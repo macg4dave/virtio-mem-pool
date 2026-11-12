@@ -2,9 +2,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use thiserror::Error;
-use virtio_mem_core::settings::{
-    self, GlobalSettings, HostVm, VmSettings, CONTROL_PATH, SERVICE_NAME,
-};
+use virtio_mem_core::settings::{self, GlobalSettings, GuestOs, HostVm, VmSettings};
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum HostConfigError {
@@ -30,6 +28,9 @@ pub struct HostConfig {
     pub virsh_binary: String,
     pub raw_telemetry_path: String,
     pub raw_telemetry_service_name: String,
+    /// Selects the guest's control path and identity above, and whether the
+    /// Windows driver workarounds apply to this VM's resizes.
+    pub guest_os: GuestOs,
     pub raw_telemetry_max_age: Duration,
     pub raw_telemetry_future_tolerance: Duration,
     pub host_min_headroom_bytes: u64,
@@ -93,8 +94,9 @@ impl HostConfig {
             command_timeout: Duration::from_secs(globals.command_timeout_seconds),
             convergence_timeout: Duration::from_secs(globals.convergence_timeout_seconds),
             virsh_binary: "/usr/bin/virsh".to_owned(),
-            raw_telemetry_path: CONTROL_PATH.to_owned(),
-            raw_telemetry_service_name: SERVICE_NAME.to_owned(),
+            raw_telemetry_path: vm.guest_os.control_path().to_owned(),
+            raw_telemetry_service_name: vm.guest_os.service_name().to_owned(),
+            guest_os: vm.guest_os,
             raw_telemetry_max_age: Duration::from_millis(globals.freshness_millis()),
             raw_telemetry_future_tolerance: Duration::from_secs(globals.poll_interval_seconds),
             host_min_headroom_bytes: globals.host_min_headroom_bytes,
@@ -117,11 +119,35 @@ mod tests {
         let settings = HostSettings::load(&path).expect("tracked config");
         assert_eq!(settings.vms.len(), 1);
         assert!(settings.vms[0].telemetry_path.is_none());
-        assert_eq!(settings.vms[0].raw_telemetry_path, CONTROL_PATH);
+        assert_eq!(settings.vms[0].guest_os, GuestOs::Windows);
+        assert_eq!(
+            settings.vms[0].raw_telemetry_path,
+            GuestOs::Windows.control_path()
+        );
         assert_eq!(
             settings.vms[0].policy_state_path,
             "/var/lib/virtio-mem-host/state/win11_gpu-requests.json"
         );
         assert!(HostConfig::load_vm(&path, Some("absent")).is_err());
+    }
+
+    #[test]
+    fn a_linux_guest_resolves_its_own_control_path_and_service_identity() {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../deploy/config_files");
+        let globals = settings::load_globals(&directory).expect("tracked globals");
+        let vm = settings::load_vm(&directory.join("debian13_settings.toml")).expect("tracked VM");
+        let entry = HostVm {
+            vm_name: vm.vm_name.clone(),
+            alias: "ua-virtiomem0".to_owned(),
+            priority: 50,
+            telemetry_path: None,
+        };
+        let config = HostConfig::resolve(&globals, &entry, &vm);
+        assert_eq!(config.guest_os, GuestOs::Linux);
+        assert_eq!(config.raw_telemetry_path, GuestOs::Linux.control_path());
+        assert_eq!(
+            config.raw_telemetry_service_name,
+            GuestOs::Linux.service_name()
+        );
     }
 }

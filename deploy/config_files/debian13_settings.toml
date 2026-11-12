@@ -1,0 +1,16 @@
+# Total guest RAM limits, including all memory Linux can see. No boot/base
+# RAM setting is needed: the policy derives the device portion from live state.
+# Sizes are binary ("1GB" = 2^30 bytes). Use multiples of the live device
+# block size: 2 MiB for this VM. The block size is configured in libvirt XML.
+# The VM's live memory geometry must be capable of reaching these limits:
+# debian13 boots with 1 GiB of fixed RAM and a 4 GiB virtio-mem device.
+min_ram = "2GB"
+max_ram = "5GB"
+
+# A Linux guest runs virtio-mem-guest under systemd. It has no install path,
+# service account or optional telemetry output to configure here.
+guest_os = "linux"
+
+# This identity must match host_list.toml and the libvirt domain name. Filenames
+# are exactly <vm_name>_settings.toml; names use lower-case ASCII, digits, - or _.
+vm_name = "debian13"

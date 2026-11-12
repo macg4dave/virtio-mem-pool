@@ -9,6 +9,8 @@ const PACKAGES: &[&str] = &[
     "virtio-mem-host",
     "-p",
     "virtio-mem-xtask",
+    "-p",
+    "virtio-mem-linux-service",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

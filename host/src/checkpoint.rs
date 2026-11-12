@@ -468,6 +468,7 @@ mod tests {
             virsh_binary: "virsh".to_owned(),
             raw_telemetry_path: "telemetry.jsonl".to_owned(),
             raw_telemetry_service_name: "VirtioMemService".to_owned(),
+            guest_os: virtio_mem_core::settings::GuestOs::Windows,
             raw_telemetry_max_age: Duration::from_secs(60),
             raw_telemetry_future_tolerance: Duration::from_secs(5),
             host_min_headroom_bytes: 4 * GIB,

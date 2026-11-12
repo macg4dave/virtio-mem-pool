@@ -144,7 +144,8 @@ kept) when requested ≠ current.
 - `host_list.toml`: one `[[vm]]` per VM with `vm_name`, libvirt device `alias`
   and `priority`. Optional `telemetry_path` writes diagnostics on the Linux host.
 - `<vm_name>_settings.toml`: `min_ram`, `max_ram`, `install_path`,
-  `service_account`, `vm_name` and optional Windows `telemetry_path`.
+  `service_account`, `vm_name` and optional Windows `telemetry_path`. A Linux
+  guest instead sets `guest_os = "linux"`; see [Linux guests](#linux-guests).
 
 The host list loads sibling files; paths do not depend on the working directory.
 VM names use lower-case ASCII letters, digits, `-` and `_`, beginning with a
@@ -274,6 +275,68 @@ The installed attestation is `/etc/virtio-mem-host/<vm_name>.attestation.json`;
 retained state is `/var/lib/virtio-mem-host/state/<vm_name>-requests.json`.
 Deploy the Windows service separately for each guest. `pool_bytes` describes
 shared **device** RAM; the per-VM bounds describe total RAM.
+
+## Linux guests
+
+One controller manages Windows and Linux guests from the same host list. A
+VM's settings file selects the guest with `guest_os = "linux"`; omitted means
+Windows, so existing files are unchanged. A Linux settings file holds only
+`min_ram`, `max_ram`, `guest_os` and `vm_name`: `install_path`,
+`service_account` and `telemetry_path` are Windows settings and are rejected.
+[debian13_settings.toml](debian13_settings.toml) is the tracked example. It is
+not yet in `host_list.toml`, so the installed controller does not manage it.
+
+The Linux guest runs `virtio-mem-guest` under systemd
+([unit](../../linux/systemd/virtio-mem-guest.service)) with the same policy,
+request protocol and wire format as the Windows service. Its identity and
+files are built in:
+
+| Item | Linux guest |
+|---|---|
+| Service identity on the wire | `virtio-mem-guest` |
+| Control publication | `/var/lib/virtio-mem-guest/control.json` |
+| Host status, request state | `control.json.host-status`, `control.json.request-state` |
+| Generated configuration | `/etc/virtio-mem-guest/config.json` |
+
+Generate the configuration from the settings, then install the release binary,
+configuration and unit in the guest. The guest also needs `qemu-guest-agent`
+running, with file commands allowed, because the host reads and writes the
+control files through it.
+
+```bash
+cargo xtask linux config deploy/config_files/debian13_settings.toml > config.json
+cargo build --release --locked -p virtio-mem-linux-service
+# In the guest:
+install -D -m 0755 virtio-mem-guest /usr/local/libexec/virtio-mem-guest
+install -D -m 0644 config.json /etc/virtio-mem-guest/config.json
+install -m 0644 virtio-mem-guest.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now virtio-mem-guest
+```
+
+Linux memory is reported in the shared telemetry fields as follows.
+
+- Physical total and available are `MemTotal` and `MemAvailable`.
+- The commit limit is `MemTotal + SwapTotal` and the commit total is that less
+  `MemAvailable + SwapFree`. The kernel's `CommitLimit`/`Committed_AS` are not
+  used: they are not enforced under the default overcommit heuristic. Strict
+  overcommit (`vm.overcommit_memory=2`) is not modelled.
+- Native pressure comes from `/proc/pressure/memory` (`some avg10`): 10 % or
+  more is Low, exactly zero is High and anything between is Neutral. As on
+  Windows, only High permits reclaim and Low is an urgent growth trigger. A
+  kernel without pressure stall information reports nothing, which allows
+  growth and never reclaim.
+- The driver version field carries the kernel release, since the Linux
+  virtio-mem driver ships with its kernel.
+
+The guest polls on the configured interval; it has no wake channel yet. Up to
+four consecutive failed polls are skipped with reclaim history reset, because
+host status and the guest's counters are not read atomically; the fifth ends
+the service and systemd restarts it. A retained request survives both.
+
+The host applies the Windows driver workarounds (usable-region widening and
+shrink extension) only to Windows guests. For a Linux guest a growth is held
+until the guest plugs it, and a removal that has not moved for the convergence
+timeout settles at what the guest returned and reports a partial result.
 
 ### Prompt memory notifications
 

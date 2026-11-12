@@ -3,6 +3,7 @@ mod build_identity;
 mod controller_status;
 mod host_deploy;
 mod host_run;
+mod linux;
 mod local;
 mod metrics;
 mod preflight;
@@ -24,6 +25,7 @@ Usage:
   cargo xtask host-deploy INSTANCE --config PATH --attestation VM=PATH... [OPTIONS]
   cargo xtask host-run --config PATH --max-run-seconds N [OPTIONS]
   cargo xtask preflight VM_NAME ALIAS [OPTIONS]
+  cargo xtask linux config VM_SETTINGS
   cargo xtask windows <check|sync|build|test|lint|fetch|all>
   cargo xtask windows deploy MANIFEST --output PATH [--apply]
   cargo xtask windows service-cycle SERVICE --output PATH [--apply]
@@ -162,6 +164,7 @@ fn execute(arguments: &[String]) -> Result<(), String> {
         Some("host-deploy") => host_deploy::run(&host_deploy::parse(&arguments[1..])?, &repo),
         Some("host-run") => host_run::run(&host_run::parse(&arguments[1..])?, &repo),
         Some("preflight") => preflight::run(&preflight::parse(&arguments[1..])?, &repo),
+        Some("linux") => linux::run(&arguments[1..], &repo),
         Some("windows") => windows::run(windows::parse(&arguments[1..])?, &repo),
         Some("qualification") => qualification::execute(&arguments[1..], &repo),
         Some("watch") => watch::run(&watch::parse(&arguments[1..])?, &repo),

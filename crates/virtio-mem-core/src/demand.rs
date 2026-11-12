@@ -7,7 +7,9 @@ use crate::memory_request::{valid_identity, MemoryRequest, MemoryResult};
 /// Version 5 adds diagnostic explanations; readers still accept version 4.
 pub const RAW_TELEMETRY_VERSION: u16 = 5;
 
-/// Native, canonical-byte memory observations collected from the Windows guest.
+/// Native, canonical-byte memory observations collected from the guest. The
+/// fields are Windows' counters; the Linux guest service documents how it
+/// fills them from `/proc/meminfo`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryTelemetrySnapshot {
     pub physical_total_bytes: u64,
@@ -65,7 +67,9 @@ pub enum MemoryResourceNotificationState {
 #[serde(deny_unknown_fields)]
 pub struct GuestDiagnostics {
     pub build_id: String,
-    /// On-disk viomem.sys version, not a claim about a loaded driver image.
+    /// Windows: the on-disk viomem.sys version, not a claim about a loaded
+    /// driver image. Linux: the running kernel release, which carries the
+    /// in-tree driver.
     pub driver_file_version: Result<String, String>,
     pub boot_uptime_millis: Option<u64>,
     pub policy: GuestPolicyDiagnostics,

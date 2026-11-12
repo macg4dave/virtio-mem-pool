@@ -945,6 +945,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "virtio-mem-linux-service"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "signal-hook",
+ "toml",
+ "virtio-mem-core",
+]
+
+[[package]]
 name = "virtio-mem-service"
 version = "0.1.0"
 dependencies = [

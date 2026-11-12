@@ -21,3 +21,8 @@ Metrics captures include `run.json` provenance and `guest-publications.jsonl`
 state-change/30-second snapshots. CSV includes guest policy explanations;
 sustained performance problems produce incident bundles alongside crashes.
 See [capture diagnostics](../deploy/config_files/README.md#diagnostic-evidence-in-metrics-captures).
+
+cargo xtask linux config deploy/config_files/debian13_settings.toml
+
+Prints the Linux guest service configuration generated from a VM settings file
+and its sibling global settings. See [Linux guests](../deploy/config_files/README.md#linux-guests).

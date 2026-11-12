@@ -1,0 +1,35 @@
+[Unit]
+Description=Virtio-mem guest memory requests
+Documentation=https://github.com/macg4dave/virtio_mem_windows_service
+# The host exchanges the control files through the guest agent.
+After=qemu-guest-agent.service
+ConditionVirtualization=kvm
+
+[Service]
+Type=exec
+ExecStart=/usr/local/libexec/virtio-mem-guest run --config /etc/virtio-mem-guest/config.json
+# A restart is safe: the one unresolved request is durable in the state
+# directory and is retransmitted unchanged until the host resolves it.
+Restart=on-failure
+RestartSec=5
+# Unprivileged: the service only reads /proc and writes its state directory.
+# The guest agent (root) reads the publication and writes the host status
+# beside it, so the directory and its files stay readable.
+DynamicUser=yes
+StateDirectory=virtio-mem-guest
+StateDirectoryMode=0755
+UMask=0022
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+MemoryDenyWriteExecute=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

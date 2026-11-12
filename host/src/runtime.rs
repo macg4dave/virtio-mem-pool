@@ -10,6 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use thiserror::Error;
+use virtio_mem_core::settings::GuestOs;
 use virtio_mem_core::{
     allocate_pool, bounded_reason, CommandDirection, CommandOwnership, HostMemoryStatus,
     MemoryOperation, MemoryOutcome, MemoryRequest, MemoryResourceNotificationState, MemoryResult,
@@ -643,10 +644,16 @@ where
         //   the guest ask for memory again;
         // - a shrink stuck at its minimum target for the convergence timeout,
         //   where the driver workaround cannot make another attempt.
+        // The widening and the shrink extension answer Windows driver
+        // behaviour. The Linux driver retries plugs and removals by itself, so
+        // a Linux grow is held and a Linux shrink that has not moved for the
+        // convergence timeout settles at what the guest returned.
         let can_settle = !self.control.latched() && !self.config.observe_only;
+        let windows = self.config.guest_os == GuestOs::Windows;
         let settle = match direction {
             CommandDirection::Grow => {
                 can_settle
+                    && windows
                     && !self.widened
                     && self
                         .control
@@ -662,6 +669,15 @@ where
                 }) {
                     self.log("event=held_shrink_released reason=guest_low_memory");
                     true
+                } else if !windows {
+                    let stalled = self.command_stalled(state)
+                        && self.pending_progress.is_some_and(|(_, since)| {
+                            since.elapsed() >= self.config.convergence_timeout
+                        });
+                    if stalled {
+                        self.log("event=held_shrink_released reason=removal_stalled");
+                    }
+                    stalled
                 } else {
                     // VIOMEM WORKAROUND (see `extend_shrink`).
                     let base_ram = guest.and_then(|envelope| {
@@ -1611,6 +1627,7 @@ mod tests {
             virsh_binary: "virsh".to_owned(),
             raw_telemetry_path: "telemetry.json".to_owned(),
             raw_telemetry_service_name: "VirtioMemService".to_owned(),
+            guest_os: virtio_mem_core::settings::GuestOs::Windows,
             raw_telemetry_max_age: Duration::from_secs(60),
             raw_telemetry_future_tolerance: Duration::from_secs(5),
             host_min_headroom_bytes: 4 * GIB,
@@ -2018,6 +2035,38 @@ mod tests {
 
         // Windows runs short: settle at what it reached, report partial.
         fixture.guest.signal(MemoryResourceNotificationState::Low);
+        round(&mut runtime);
+        round(&mut runtime);
+        assert_eq!(*fixture.targets.borrow(), [7 * GIB, 7 * GIB + 512 * MIB]);
+        let result = fixture.guest.last_result().expect("result");
+        assert_eq!(result.outcome, MemoryOutcome::Partial);
+        assert_eq!(result.actual_bytes, 512 * MIB);
+        drop(runtime);
+        assert!(!fixture.journal().latched());
+    }
+
+    #[test]
+    fn a_linux_removal_is_never_extended_and_settles_once_it_stops_moving() {
+        let mut fixture = Fixture::new("linux-shrink", 100, 8 * GIB);
+        fixture.config.guest_os = GuestOs::Linux;
+        fixture.config.poll_interval = Duration::from_millis(2);
+        fixture.config.convergence_timeout = Duration::from_millis(300);
+        fixture.device.0.borrow_mut().stall_at = Some(7 * GIB + 512 * MIB);
+        fixture.guest.signal(MemoryResourceNotificationState::High);
+        fixture
+            .guest
+            .send(Some(request(1, MemoryOperation::Remove, GIB)));
+        let mut runtime = runtime(vec![fixture.controller(None)], 64 * GIB, None);
+        for _ in 0..4 {
+            round(&mut runtime);
+            thread::sleep(Duration::from_millis(5));
+        }
+        // Stalled for several polls: the Windows driver workaround would have
+        // lowered the target by now.
+        assert_eq!(*fixture.targets.borrow(), [7 * GIB]);
+        assert!(fixture.guest.last_result().is_none());
+
+        thread::sleep(Duration::from_millis(350));
         round(&mut runtime);
         round(&mut runtime);
         assert_eq!(*fixture.targets.borrow(), [7 * GIB, 7 * GIB + 512 * MIB]);

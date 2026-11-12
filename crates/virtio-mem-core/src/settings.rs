@@ -8,14 +8,49 @@ use std::path::Path;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{
-    GuestMemoryPolicy, TargetPolicyConfig, WindowsServiceConfigFile,
-    WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION,
+    GuestMemoryPolicy, LinuxServiceConfigFile, TargetPolicyConfig, WindowsServiceConfigFile,
+    LINUX_SERVICE_CONFIG_SCHEMA_VERSION, WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION,
 };
 
 pub const SERVICE_NAME: &str = "VirtioMemService";
 // The control channel is required for memory requests, independently of optional
 // diagnostic output. Keep its historical path to retain durable pending requests.
 pub const CONTROL_PATH: &str = r"C:\ProgramData\VirtioMemService\telemetry.json";
+/// The Linux guest service's wire identity and systemd unit name.
+pub const LINUX_SERVICE_NAME: &str = "virtio-mem-guest";
+/// The Linux guest's control publication; host status and durable request
+/// state are derived beside it, as on Windows.
+pub const LINUX_CONTROL_PATH: &str = "/var/lib/virtio-mem-guest/control.json";
+
+/// The guest operating system decides the guest service's identity, its
+/// control path and which driver-specific host behaviour applies.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GuestOs {
+    #[default]
+    Windows,
+    Linux,
+}
+
+impl GuestOs {
+    fn is_windows(&self) -> bool {
+        *self == Self::Windows
+    }
+
+    pub fn service_name(self) -> &'static str {
+        match self {
+            Self::Windows => SERVICE_NAME,
+            Self::Linux => LINUX_SERVICE_NAME,
+        }
+    }
+
+    pub fn control_path(self) -> &'static str {
+        match self {
+            Self::Windows => CONTROL_PATH,
+            Self::Linux => LINUX_CONTROL_PATH,
+        }
+    }
+}
 pub const GLOBAL_FILE: &str = "global-settings.toml";
 pub const HOST_LIST_FILE: &str = "host_list.toml";
 const GIB: u64 = 1 << 30;
@@ -110,8 +145,15 @@ pub struct VmSettings {
     pub min_ram: u64,
     #[serde(with = "crate::units::byte_size")]
     pub max_ram: u64,
-    pub install_path: String,
-    pub service_account: String,
+    /// Omitted means Windows, so existing settings files are unchanged.
+    #[serde(default, skip_serializing_if = "GuestOs::is_windows")]
+    pub guest_os: GuestOs,
+    /// Windows only: the installed service executable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install_path: Option<String>,
+    /// Windows only: the account the service runs as.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_account: Option<String>,
     pub vm_name: String,
     /// Optional Windows diagnostic output, independent of memory requests.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -122,13 +164,38 @@ impl VmSettings {
     pub fn validate(&self) -> Result<(), String> {
         vm_filename(&self.vm_name)?;
         validate_ram_limits(self.min_ram, self.max_ram)?;
-        crate::windows_service_config::normalize_windows_path(&self.install_path)?;
-        if !self.install_path.to_ascii_lowercase().ends_with(".exe") {
+        match self.guest_os {
+            GuestOs::Windows => self.validate_windows(),
+            GuestOs::Linux => {
+                if self.install_path.is_some()
+                    || self.service_account.is_some()
+                    || self.telemetry_path.is_some()
+                {
+                    return Err("install_path, service_account and telemetry_path are Windows settings; omit them for a Linux guest".to_owned());
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// The Windows install path and service account, or why there are none.
+    pub fn windows_install(&self) -> Result<(&str, &str), String> {
+        match (self.guest_os, &self.install_path, &self.service_account) {
+            (GuestOs::Windows, Some(path), Some(account)) => Ok((path, account)),
+            (GuestOs::Windows, _, _) => {
+                Err("a Windows guest needs install_path and service_account".to_owned())
+            }
+            (GuestOs::Linux, _, _) => Err(format!("VM {} is not a Windows guest", self.vm_name)),
+        }
+    }
+
+    fn validate_windows(&self) -> Result<(), String> {
+        let (install_path, service_account) = self.windows_install()?;
+        crate::windows_service_config::normalize_windows_path(install_path)?;
+        if !install_path.to_ascii_lowercase().ends_with(".exe") {
             return Err("install_path must name an .exe file".to_owned());
         }
-        if self.service_account.trim().is_empty()
-            || self.service_account.chars().any(char::is_control)
-        {
+        if service_account.trim().is_empty() || service_account.chars().any(char::is_control) {
             return Err("service_account must be nonempty without control characters".to_owned());
         }
         if let Some(path) = &self.telemetry_path {
@@ -137,8 +204,7 @@ impl VmSettings {
             let config = crate::windows_service_config::normalize_windows_path(
                 r"C:\ProgramData\VirtioMemService\config.json",
             )?;
-            let executable =
-                crate::windows_service_config::normalize_windows_path(&self.install_path)?;
+            let executable = crate::windows_service_config::normalize_windows_path(install_path)?;
             if path == control
                 || path.starts_with(&format!("{control}."))
                 || path == config
@@ -150,22 +216,47 @@ impl VmSettings {
         Ok(())
     }
 
-    pub fn service_config(&self, globals: &GlobalSettings) -> WindowsServiceConfigFile {
-        WindowsServiceConfigFile {
+    /// The Windows service's generated runtime configuration.
+    pub fn service_config(
+        &self,
+        globals: &GlobalSettings,
+    ) -> Result<WindowsServiceConfigFile, String> {
+        let (_, service_account) = self.windows_install()?;
+        Ok(WindowsServiceConfigFile {
             schema_version: WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION,
             vm_name: self.vm_name.clone(),
             service_name: SERVICE_NAME.to_owned(),
             display_name: "Virtio Memory Service".to_owned(),
             description: "Manages guest virtio-mem requests.".to_owned(),
             demand_report_path: CONTROL_PATH.to_owned(),
-            service_account: self.service_account.clone(),
+            service_account: service_account.to_owned(),
             poll_interval_millis: globals.poll_interval_seconds * 1000,
             shutdown_timeout_millis: 30_000,
             policy: globals.guest_policy(),
             min_ram: self.min_ram,
             max_ram: self.max_ram,
             telemetry_path: self.telemetry_path.clone(),
+        })
+    }
+
+    /// The Linux guest service's generated runtime configuration.
+    pub fn linux_service_config(
+        &self,
+        globals: &GlobalSettings,
+    ) -> Result<LinuxServiceConfigFile, String> {
+        if self.guest_os != GuestOs::Linux {
+            return Err(format!("VM {} is not a Linux guest", self.vm_name));
         }
+        Ok(LinuxServiceConfigFile {
+            schema_version: LINUX_SERVICE_CONFIG_SCHEMA_VERSION,
+            vm_name: self.vm_name.clone(),
+            service_name: LINUX_SERVICE_NAME.to_owned(),
+            control_path: LINUX_CONTROL_PATH.to_owned(),
+            poll_interval_millis: globals.poll_interval_seconds * 1000,
+            policy: globals.guest_policy(),
+            min_ram: self.min_ram,
+            max_ram: self.max_ram,
+        })
     }
 }
 
@@ -339,8 +430,11 @@ mod tests {
             min_ram: 4 * GIB,
             max_ram: 16 * GIB,
             vm_name: name.to_owned(),
-            install_path: r"C:\Program Files\VirtioMemService\virtio-mem-service.exe".to_owned(),
-            service_account: r"NT AUTHORITY\LocalService".to_owned(),
+            guest_os: GuestOs::Windows,
+            install_path: Some(
+                r"C:\Program Files\VirtioMemService\virtio-mem-service.exe".to_owned(),
+            ),
+            service_account: Some(r"NT AUTHORITY\LocalService".to_owned()),
             telemetry_path: None,
         }
     }
@@ -369,7 +463,8 @@ mod tests {
         assert_eq!(toml::from_str::<VmSettings>(&text).unwrap(), settings);
         let globals: GlobalSettings = toml::from_str("").unwrap();
         globals.validate().unwrap();
-        let service = settings.service_config(&globals);
+        assert!(!text.contains("guest_os"));
+        let service = settings.service_config(&globals).unwrap();
         service.validate().unwrap();
         service
             .validate_paths(r"C:\ProgramData\VirtioMemService\config.json")
@@ -388,6 +483,35 @@ mod tests {
         other.telemetry_path = Some("/tmp/./virtio-diagnostic.json".to_owned());
         host.vms.push(other);
         assert!(host.validate().is_err(), "outputs cannot alias across VMs");
+    }
+
+    #[test]
+    fn a_linux_guest_has_its_own_identity_and_rejects_windows_settings() {
+        let linux: VmSettings =
+            toml::from_str("min_ram='2GB'\nmax_ram='5GB'\nguest_os='linux'\nvm_name='debian'")
+                .unwrap();
+        linux.validate().unwrap();
+        assert_eq!(
+            toml::from_str::<VmSettings>(&toml::to_string(&linux).unwrap()).unwrap(),
+            linux
+        );
+        let globals = GlobalSettings::default();
+        let service = linux.linux_service_config(&globals).unwrap();
+        service.validate().unwrap();
+        assert_eq!(service.service_name, GuestOs::Linux.service_name());
+        assert_eq!(service.control_path, GuestOs::Linux.control_path());
+        assert!(linux.service_config(&globals).is_err());
+        assert!(vm("guest").linux_service_config(&globals).is_err());
+
+        let mut mixed = linux.clone();
+        mixed.service_account = Some("root".to_owned());
+        assert!(mixed.validate().is_err());
+        let mut windows = vm("guest");
+        windows.install_path = None;
+        assert!(
+            windows.validate().is_err(),
+            "Windows needs its install path"
+        );
     }
 
     #[test]

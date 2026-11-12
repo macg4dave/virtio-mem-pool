@@ -891,7 +891,7 @@ fn deploy(
     let output_path = resolve_local(repo, output_path);
     let manifest = settings::load_vm(&manifest_path)?;
     let globals = settings::load_globals(manifest_path.parent().unwrap_or(Path::new(".")))?;
-    let service_config = manifest.service_config(&globals);
+    let service_config = manifest.service_config(&globals)?;
     service_config.validate()?;
     service_config.validate_paths(r"C:\ProgramData\VirtioMemService\config.json")?;
     let record = required_record(config)?;
@@ -1252,7 +1252,7 @@ fn deployment_powershell(
 ) -> String {
     let service = ps_literal(SERVICE_NAME);
     let candidate = ps_literal(candidate_path);
-    let install = ps_literal(&manifest.install_path);
+    let install = ps_literal(manifest.windows_install().map_or("", |(path, _)| path));
     let telemetry = ps_literal(CONTROL_PATH);
     let wait_millis = poll_interval_millis.saturating_mul(3).max(1000);
     format!(
@@ -1649,7 +1649,7 @@ mod tests {
             .join("deploy/config_files/win11_gpu_settings.toml");
         let vm = settings::load_vm(&path).expect("VM settings");
         let globals = settings::load_globals(path.parent().unwrap()).expect("globals");
-        let wire = vm.service_config(&globals);
+        let wire = vm.service_config(&globals).unwrap();
         wire.validate().expect("valid service config");
         wire.validate_paths(r"C:\ProgramData\VirtioMemService\config.json")
             .expect("distinct paths");
