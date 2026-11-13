@@ -26,6 +26,41 @@ cargo xtask watch --config CONFIG
 A live view of one VM: device size, requested and current memory, the
 guest's latest publication and the controller's events.
 
+## Watching the pool
+
+```bash
+cargo xtask pool --config CONFIG
+```
+
+A live view of every VM in the host list on one screen, read-only like
+`watch`:
+
+- **Pool**: one bar split into each VM's charge (`max(requested,
+  plugged)`, as the controller counts it) in that VM's colour, then the
+  free part. Below it are the pool size, the charge, the free pool, the
+  resizes under way and host `MemAvailable` against the controller's
+  floor. Peak charge and lowest free and host memory are kept for the
+  session.
+- **VMs**: one row per VM, in host-list order, showing:
+  - priority
+  - plugged size
+  - whether the device is steady, growing or shrinking, and by how much
+  - `min_ram`–`max_ram` (on terminals at least 110 columns wide)
+  - how much of the guest's RAM is in use
+  - the guest's pending request
+
+  A publication older than 30 s is marked stale.
+- **Pool history**: the pool's charge over time, stacked by VM, against
+  the pool size.
+- **Pool events**: grants, refusals, completed requests, latches and
+  control-channel changes from the controller's journal, for every VM.
+
+Guest figures come from the controller's publication copies, so the view
+sends no guest-agent traffic. They are empty while the controller is
+stopped. `--interval-seconds N` sets the refresh period (default 1),
+`--events N` the number of events (default 8) and `--once` prints one
+plain snapshot. Ctrl+C leaves the last view on the screen as plain text.
+
 ## Recording a run
 
 ```bash

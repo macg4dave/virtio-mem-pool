@@ -1,12 +1,14 @@
 mod attestation;
 mod build_identity;
 mod controller_status;
+mod dashboard;
 mod debian;
 mod host_deploy;
 mod host_run;
 mod linux;
 mod local;
 mod metrics;
+mod pool;
 mod preflight;
 mod process;
 mod qualification;
@@ -41,6 +43,7 @@ Usage:
   cargo xtask qualification <start|run|status|review> [OPTIONS]
   cargo xtask watch [OPTIONS]
   cargo xtask metrics [OPTIONS]
+  cargo xtask pool [OPTIONS]
 
 Attestation options:
   --output PATH                 Required generated attestation path.
@@ -156,7 +159,7 @@ fn execute(arguments: &[String]) -> Result<(), String> {
     let repo = repo_root()?;
     match arguments.first().map(String::as_str) {
         Some("help" | "--help" | "-h") | None => {
-            print!("{HELP}\n{}\n{}", watch::HELP, metrics::HELP);
+            print!("{HELP}\n{}\n{}\n{}", watch::HELP, pool::HELP, metrics::HELP);
             Ok(())
         }
         Some("gate") => gate(&arguments[1..], &repo),
@@ -177,6 +180,7 @@ fn execute(arguments: &[String]) -> Result<(), String> {
         Some("windows") => windows::run(windows::parse(&arguments[1..])?, &repo),
         Some("qualification") => qualification::execute(&arguments[1..], &repo),
         Some("watch") => watch::run(&watch::parse(&arguments[1..])?, &repo),
+        Some("pool") => pool::run(&pool::parse(&arguments[1..])?, &repo),
         Some("metrics") => metrics::execute(&arguments[1..], &repo),
         Some(command) => Err(format!("unknown command: {command}\n\n{HELP}")),
     }
