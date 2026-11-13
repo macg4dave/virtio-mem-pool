@@ -64,6 +64,40 @@ pub fn controller_instance(unit: &str) -> Result<&str, String> {
         .ok_or_else(|| format!("{unit} is not a virtio-mem-host@INSTANCE.service unit"))
 }
 
+/// The controller unit to observe when none was named: the one
+/// `virtio-mem-host@INSTANCE` unit systemd knows on this host, since one
+/// controller manages every VM in its configuration. With none or several,
+/// `fallback` (the unit named after the VM) is kept.
+pub fn installed_controller_unit(fallback: &str, repo: &Path) -> String {
+    let listing = process::bounded_text(
+        "systemctl",
+        &[
+            process::os("list-units"),
+            process::os("--all"),
+            process::os("--plain"),
+            process::os("--no-legend"),
+            process::os("virtio-mem-host@*.service"),
+        ],
+        repo,
+        Duration::from_secs(10),
+    );
+    // Best effort: without systemctl the fallback is what was used before.
+    listing.map_or_else(
+        |_| fallback.to_owned(),
+        |text| only_controller_unit(&text).unwrap_or_else(|| fallback.to_owned()),
+    )
+}
+
+/// The single controller unit in a `systemctl list-units --plain` listing.
+fn only_controller_unit(listing: &str) -> Option<String> {
+    let mut units = listing
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .filter(|unit| controller_instance(unit).is_ok());
+    let unit = units.next()?;
+    units.next().is_none().then(|| unit.to_owned())
+}
+
 pub fn parse(args: &[String]) -> Result<Command, String> {
     let instance = args
         .first()
@@ -810,5 +844,23 @@ mod tests {
         ] {
             assert!(controller_instance(unit).is_err(), "{unit}");
         }
+    }
+
+    #[test]
+    fn the_only_installed_controller_is_the_default_one() {
+        let one =
+            "virtio-mem-host@main.service loaded active running Virtio-mem controller for main\n";
+        assert_eq!(
+            only_controller_unit(one).as_deref(),
+            Some("virtio-mem-host@main.service")
+        );
+        // Several controllers, or none, leave the choice to the caller.
+        let two = format!("{one}virtio-mem-host@lab.service loaded inactive dead x\n");
+        assert_eq!(only_controller_unit(&two), None);
+        assert_eq!(only_controller_unit(""), None);
+        assert_eq!(
+            only_controller_unit("other@main.service loaded active running x\n"),
+            None
+        );
     }
 }

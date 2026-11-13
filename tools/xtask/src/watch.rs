@@ -40,7 +40,8 @@ pub const HELP: &str = "Watch options (read-only live dashboard):
                                 telemetry path and host floor come from it.
   --vm NAME                     The [[vm]] to show; required with several.
   --instance NAME               Controller unit virtio-mem-host@NAME.service;
-                                default the VM name.
+                                default the one installed controller unit,
+                                else the VM name.
   --connect URI                 Libvirt URI; default qemu:///system.
   --interval-seconds N          Refresh period; default 1.
   --guest-interval-seconds N    Guest-agent telemetry read period; default 1.
@@ -55,6 +56,8 @@ pub struct Command {
     vm: String,
     alias: String,
     unit: String,
+    /// `--instance` named the unit; otherwise `run` looks for the installed one.
+    unit_named: bool,
     telemetry_path: String,
     connect: String,
     interval: Duration,
@@ -73,6 +76,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         vm: String::new(),
         alias: String::new(),
         unit: String::new(),
+        unit_named: false,
         telemetry_path: String::new(),
         connect: "qemu:///system".to_owned(),
         interval: Duration::from_secs(1),
@@ -128,6 +132,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         "virtio-mem-host@{}.service",
         instance.as_deref().unwrap_or(&config.vm_name)
     );
+    command.unit_named = instance.is_some();
     command.vm = config.vm_name;
     command.alias = config.alias;
     command.telemetry_path = config.raw_telemetry_path;
@@ -136,6 +141,16 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
 }
 
 pub fn run(command: &Command, repo: &Path) -> Result<(), String> {
+    let resolved;
+    let command = if command.unit_named {
+        command
+    } else {
+        resolved = Command {
+            unit: crate::host_deploy::installed_controller_unit(&command.unit, repo),
+            ..command.clone()
+        };
+        &resolved
+    };
     let interactive = !command.once && std::io::stdout().is_terminal();
     let stop = Arc::new(AtomicBool::new(false));
     for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {

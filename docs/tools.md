@@ -3,7 +3,10 @@
 Observation and development tools. Run `watch`, `metrics` and
 `qualification` on the KVM host; they read the controller's journal,
 libvirt and each guest's publication. `CONFIG` below is the host list the
-controller runs (installed as `/etc/virtio-mem-host/host_list.toml`).
+controller runs (installed as `/etc/virtio-mem-host/host_list.toml`); with
+several VMs, `--vm NAME` picks one. They follow the one
+`virtio-mem-host@INSTANCE` unit installed on the host, or the one named
+with `--instance INSTANCE`.
 
 ## Guest publications
 

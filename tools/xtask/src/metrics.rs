@@ -55,7 +55,8 @@ pub const HELP: &str = "Metrics options (read-only stress-test recorder):
                                 telemetry paths are not needed or read.
   --vm NAME                     The [[vm]] to record; required with several.
   --instance NAME               Controller unit virtio-mem-host@NAME.service;
-                                default the VM name.
+                                default the one installed controller unit,
+                                else the VM name.
   --connect URI                 Libvirt URI; default qemu:///system.
   --output DIR                  Run directory; default
                                 .artifacts/metrics/VM-YYYYMMDDTHHMMSSZ.
@@ -78,6 +79,8 @@ pub struct Command {
     vm: String,
     alias: String,
     unit: String,
+    /// `--instance` named the unit; otherwise `run` looks for the installed one.
+    unit_named: bool,
     telemetry_path: String,
     connect: String,
     output: Option<PathBuf>,
@@ -98,6 +101,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         vm: String::new(),
         alias: String::new(),
         unit: String::new(),
+        unit_named: false,
         telemetry_path: String::new(),
         connect: "qemu:///system".to_owned(),
         output: None,
@@ -149,6 +153,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         "virtio-mem-host@{}.service",
         instance.as_deref().unwrap_or(&config.vm_name)
     );
+    command.unit_named = instance.is_some();
     command.vm = config.vm_name;
     command.alias = config.alias;
     command.telemetry_path = config.raw_telemetry_path;
@@ -320,6 +325,16 @@ impl Recorder {
 }
 
 pub fn run(command: &Command, repo: &Path) -> Result<(), String> {
+    let resolved;
+    let command = if command.unit_named {
+        command
+    } else {
+        resolved = Command {
+            unit: crate::host_deploy::installed_controller_unit(&command.unit, repo),
+            ..command.clone()
+        };
+        &resolved
+    };
     let stop = Arc::new(AtomicBool::new(false));
     for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
         signal_hook::flag::register(signal, Arc::clone(&stop))
