@@ -21,7 +21,8 @@ virtio-mem. Windows guests are resized with Hyper-V Dynamic Memory.
 | Core policy, request protocol, wire format | Working, platform-neutral, well tested |
 | Host controller (RHEL 10.2, libvirt 11.10, QEMU 10.1) | Working; instance `main` manages `debian13` and `safe_vm` (15 GiB pool) |
 | Linux guest service | Working under the real controller; PSI triggers, cache floor, readiness report, control channel |
-| Real-world guest | `safe_vm` (Debian 13, ClamAV scanner, 512 MiB boot, up to 15.5 GiB) since 2026-11-13: on the control channel with no guest agent; spikes to 1.25 GiB and 4.4 GiB grown and returned without OOM. Capture on pc101: `.artifacts/metrics/safe_vm-live-20261113/` |
+| Multi-VM test fleet | `safe_vm` and four copies (`safe_vm_1`–`4`, made with `deploy/scripts/clone-vm.sh` and added with `add-linux-vm.sh`), all Debian 13 ClamAV scanners with 256 MiB boot RAM, recorded together with `metrics --vm all`; resizes over the libvirt session (about 28 ms, was 229 ms); equal priorities served first come, first served |
+| Real-world guest | `safe_vm` (Debian 13, ClamAV scanner, now 256 MiB boot, up to 15.25 GiB) since 2026-11-13: on the control channel with no guest agent; spikes to 1.25 GiB and 4.4 GiB grown and returned without OOM. Capture on pc101: `.artifacts/metrics/safe_vm-live-20261113/` |
 | Windows guest service | Built on the shared guest crate; **not deployed**. Its virtio-mem path is paused (B1) |
 | `viomem` workarounds and driver patch | **Paused** and moved to [archive/viomem](../archive/viomem/) on 2026-11-13 |
 | Windows on Dynamic Memory | Not started. pc101's QEMU lacks the devices (B2) |

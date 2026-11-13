@@ -265,6 +265,19 @@ settings it warns if `max_ram` is above that limit. With
 `auto_movable_numa_aware=Y` (the default) the ratio also applies to each
 NUMA node, so a guest with several nodes may reach its limit earlier.
 
+Boot RAM can be very small, because the guest grows on demand once its
+service runs. Measured on Debian 13 (kernel 6.12, 2026-11-13): the kernel
+keeps back about 110 MiB of any boot size, the largest part a 64 MiB
+`swiotlb` bounce buffer that x86 sets up because hot-pluggable memory
+lies above 4 GiB. Untuned, 320 MiB booted cleanly (80 MiB free at idle)
+and 256 MiB booted but starved while cloud-init ran. With `swiotlb=8192`
+(16 MiB), `exim4` and `unattended-upgrades` disabled and cloud-init
+disabled after provisioning, 256 MiB boots in about 10 seconds with
+100 MiB free. Keep `swiotlb` rather than turning it off while the guest
+has devices limited to 32-bit DMA (IDE, USB). Set `min_ram` to the boot
+RAM so an idle guest can return its whole device, and save the device
+with `<requested>` 0 so every boot starts on boot RAM alone.
+
 Growth follows use, so a guest grows as a program touches memory, not
 when it asks for it. Under the default heuristic overcommit
 (`vm.overcommit_memory=0`) the kernel refuses a single allocation larger
