@@ -137,7 +137,8 @@ pub fn assess(probe: &Probe) -> Readiness {
         "online" | "online_kernel" if online_policy != "auto-movable" => warnings.push(format!(
             "hot-plugged memory is onlined to kernel zones (auto_online_blocks={auto_online}, \
              online_policy={online_policy}): the kernel guarantees removal only from the \
-             movable zone, so memory may not all be returned"
+             movable zone. If removals come back partial, boot with \
+             memory_hotplug.online_policy=auto-movable"
         )),
         _ => {}
     }
@@ -193,7 +194,12 @@ pub fn assess(probe: &Probe) -> Readiness {
 
 /// The published facts for this moment.
 pub fn environment() -> BTreeMap<String, String> {
-    assess(&Probe::read()).environment
+    let mut environment = assess(&Probe::read()).environment;
+    environment.insert(
+        "protected_cache_bytes".to_owned(),
+        crate::cache::protected_bytes().to_string(),
+    );
+    environment
 }
 
 #[cfg(test)]

@@ -22,6 +22,14 @@ state-change/30-second snapshots. CSV includes guest policy explanations;
 sustained performance problems produce incident bundles alongside crashes.
 See [capture diagnostics](../deploy/config_files/README.md#diagnostic-evidence-in-metrics-captures).
 
+tools/linux/watch-ram.sh
+
+The Linux counterpart of `Watch-Ram.ps1`, run inside the guest without root.
+It reads `/proc/meminfo` on every tick and shows total, in-use and available
+RAM, file cache and how much of it the guest service is keeping, memory
+pressure, the page-cache refault rate, a history graph and the last changes
+in total RAM. `--csv` prints one row per sample; `-h` lists the options.
+
 cargo xtask linux config deploy/config_files/debian13_settings.toml
 
 Prints the Linux guest service configuration generated from a VM settings file

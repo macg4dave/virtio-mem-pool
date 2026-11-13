@@ -439,6 +439,7 @@ mod tests {
             requested_bytes: 4 * GIB,
             current_bytes: 4 * GIB,
             result: None,
+            guest_settings: None,
         };
         let mut bytes = serde_json::to_vec(&status).unwrap();
         bytes.push(b'\n');
@@ -639,6 +640,7 @@ mod tests {
                 requested_bytes: 4 * GIB,
                 current_bytes: 4 * GIB,
                 result: None,
+                guest_settings: None,
             };
             let mut bytes = serde_json::to_vec(&status).unwrap();
             bytes.push(b'\n');

@@ -372,6 +372,7 @@ mod tests {
                 requested_bytes: current,
                 current_bytes: current,
                 result,
+                guest_settings: None,
             };
             let mut bytes = serde_json::to_vec(&status).unwrap();
             bytes.push(b'\n');

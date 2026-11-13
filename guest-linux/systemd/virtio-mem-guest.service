@@ -8,6 +8,10 @@ ConditionVirtualization=kvm
 [Service]
 Type=exec
 ExecStart=/usr/local/libexec/virtio-mem-guest run --config /etc/virtio-mem-guest/config.json
+# When the guest runs out of memory this service is what asks for more, so
+# it must be among the last processes the kernel kills. On 2026-11-13 a
+# fast fill killed it and the guest could never grow again.
+OOMScoreAdjust=-900
 # A restart is safe: the one unresolved request is durable in the state
 # directory and is retransmitted unchanged until the host resolves it.
 Restart=on-failure

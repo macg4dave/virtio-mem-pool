@@ -21,7 +21,7 @@ makes sense on the machines it was developed on.
 | Core policy, request protocol, wire format | Working, platform-neutral, well tested |
 | Host controller (RHEL, libvirt) | Working for one Windows VM (`win11_gpu`); multi-VM pool implemented |
 | Windows guest service | Working, **paused** until the `viomem` driver removal bug is repaired |
-| Linux guest service | Runs on `debian13` under the real controller: growth and removal both completed on 2026-11-13 |
+| Linux guest service | Runs on `debian13` under the real controller: growth and removal both completed on 2026-11-13. M2 started: PSI triggers, commit model, growth margin and readiness report are in |
 | Tooling (`xtask`: deploy, watch, metrics, qualification) | Built for the Windows VM; Linux has config generation only |
 | Linux work from 2026-11-12 | Committed on `main` (`e9b8683`) |
 | Controller on `pc101` | Running as `virtio-mem-host@main`, managing `debian13` only, from a site configuration outside the repo |
@@ -70,7 +70,7 @@ Linux. "Keep" means the Windows answer is also correct here.
 | Request protocol, durable single request, host-owned resize | Shared core | Keep. Nothing here is OS-specific | — |
 | Pressure signal | A categorical Low/Neutral/High, polled | Pressure stall information. Use PSI **triggers** (kernel wakes the service when stall time crosses a threshold) for growth, not the ten-second average read once a second: the OOM killer can act faster than a poll. Keep the average only as the "calm" test for reclaim | M2 |
 | Commit accounting | Commit total and limit | Linux has no enforced commit under default overcommit. Current mapping (RAM plus swap, less available plus free swap) is a stand-in. Decide whether the commit reserve should exist at all for Linux, and honour strict overcommit where it is enabled | M2 |
-| Page cache | Counted as available | Linux fills free RAM with cache by design. Treating all cache as surplus shrinks a file-heavy guest until it thrashes its cache. Reclaim needs a cache-aware floor (working-set refault activity, or a configurable cache allowance) | M2 |
+| Page cache | Counted as available | Done: cache the guest is re-reading from disk (the kernel's refault counter) is counted as in use, grown until refaults stop and given back in trial steps | — |
 | Free memory target | Fixed 2 GiB reserve, 1 GiB floor, 3 GiB shrink step from the Windows test | Done: one required per-VM setting, `free_ram`; every policy size derives from it and nothing is built in. Fixed (boot) RAM needs no check of its own: the administrator sets `min_ram` | — |
 | Removal reliability | Driver workaround on the host | Linux removes memory reliably only from the movable zone. How hot-plugged memory is onlined (`online_movable`, `auto-movable` policy and ratio) decides whether reclaim works. The guest must check and report this; the product must document or set it | M2 |
 | Stalled removal | Host lowers the target step by step | Not applicable. The Linux driver retries by itself. The host holds, then settles partial. The settle delay needs its own evidence-based value | M2 |
@@ -90,7 +90,7 @@ Linux. "Keep" means the Windows answer is also correct here.
 | B2 | ~~Go-ahead to install the controller on `pc101`~~ | — | Cleared 2026-11-13: the owner allows the controller to be updated and installed |
 | B3 | ~~Attestation requires `windows_driver_version`~~ | — | Cleared 2026-11-13: the review field is now `guest_driver_version` and older reviews are still read. `trusted_development_guest` remains (T0.6) |
 | B4 | ~~Policy sizes fixed for one Windows VM~~ | — | Cleared 2026-11-13: per-VM `free_ram` replaces every built-in size |
-| B5 | Removal reliability on Debian's default onlining is unmeasured | Signing off reclaim for Linux (M2) | Measurement on `debian13` under each onlining policy (T2.5) |
+| B5 | ~~Removal reliability on Debian's default onlining is unmeasured~~ | — | Cleared 2026-11-13: measured under three onlining policies (T2.5). Long-uptime fragmentation is left to the soak (T5.4) |
 | B6 | Transport depends on guest-agent file commands | RHEL-family guests; packaging (M4); the final sandbox | Transport decision and implementation (T3.1, T3.2) |
 | B7 | Linux gate runs only by hand on `pc101`; host and `xtask` do not build on the Windows workstation | Trustworthy review of every change | Scripted Linux gate (T0.4) |
 | B8 | `docs/development.md` is referenced by the Rust standards and does not exist | Agents and contributors following the standards | Write it (T0.5) |
@@ -181,27 +181,128 @@ freed.
 
 Replace the Windows carry-overs with Linux answers. Needs M1 evidence.
 
-- [ ] **T2.1** PSI triggers for growth wake-ups; verify the privileges the
-  unit needs on the target kernels.
-- [ ] **T2.2** Decide the Linux commit model: drop the commit reserve for
-  default overcommit, honour `CommitLimit` under strict overcommit.
+- [x] **T2.1** PSI triggers for growth wake-ups (2026-11-13). The service
+  registers a 100 ms in 1 s trigger, which kernel 6.12 grants only with
+  `CAP_SYS_RESOURCE` (now the unit's one capability), and falls back to
+  200 ms in 2 s without it. With a trigger, the ten-second average no longer
+  means Low. Seen firing in the T2.5 runs: a request issued between polls
+  with pressure Low.
+- [x] **T2.2** Linux commit model (2026-11-13): the kernel's `CommitLimit`
+  pair is used only under strict overcommit with a RAM-scaled limit.
+  Otherwise the RAM-plus-swap pair stays, whose headroom is never below
+  available RAM, so the commit reserve cannot ask for anything.
 - [x] **T2.3** Per-VM `free_ram` in the settings file replaces the built-in
   reserve, floor and step sizes (owner decision, 2026-11-13).
-- [ ] **T2.10** Minimum growth step or upward hysteresis, so noise at the
-  `free_ram` boundary does not cause block-sized resizes.
-- [ ] **T2.4** Cache-aware reclaim floor, measured with a file-heavy workload.
-- [ ] **T2.5** Measure removal under each onlining policy; choose the
-  recommended one; have the guest report zone layout and onlining policy.
-  Removes B5.
-- [ ] **T2.6** Guest readiness check at start and in diagnostics: driver
-  present, PSI available, onlining policy, swap.
+- [x] **T2.10** Growth and reclaim both aim a sixteenth of `free_ram` above
+  the threshold, so noise at the boundary causes no resize (2026-11-13).
+  This is in the shared policy and so applies to Windows too.
+- [x] **T2.4** Cache floor that follows the kernel's refault counter
+  (2026-11-13, owner decision). File cache the guest is re-reading from disk
+  is counted as in use: the guest grows until refaults stop, then gives the
+  cache back a step at a time and restores a step that turns out to be
+  needed. Measured below. Its numbers are provisional (T2.8).
+- [x] **T2.5** Removal measured under each onlining policy (2026-11-13,
+  below). Recommendation: Debian's default needs no change; the guest
+  reports its onlining policy and names `memory_hotplug.online_policy=auto-movable`
+  as the remedy if removals come back partial. Removes B5.
+- [x] **T2.6** Guest readiness check at start and in diagnostics: driver
+  bound, PSI and trigger, onlining policy, movable zone, swap, commit model
+  (2026-11-13). `watch` and `metrics` do not show it yet.
+- [ ] **T2.11** Survive a fill faster than growth. Done: the guest unit sets
+  `OOMScoreAdjust=-900`. Left: decide what else must survive (the guest
+  agent until T3.2 replaces it) and record a run.
 - [ ] **T2.8** Replace the provisional Linux thresholds (pressure level,
-  failed-poll limit, stalled-removal delay) with measured defaults or settings.
+  failed-poll limit, stalled-removal delay, and the cache floor's refault
+  threshold, quiet period and settling time) with measured defaults or
+  settings.
 - [ ] **T2.9** Move guest-side code that is identical on both guests behind
   one owner, once the Linux shape is stable.
 
 Exit: a small (2–4 GiB) and a large Linux VM both grow before the OOM killer
 acts and reclaim without cache thrash, in recorded runs, using defaults.
+
+First runs, 2026-11-13 (`debian13`, guest build
+`6134275b136c-dirty.43344f8f4a8f`, read from the journals, not a recorded
+capture):
+
+- `debian13` onlines hot-plugged memory as `online` with `contig-zones` and
+  its Movable zone is empty. Removals of 2.9 GiB and 374 MiB from the Normal
+  zone still completed.
+- 1.6 GiB filled in four steps grew the guest by 374 MiB in total; the last
+  request was 36 MiB (4 MiB short plus the 32 MiB margin). Available memory
+  then stayed put for 20 quiet seconds and the growth was returned in one
+  removal once the fill was freed. The M1 run of 2 MiB and 14 MiB requests did not recur.
+- 2.6 GiB written to tmpfs in about a second ran the guest out of memory
+  before any request was granted. The OOM killer killed the guest agent and
+  the guest service, so the guest could not ask again and had to be reset
+  (T2.11, and more evidence for B6).
+
+Onlining measurement, 2026-11-13 (`.artifacts/metrics/m2-t25-debian13/`, one
+run per policy from a fresh boot): the guest was grown to about 4.5 GiB with
+3.2 GiB of tmpfs data, 200,000 files were created and a 1.5 GiB file written
+and read, then the tmpfs data was freed.
+
+| Onlining | Hot-plugged memory lands in | Removal | Result |
+|---|---|---|---|
+| Debian default (`online`, `contig-zones`) | Normal | 2,394 MiB | Completed in 3 s |
+| `memhp_default_state=online_movable` | Movable | 2,378 MiB | Completed in 2 s |
+| `memory_hotplug.online_policy=auto-movable` | Movable, with 136 MiB left in Normal | 2,386 MiB | Completed in 3 s |
+
+- All three returned everything asked for. These are short runs on a fresh
+  boot; fragmentation after long uptime is not measured (T5.4).
+- With `online_movable` the kernel's own memory is confined to the 1 GiB of
+  boot RAM however large the guest grows, which is why `auto-movable` is
+  the remedy named and not `online_movable`.
+- Reclaim started 48 to 54 seconds after the data was freed in the two runs
+  where the load had stalled on memory just before; the third stalled less
+  and started after 37 seconds. Reclaim waits for the ten-second average
+  to return to exactly zero. Whether that is the right calm test is T2.8.
+- Writing the large file caused memory stalls while available memory was at
+  or above `free_ram`. In two runs the trigger fired and the guest asked for
+  256 MiB it did not otherwise need: page-cache reclaim reads as pressure.
+  This belongs with the cache-aware work in T2.4.
+- Growth kept up with 400 MiB every five seconds, but available memory fell
+  to 125–140 MiB against the 512 MiB `free_ram` between grants: each
+  request took two to three seconds to complete (T3.2).
+
+File-cache baseline, 2026-11-13 (`.artifacts/metrics/m2-t24-debian13/`):
+2.5 GiB of files re-read in a loop for four minutes in the 2 GiB guest, then
+90 idle seconds.
+
+- The guest service issued no request. The guest stayed at 2 GiB and the
+  kernel re-read about 1.7 GiB from disk on every pass (about 440,000 refaulted
+  pages per pass, 54 million in the run).
+- Nothing the policy reads saw it. `MemAvailable` stayed near 1.76 GiB
+  because page cache counts as available. Memory stall time was about 2.4 %,
+  under the 10 % trigger and above the zero that reclaim needs, so the
+  guest neither grew nor shrank.
+- `Active(file)` stayed at 35 MiB throughout. With the multi-generation LRU
+  that Debian 13 enables, repeated sequential reads are not promoted, so
+  `Active(file)` is not a usable measure of the file working set here.
+- The refault counter (`workingset_refault_file` in `/proc/vmstat`) is the
+  signal that did show it: it rose by about 225,000 pages a second while
+  the loop ran and stopped the moment the loop stopped.
+- Each pass still took 0.93 s, because the host caches the guest's disk.
+  On storage without that, the cost would be disk reads.
+
+The same workload with the cache floor (`floor.log` in the same directory,
+guest build `6134275b136c-dirty.cdf3554aac2a`, loop of 150 seconds):
+
+- Refaults were seen on the second pass. Three requests grew the guest from
+  2.0 to 3.4 GiB in seven seconds, refaults stopped, and a pass fell from
+  0.93 s to 0.20 s.
+- After a quiet minute the floor was lowered by 256 MiB and the guest
+  returned 238 MiB with no refaults: the working set still fitted.
+- The next step a minute later removed 260 MiB and cut into the working
+  set. Refaults came back within two seconds, the floor returned to its
+  previous level, the guest asked for 236 MiB back, and the wait before the
+  next trial doubled to two minutes. The guest held at 3.1 GiB.
+- Earlier runs of the same day showed two faults since corrected: a restore
+  that overshot by about 500 MiB because the removal under way kept evicting
+  cache, and a 544 MiB grow-then-return caused by one second of refaults
+  while the test files were written.
+- Not yet measured: how fast a guest gives cache back after the workload
+  stops for good, and any workload other than sequential re-reads.
 
 ### M3 — Product transport and configuration
 
@@ -294,6 +395,11 @@ Made by the owner on 2026-11-12:
   the administrator's control (2026-11-13).
 - **Scope:** Debian first. Other Linux distributions later; keep the guest
   free of Debian-specific code so they remain possible.
+
+- **Cache policy (2026-11-13):** a Linux guest follows the refault counter.
+  It grows while file cache is being re-read from disk, holds what stopped
+  that, and gives it back slowly. Cache activity can therefore take pool
+  memory up to `max_ram` without a per-VM setting (T2.4).
 
 Still open:
 

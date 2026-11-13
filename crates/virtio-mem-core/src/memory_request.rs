@@ -216,6 +216,29 @@ impl MemoryResult {
 /// response can resolve its durable pending request. Status must be fresh
 /// before computing another delta. An old terminal result may resolve a
 /// retained identity, but never supplies fresh geometry for policy.
+/// What the host tells a guest about itself: the administrator's limits and
+/// the policy derived from them. A guest that takes these from the host
+/// needs no configuration of its own and cannot drift from the host's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GuestSettings {
+    pub policy: crate::GuestMemoryPolicy,
+    /// Total guest RAM limits, as the administrator set them.
+    pub min_ram: u64,
+    pub max_ram: u64,
+    pub poll_interval_millis: u64,
+}
+
+impl GuestSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.poll_interval_millis == 0 || self.poll_interval_millis >= u64::from(u32::MAX) {
+            return Err("guest poll interval is zero or too large".to_owned());
+        }
+        crate::settings::validate_ram_limits(self.min_ram, self.max_ram)?;
+        self.policy.validate()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HostMemoryStatus {
@@ -229,6 +252,10 @@ pub struct HostMemoryStatus {
     pub requested_bytes: u64,
     pub current_bytes: u64,
     pub result: Option<MemoryResult>,
+    /// Published to guests that take their settings from the host. Absent
+    /// for a guest that carries its own configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guest_settings: Option<GuestSettings>,
 }
 
 impl HostMemoryStatus {
@@ -251,6 +278,9 @@ impl HostMemoryStatus {
         }
         if self.observed_unix_millis == 0 {
             return Err("host memory status has no observation time".to_owned());
+        }
+        if let Some(settings) = &self.guest_settings {
+            settings.validate()?;
         }
         self.device()
             .validate()

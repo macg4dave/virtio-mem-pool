@@ -501,6 +501,7 @@ mod tests {
             requested_bytes: current,
             current_bytes: current,
             result,
+            guest_settings: None,
         }
     }
 

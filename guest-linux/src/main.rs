@@ -52,7 +52,7 @@ fn run(config_path: &Path) -> Result<(), String> {
     )?;
     requests.set_ram_limits(config.min_ram, config.max_ram)?;
     let mut worker = GuestWorker::new(
-        ProcMeminfo::default(),
+        ProcMeminfo::with_cache_floor(config.policy.grow_step_bytes),
         ProcPressure::open(),
         SystemClock::default(),
         requests,

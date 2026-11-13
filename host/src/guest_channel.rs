@@ -134,6 +134,7 @@ impl<Q: GuestFileReader + GuestFileWriter, T: UnixClock> GuestLink for GuestChan
                 || last.result != status.result
                 || last.device_size_bytes != status.device_size_bytes
                 || last.block_size_bytes != status.block_size_bytes
+                || last.guest_settings != status.guest_settings
         });
         let refresh_due = self
             .last_write
@@ -382,6 +383,7 @@ mod tests {
             requested_bytes: 0,
             current_bytes: 0,
             result: None,
+            guest_settings: None,
         };
         let channel = qga(Vec::new());
         channel.publish_status(&status).expect("QGA status");

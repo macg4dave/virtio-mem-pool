@@ -1280,6 +1280,7 @@ where
                 requested_bytes: state.requested_bytes,
                 current_bytes: state.current_bytes,
                 result: refusal.or_else(|| self.control.journal.result.clone()),
+                guest_settings: self.config.guest_settings,
             })
         });
         match published {

@@ -19,6 +19,10 @@
 //!
 //! A fixed limit (`vm.overcommit_kbytes`) is treated as not enforced: more
 //! RAM cannot raise it, so asking the host for memory would not help.
+//!
+//! `MemAvailable` counts page cache as available. The part of it under the
+//! cache floor (see `cache`) is reported as in use instead, so the policy
+//! neither returns it nor counts it towards the free reserve.
 
 use std::path::Path;
 
@@ -72,6 +76,21 @@ impl CommitModel {
 #[derive(Debug, Default)]
 pub struct ProcMeminfo {
     commit_peak_bytes: u64,
+    cache_floor: Option<(crate::cache::CacheFloor, std::time::Instant)>,
+}
+
+impl ProcMeminfo {
+    /// Keeps file cache the guest is re-reading from disk, growing and
+    /// giving it back `step_bytes` at a time.
+    pub fn with_cache_floor(step_bytes: u64) -> Self {
+        Self {
+            commit_peak_bytes: 0,
+            cache_floor: Some((
+                crate::cache::CacheFloor::new(step_bytes, crate::cache::page_size_bytes()),
+                std::time::Instant::now(),
+            )),
+        }
+    }
 }
 
 impl MemorySource for ProcMeminfo {
@@ -80,11 +99,60 @@ impl MemorySource for ProcMeminfo {
             .map_err(|error| format!("read {MEMINFO_PATH}: {error}"))?
             .ok_or_else(|| format!("{MEMINFO_PATH} is missing"))?;
         let text = String::from_utf8(text).map_err(|_| format!("{MEMINFO_PATH} is not UTF-8"))?;
-        let snapshot =
-            snapshot_from_meminfo(&text, CommitModel::current(), self.commit_peak_bytes)?;
+        let commit = CommitModel::current();
+        let snapshot = snapshot_from_meminfo(&text, commit, self.commit_peak_bytes)?;
+        let protected = self.cache_floor.as_mut().map_or(0, |(floor, started)| {
+            floor.update(
+                u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                crate::cache::read_refault_file_pages(),
+                file_cache_bytes(&text),
+            )
+        });
+        let snapshot = reserve_cache(snapshot, commit, protected);
         self.commit_peak_bytes = snapshot.commit_peak_bytes;
         Ok(snapshot)
     }
+}
+
+/// File-backed page cache: `Active(file)` plus `Inactive(file)`. Zero when
+/// the kernel does not report them.
+pub fn file_cache_bytes(meminfo: &str) -> u64 {
+    ["Active(file):", "Inactive(file):"]
+        .into_iter()
+        .filter_map(|name| {
+            meminfo
+                .lines()
+                .find_map(|line| line.strip_prefix(name))?
+                .trim()
+                .strip_suffix("kB")?
+                .trim()
+                .parse::<u64>()
+                .ok()?
+                .checked_mul(1024)
+        })
+        .fold(0, u64::saturating_add)
+}
+
+/// Report `protected_bytes` of the available memory as in use. Where commit
+/// is RAM plus swap, its headroom falls by the same amount.
+pub fn reserve_cache(
+    mut snapshot: MemoryTelemetrySnapshot,
+    commit: CommitModel,
+    protected_bytes: u64,
+) -> MemoryTelemetrySnapshot {
+    let reserved = protected_bytes.min(snapshot.physical_available_bytes);
+    snapshot.physical_available_bytes -= reserved;
+    snapshot.memory_load_percent =
+        ((u128::from(snapshot.physical_total_bytes - snapshot.physical_available_bytes) * 100)
+            / u128::from(snapshot.physical_total_bytes)) as u32;
+    if commit == CommitModel::NotEnforced {
+        snapshot.commit_total_bytes = snapshot
+            .commit_total_bytes
+            .saturating_add(reserved)
+            .min(snapshot.commit_limit_bytes);
+        snapshot.commit_peak_bytes = snapshot.commit_peak_bytes.max(snapshot.commit_total_bytes);
+    }
+    snapshot
 }
 
 /// `previous_peak_bytes` is the highest commit total already observed.
@@ -233,6 +301,41 @@ mod tests {
                 "{memory:?} {kbytes:?} {ratio:?}"
             );
         }
+    }
+
+    #[test]
+    fn cache_under_the_floor_is_reported_as_in_use() {
+        let text = format!(
+            "{}Active(file):     102400 kB\nInactive(file):  921600 kB\n",
+            meminfo(4 * 1024 * 1024, 1048576)
+        );
+        assert_eq!(file_cache_bytes(&text), 1000 * MIB);
+        assert_eq!(file_cache_bytes(&meminfo(1024, 0)), 0);
+
+        let plain = snapshot_from_meminfo(&text, NOT_ENFORCED, 0).unwrap();
+        let held = reserve_cache(plain, NOT_ENFORCED, 1000 * MIB);
+        held.validate().unwrap();
+        assert_eq!(held.physical_available_bytes, 3096 * MIB);
+        assert_eq!(
+            held.commit_limit_bytes - held.commit_total_bytes,
+            (3096 + 1024) * MIB,
+            "commit headroom falls with it"
+        );
+        assert!(held.memory_load_percent > plain.memory_load_percent);
+        // A floor above what is available leaves nothing, not less.
+        let all = reserve_cache(plain, NOT_ENFORCED, u64::MAX);
+        all.validate().unwrap();
+        assert_eq!(all.physical_available_bytes, 0);
+        // The kernel's enforced commit pair is not ours to adjust.
+        let enforced = snapshot_from_meminfo(
+            &text.replace("9999999 kB", "2000000 kB"),
+            CommitModel::Enforced,
+            0,
+        )
+        .unwrap();
+        let held = reserve_cache(enforced, CommitModel::Enforced, 1000 * MIB);
+        assert_eq!(held.commit_total_bytes, enforced.commit_total_bytes);
+        assert_eq!(reserve_cache(plain, NOT_ENFORCED, 0), plain);
     }
 
     #[test]

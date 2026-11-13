@@ -8,8 +8,8 @@ use std::path::Path;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{
-    GuestMemoryPolicy, LinuxServiceConfigFile, TargetPolicyConfig, WindowsServiceConfigFile,
-    LINUX_SERVICE_CONFIG_SCHEMA_VERSION, WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION,
+    GuestMemoryPolicy, GuestSettings, TargetPolicyConfig, WindowsServiceConfigFile,
+    WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION,
 };
 
 pub const SERVICE_NAME: &str = "VirtioMemService";
@@ -275,24 +275,15 @@ impl VmSettings {
         })
     }
 
-    /// The Linux guest service's generated runtime configuration.
-    pub fn linux_service_config(
-        &self,
-        globals: &GlobalSettings,
-    ) -> Result<LinuxServiceConfigFile, String> {
-        if self.guest_os != GuestOs::Linux {
-            return Err(format!("VM {} is not a Linux guest", self.vm_name));
-        }
-        Ok(LinuxServiceConfigFile {
-            schema_version: LINUX_SERVICE_CONFIG_SCHEMA_VERSION,
-            vm_name: self.vm_name.clone(),
-            service_name: LINUX_SERVICE_NAME.to_owned(),
-            control_path: LINUX_CONTROL_PATH.to_owned(),
-            poll_interval_millis: globals.poll_interval_seconds * 1000,
+    /// What the host publishes to this VM's guest: the administrator's
+    /// limits and the policy derived from them.
+    pub fn guest_settings(&self, globals: &GlobalSettings) -> GuestSettings {
+        GuestSettings {
             policy: self.guest_policy(globals),
             min_ram: self.min_ram,
             max_ram: self.max_ram,
-        })
+            poll_interval_millis: globals.poll_interval_seconds * 1000,
+        }
     }
 }
 
@@ -534,12 +525,12 @@ mod tests {
             linux
         );
         let globals = GlobalSettings::default();
-        let service = linux.linux_service_config(&globals).unwrap();
-        service.validate().unwrap();
-        assert_eq!(service.service_name, GuestOs::Linux.service_name());
-        assert_eq!(service.control_path, GuestOs::Linux.control_path());
+        let published = linux.guest_settings(&globals);
+        published.validate().unwrap();
+        assert_eq!((published.min_ram, published.max_ram), (2 * GIB, 5 * GIB));
+        assert_eq!(published.policy, linux.guest_policy(&globals));
+        assert_eq!(published.poll_interval_millis, 5000);
         assert!(linux.service_config(&globals).is_err());
-        assert!(vm("guest").linux_service_config(&globals).is_err());
 
         let mut mixed = linux.clone();
         mixed.service_account = Some("root".to_owned());

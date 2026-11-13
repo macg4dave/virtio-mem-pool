@@ -3,6 +3,7 @@
 //! results with the host controller through the same control files and wire
 //! format as the Windows service.
 
+pub mod cache;
 pub mod config;
 pub mod files;
 pub mod meminfo;

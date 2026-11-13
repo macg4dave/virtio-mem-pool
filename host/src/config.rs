@@ -40,6 +40,9 @@ pub struct HostConfig {
     pub observe_only: bool,
     pub min_ram: u64,
     pub max_ram: u64,
+    /// Published with the host status to a guest that takes its limits and
+    /// policy from the host. A Windows guest carries its own configuration.
+    pub guest_settings: Option<virtio_mem_core::GuestSettings>,
     pub telemetry_path: Option<String>,
 }
 
@@ -103,6 +106,7 @@ impl HostConfig {
             observe_only: globals.observe_only,
             min_ram: vm.min_ram,
             max_ram: vm.max_ram,
+            guest_settings: (vm.guest_os == GuestOs::Linux).then(|| vm.guest_settings(globals)),
             telemetry_path: entry.telemetry_path.clone(),
         }
     }

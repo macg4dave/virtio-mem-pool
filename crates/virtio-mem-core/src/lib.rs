@@ -5,7 +5,6 @@ pub mod controller_status;
 pub mod demand;
 pub mod error;
 pub mod guest_policy;
-pub mod linux_service_config;
 pub mod memory_request;
 pub mod pool;
 pub mod settings;
@@ -31,9 +30,9 @@ pub use error::VirtioMemError;
 pub use guest_policy::{
     plan_request, GuestDecision, GuestMemoryPolicy, GuestRequestState, GuestRequester,
 };
-pub use linux_service_config::{LinuxServiceConfigFile, LINUX_SERVICE_CONFIG_SCHEMA_VERSION};
 pub use memory_request::{
-    bounded_reason, host_status_path, request_state_path, HostMemoryStatus, MemoryOperation,
+    bounded_reason, host_status_path, request_state_path, GuestSettings, HostMemoryStatus,
+    MemoryOperation,
     MemoryOutcome, MemoryRequest, MemoryRequestJournal, MemoryResult, RequestAdmission,
     RequestIdentity, MAX_HOST_STATUS_BYTES, MAX_REQUEST_LIFETIME_MILLIS, MEMORY_REQUEST_VERSION,
     MEMORY_WAKE_CHANNEL_NAME,
