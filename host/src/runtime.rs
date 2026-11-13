@@ -726,8 +726,8 @@ where
     // starts at the lowest plugged block and is `plugged - requested` long,
     // once per device notification. Memory at the bottom of that window that
     // Windows cannot evacuate stops the removal for good. Observed live on
-    // win11_gpu: each request one block (8 MiB then) lower frees exactly the block
-    // it adds to the window, and the gap below `current` stays the same;
+    // the Windows test VM: each request one block (8 MiB then) lower frees
+    // exactly the block it adds to the window, and the gap below `current` stays the same;
     // re-sending a target already tried (bouncing up and back) frees nothing.
     // So each time a held shrink stops moving, request less, and settle as
     // soon as `current` reaches the guest's goal: the admitted request's

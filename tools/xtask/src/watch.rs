@@ -1105,11 +1105,11 @@ mod tests {
     #[test]
     fn events_are_newest_first_shortened_coloured_and_collapsed() {
         let journal = "\
-2026-10-27T09:50:31+00:00 pc101 virtio-mem-host[1]: virtio-mem-host: vm=w event=guest_input_invalid reason=raw telemetry observation 1793093751508 is stale at 1793094631000
-2026-10-27T09:50:37+00:00 pc101 virtio-mem-host[1]: virtio-mem-host: vm=w event=guest_input_invalid reason=raw telemetry observation 1793093751508 is stale at 1793094637000
-2026-10-27T09:57:19+00:00 pc101 virtio-mem-host[1]: virtio-mem-host: vm=w event=controller_decision action=grant session_id=s-1 operation=Remove bytes=3221225472
-2026-10-27T09:57:20+00:00 pc101 virtio-mem-host[1]: virtio-mem-host: vm=w event=control_health direction=Shrink
-2026-10-27T09:57:40+00:00 pc101 virtio-mem-host[1]: virtio-mem-host: vm=w event=actuation_latched reason=x
+2026-10-27T09:50:31+00:00 kvm-host virtio-mem-host[1]: virtio-mem-host: vm=w event=guest_input_invalid reason=raw telemetry observation 1793093751508 is stale at 1793094631000
+2026-10-27T09:50:37+00:00 kvm-host virtio-mem-host[1]: virtio-mem-host: vm=w event=guest_input_invalid reason=raw telemetry observation 1793093751508 is stale at 1793094637000
+2026-10-27T09:57:19+00:00 kvm-host virtio-mem-host[1]: virtio-mem-host: vm=w event=controller_decision action=grant session_id=s-1 operation=Remove bytes=3221225472
+2026-10-27T09:57:20+00:00 kvm-host virtio-mem-host[1]: virtio-mem-host: vm=w event=control_health direction=Shrink
+2026-10-27T09:57:40+00:00 kvm-host virtio-mem-host[1]: virtio-mem-host: vm=w event=actuation_latched reason=x
 ";
         let events = parse_events(journal, 6);
         assert_eq!(events.len(), 3);

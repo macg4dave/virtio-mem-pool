@@ -1,393 +1,359 @@
-# Test configuration files
+# Administration
 
-These configuration files are kept here for testing with `win11_gpu`; their
-long-term location will change later. Edit here, then apply. Generated files
-(attestation, deploy evidence) stay in `.artifacts/`.
+How to install the virtio-mem pool controller on a KVM host, add VMs to it,
+install the guest services, recover from faults and upgrade. Development
+builds and checks are in [development](development.md); the observation
+tools are in [tools](tools.md).
 
-| File | Installed as | Apply |
+## How it fits together
+
+One controller (`virtio-mem-host`) runs on the KVM host as the systemd unit
+`virtio-mem-host@INSTANCE.service`. It manages every VM in its host list
+from one pool of virtio-mem device memory. In each VM a guest service
+decides when it needs more or less memory and asks; the controller admits
+the request within the pool, the VM's limits and the host's own reserve,
+resizes the VM's virtio-mem device and reports the result.
+
+Guest and host talk over a dedicated virtio-serial port,
+`org.virtio-mem.control.0` (the control channel). A VM without the port is
+served through control files that the controller reads and writes with the
+QEMU guest agent.
+
+Run one controller per host: separate controllers cannot share a pool.
+
+## Host layout
+
+| Item | Location |
+|---|---|
+| Controller binary | `/usr/local/libexec/virtio-mem-host` |
+| Unit | `/etc/systemd/system/virtio-mem-host@.service` |
+| libvirt access rule | `/etc/polkit-1/rules.d/50-virtio-mem-host.rules` |
+| Configuration | `/etc/virtio-mem-host/` (`global-settings.toml`, `host_list.toml`, `<vm_name>_settings.toml`) |
+| Attestations | `/etc/virtio-mem-host/<vm_name>.attestation.json`, beside the host list |
+| Durable request state | `/var/lib/virtio-mem-host/state/<vm_name>-requests.json` (the unit's `StateDirectory`) |
+| Guest publications for tools | `/run/virtio-mem-host/<vm_name>.publication.json` |
+| Deployment backups | `/var/lib/virtio-mem-host/deployment-backups/` |
+
+A site with another layout overrides `ExecStart` in a drop-in
+(`systemctl edit virtio-mem-host@.service`). The controller takes its
+attestations from the host list's directory and its state from the unit's
+`StateDirectory`, so they follow.
+
+## Installing the controller
+
+Requirements: a RHEL-family (or other systemd) KVM host with libvirt and
+QEMU, `virsh` on the path, polkit, and Rust to build the controller.
+
+1. Create the service account once:
+
+   ```bash
+   sudo useradd --system --no-create-home --shell /sbin/nologin virtio-mem-host
+   ```
+
+   The unit adds the `qemu` group, which owns libvirt's channel sockets.
+
+2. Write the site configuration in a directory of your own, starting from
+   [deploy/examples](../deploy/examples). See [Configuration](#configuration).
+
+3. Prepare each VM and attest it ([Adding a VM](#adding-a-vm)).
+
+4. Build and install from a checkout:
+
+   ```bash
+   deploy/scripts/install-host.sh CONFIG_DIR INSTANCE VM=ATTESTATION [VM=ATTESTATION ...]
+   ```
+
+   It builds the release controller, stops the unit, then runs
+   `cargo xtask host-deploy`. That validates the configuration and every
+   attestation against the live VMs, installs binary, unit, polkit rule,
+   configuration and attestations, keeping a backup of what it replaces,
+   and writes JSON evidence under `.artifacts/deploy/`. The script then
+   enables and starts the unit. Every VM in the host list needs exactly one
+   attestation.
+
+A controller that is running does not reload its configuration. Install
+again to change it.
+
+## Configuration
+
+Three kinds of file, in one directory. Unknown or misspelt keys are
+rejected. Memory sizes are binary (`"1GB"` is 2^30 bytes); plain byte counts
+and fractional sizes such as `"8.5GB"` are accepted.
+
+### `global-settings.toml`
+
+| Key | Default | Meaning |
 |---|---|---|
-| [global-settings.toml](global-settings.toml) | `/etc/virtio-mem-host/global-settings.toml` | `install-host.sh INSTANCE VM=ATTESTATION ...` |
-| [host_list.toml](host_list.toml) | `/etc/virtio-mem-host/host_list.toml` | `install-host.sh INSTANCE VM=ATTESTATION ...` |
-| [recover-latch.sh](recover-latch.sh) | — | see below |
-| [win11_gpu_settings.toml](win11_gpu_settings.toml) | `C:\ProgramData\VirtioMemService` config + service | `make win11-deploy` |
+| `pool_bytes` | none | Device memory shared by every VM, excluding fixed boot RAM. Required with more than one VM |
+| `host_min_headroom_bytes` | `4GB` | `MemAvailable` the host keeps. Growth is reduced or refused rather than cross it |
+| `observe_only` | `false` | Evaluate and log requests, but refuse each one before resizing |
+| `poll_interval_seconds` | `5` | Host poll and guest sample interval, 1–10. Freshness bounds are six polls |
+| `command_timeout_seconds` | `10` | Limit on each `virsh` command |
+| `convergence_timeout_seconds` | `300` | How long a resize may stop moving before it is settled at what the guest returned |
+| `libvirt_uri` | `qemu:///system` | The libvirt connection that owns the VMs |
 
-`make win11-deploy` installs the build last fetched by `make win11-build`.
-How make reaches the guest (SSH alias, guest checkout, timeouts) is set in
-[windows-build.mk](windows-build.mk). Watch the live loop with
-`cargo xtask watch --config deploy/config_files/host_list.toml`.
+Each VM occupies `max(requested, current)` bytes of the pool. Growth uses
+only free pool capacity, highest priority first; the controller never takes
+memory from one VM to give to another. Admission also keeps 256 MiB above
+`host_min_headroom_bytes` for changes between planning and resizing.
 
-## Recording a stress test
+### `host_list.toml`
 
-```bash
-cargo xtask metrics --config deploy/config_files/host_list.toml [--duration-seconds N]
-```
+One `[[vm]]` per VM:
 
-Read-only, like `watch`. On a terminal it opens a live UI: host, device and
-guest panels, a memory chart (host available, guest available, device
-current and requested), request results and latencies, problem and incident
-counters, and the controller's events alongside lifecycle events. A red
-`N INCIDENTS` badge in the header means a crash or restart was recorded.
-The controller row shows its pid, memory and CPU, or how it exited. `--plain`, or output that is not a terminal, prints
-one line per sample instead. It records until `q`/Ctrl+C or
-`--duration-seconds`.
-
-| Key | Action |
+| Key | Meaning |
 |---|---|
-| `-` / `+` | Sample period (0.5 s – 120 s; default 5 s) |
-| `[` / `]` | Guest-agent read period (1 s – 120 s; default 5 s) |
-| space | Pause / resume logging (the UI keeps updating; nothing is written) |
-| `n` | Sample now |
-| `m` | Type a marker (e.g. "started 12 GB allocation"), Enter saves |
-| `s` | Save `summary.json` now |
-| `w` | Chart window: 5 min, 15 min, 1 h, whole run |
-| `q` | Quit |
+| `vm_name` | The libvirt domain name: lower-case ASCII letters, digits, `-` and `_`, at most 64 characters |
+| `alias` | The virtio-mem device's alias in the domain XML |
+| `priority` | Positive; higher is served first from free pool memory, ties in list order |
+| `telemetry_path` | Optional host file for a diagnostic copy of each publication |
 
-Period changes, pauses and markers are written to `events.jsonl` as
-`"event": "marker"` entries, so the logs show when each happened. Each run
-writes one directory under `.artifacts/metrics/win11_gpu-<UTC time>/` (or
-`--output DIR`):
+### `<vm_name>_settings.toml`
 
-| File | Contents |
+| Key | Meaning |
 |---|---|
-| `samples.csv` | Every sample period (`--interval-seconds`): host total/available RAM, headroom over `host_min_headroom_bytes`, swap used, QEMU RSS, controller active, device size/requested/current. Every guest read (`--guest-interval-seconds`, default 5): agent read time and success, publication age, Windows available RAM, load, commit and commit headroom, cache, memory signal, pending request. Appended after those: controller unit state, pid, memory, CPU % and restart count; QEMU pid; libvirt domain state (`virsh domstate --reason`); and per guest read the service session, commit peak and kernel paged/non-paged pools. Sizes in MiB. |
-| `events.jsonl` | Every controller journal entry written during the run, with its fields split out, plus markers and `metrics_*` lifecycle events: controller failed/stopped/started/restarted, QEMU exited/started/restarted, domain state changes, guest service session changes, guest publication stalled/resumed, guest agent lost/restored and publication read failed/restored. |
-| `incidents.jsonl` | One record per incident, with its bundle path, pid and details (exit status, systemd result, panic text, last controller lines, core dump flag, publication gap). Empty when nothing crashed. |
-| `incidents/NNN-TIME-COMPONENT.txt` | Evidence bundle per incident, collected at detection: panic text and last controller lines, `systemctl status`, `coredumpctl info` when the controller dumped core, the unit's last 400 journal lines, the QEMU log tail (root only) for VM incidents, the guest's last and first publication around a service restart, and the 60 `samples.csv` rows before detection. |
-| `summary.json` | Min/max/mean of the above, time spent with requested ≠ current, guest read failures and stale publications, publication stall and agent outage durations, completed requests by operation and outcome (MiB asked and got), grant→completion and Windows issue→completion latency, refusals, event counts, controller pids, memory and CPU, samples per domain state, guest service sessions, incident counts and records, and latches. Rewritten every minute, at exit and after each incident. |
+| `vm_name` | Must match the filename and the host list |
+| `min_ram`, `max_ram` | Limits on total guest RAM, fixed boot RAM included, aligned to the device block size |
+| `free_ram` | The memory the guest keeps free above what it uses. A multiple of eight device blocks |
+| `guest_os` | `"linux"`, or omitted for Windows |
+| `install_path`, `service_account` | Windows only: where the service is installed and the account it runs as |
 
-An incident is a controller that stops other than cleanly (any systemd
-`Result` except `success`, including one already failed when recording
-starts), a new guest service session (service restart or guest reboot; the
-host cannot tell which), a QEMU process exit or replacement, or a domain in
-`crashed`/`panicked` state. A `systemctl stop` is an event, not an incident.
-Lifecycle events and incidents are written even while logging is paused.
-Windows' own record of a service crash stays in the guest: System log,
-Service Control Manager 7031/7034, and Application log, Application Error
-1000; guest bundles include a `Get-WinEvent` query for the right time.
+`free_ram` is the only policy size. The guest asks for more when free
+memory falls below it and returns memory when it has more than that spare.
+The rest follows from it: reclaim never plans below half of it (also the
+level treated as critical), memory is returned only once the surplus
+exceeds an eighth of it, growth and reclaim both aim a sixteenth of it
+above it so ordinary fluctuation causes no resize, and native Low pressure
+asks for at least half of it. A Windows guest removes at most one and a
+half times `free_ram` per request.
 
-The recorder uses a persistent libvirt connection for repeated XML/QGA reads.
-It appends host memory PSI (`some`/`full` avg10 percentages), swap-in/out pages
-per second, major faults per second and sample collection milliseconds to CSV.
-Rates are host-wide; the first sample has no rate. Unavailable interfaces leave
-blank values. Swap occupancy alone does not indicate active paging.
+Guests take these settings from the host with every status. Changing a
+VM's settings needs only a controller install, never a guest change.
 
-Summary request totals include terminal PoolEmpty and Rejected results as well
-as completed/partial movements. Refusal counts include zero grants and final
-headroom rejections. Growth and removal latencies are also separate, and pending
-operations show age, original allocation goal and remaining bytes. The last
-observed guest request may persist briefly after host completion until the guest
-consumes its result. Full error messages remain in events; publication read
-failures are distinguished from explicit guest-agent connection loss.
+## Adding a VM
 
-### Diagnostic evidence in metrics captures
+1. **Device.** Give the domain a virtio-mem device with a stable alias and
+   the options the controller requires. The device's `requested` size in
+   the saved definition should be zero: the guest asks for what it needs.
 
-Each capture now also writes `run.json` and `guest-publications.jsonl`.
-`run.json` records the recorder checkout and executable hash, running host
-executable hash, requested and installed settings, live and saved domain XML,
-host boot ID, and readable initial checkpoint/attestation. Missing permissions
-and metadata are recorded as errors rather than requiring elevation. The first
-readable guest publication adds its build identity, initial request and on-disk
-`viomem.sys` version when available. File version is not proof of the loaded
-driver version. A final status distinguishes a finished run from a recording
-interrupted before its manifest could be finalised.
+   ```xml
+   <maxMemory slots='1' unit='GiB'>16</maxMemory>
+   ...
+   <memory model='virtio-mem'>
+     <target>
+       <size unit='GiB'>8</size>
+       <node>0</node>
+       <block unit='KiB'>2048</block>
+       <requested unit='KiB'>0</requested>
+     </target>
+     <alias name='ua-virtiomem0'/>
+   </memory>
+   ```
 
-Guest publication snapshots retain every published field when the request,
-service session, native signal or policy reason changes, and otherwise every
-30 seconds. Pausing recording pauses these snapshots. Policy reason, desired
-allocation, safety floor, history readiness, retry delay and Windows boot uptime
-are also appended to CSV. Desired targets may be unavailable while device
-geometry is pending; this is not zero demand. A new service session combined
-with decreased Windows boot uptime records a separate reboot event; a service
-restart alone does not establish a reboot.
+   QEMU must run the device with `dynamic-memslots` and
+   `unplugged-inaccessible` on. The attestation reads both from QEMU and
+   refuses a VM without them.
 
-Host events record the observed request, per-request pool/device/guest/host
-limits, all tied limiting factors, alignment loss, command start and duration.
-Unchanged pending-device health is reduced to a 30-second heartbeat, retaining
-state changes, request identity, idle time and timeout remaining. Existing
-completion events identify convergence. Guest result-consumed events add the
-sample time at which Windows consumed the result; compare clocks with care
-when interpreting host-to-guest timing.
+2. **Control channel.**
 
-Sustained host reserve shortfall, stale readable publications, device stalls,
-and repeated capacity failures create `performance` incident bundles with the
-same journal/sample context as lifecycle incidents. Shortfall/staleness requires
-30 seconds; a device must first stop moving for 30 seconds and remain stalled
-for another 30. Five or more zero grants or rejected commands within a minute
-must persist as a condition for 30 seconds. Bundles are emitted once per episode
-and rearm after recovery. Durations use the recorder's monotonic clock.
+   ```xml
+   <channel type='unix'>
+     <target type='virtio' name='org.virtio-mem.control.0'/>
+     <alias name='ua-virtiomem-control'/>
+   </channel>
+   ```
 
-Guests now publish version 6, which means the guest takes its settings
-from the host. Hosts accept versions 4 to 6 and send settings only to a
-version 6 guest or one that has published nothing yet. Upgrade the host
-before either guest service. The durable memory request and host-status schemas are
-unchanged; diagnostic fields never authorise memory changes. Existing captures
-without diagnostic fields remain readable.
+   libvirt chooses the host socket; the controller finds it in the domain
+   XML. Without the channel the guest agent must run in the guest with file
+   commands allowed (RHEL-family guests block them by default).
 
-## Recovering a latched controller
+3. **Review.** Write the compatibility review for the VM, a JSON file that
+   records what you checked:
 
-When the controller latches (`actuation_latched` in `watch`/`metrics`), it
-stops resizing until an operator clears it. Install the current host build
-and attestation, then run
+   ```json
+   {
+     "guest_os": "linux",
+     "workload_reviewed": true,
+     "no_vdpa": true,
+     "no_rdma_migration": true,
+     "no_vfio_nvme": true,
+     "no_mlock": true,
+     "no_secure_virtualization": true,
+     "no_unsupported_vhost_user": true,
+     "balloon_resize_inactive": true,
+     "memory_slot_budget": 1,
+     "vfio_mapping_budget": 1,
+     "guest_driver_version": "linux 6.12.86+deb13-amd64"
+   }
+   ```
 
-```bash
-deploy/config_files/recover-latch.sh "why it is safe to resume"
-```
+   `guest_os` must match the VM's settings. `guest_driver_version` is the
+   `viomem` driver version on Windows and the kernel release on Linux.
 
-It stops the controller, clears the latch and starts the controller again.
-`clear-latch` first settles a stuck shrink (requested set to what the guest
-kept) when requested ≠ current.
+4. **Attest.** With the VM running in its final configuration:
 
-## Configuration ownership
+   ```bash
+   cargo xtask attestation VM ALIAS REVIEW --output VM.attestation.json --command-timeout-seconds 60
+   ```
 
-- `global-settings.toml`: shared device pool, Linux headroom, observe-only mode
-  and three controller timings. Omitted keys use built-in defaults. A missing
-  global file uses all defaults; multiple VMs still require an explicit pool.
-- `host_list.toml`: one `[[vm]]` per VM with `vm_name`, libvirt device `alias`
-  and `priority`. Optional `telemetry_path` writes diagnostics on the Linux host.
-- `<vm_name>_settings.toml`: `min_ram`, `max_ram`, `free_ram`, `install_path`,
-  `service_account` and `vm_name`. A Linux guest instead sets
-  `guest_os = "linux"`; see [Linux guests](#linux-guests).
+   The attestation binds the review to hashes of the live domain XML, QEMU's
+   arguments and versions, and the device options. Every resize collects
+   them again and refuses on any difference, so attest again after any
+   change to the VM's definition. `deploy/scripts/restart-vm-attest.sh`
+   cold-restarts a VM (so a saved definition takes effect), attests it and
+   installs the controller in one step.
 
-The host list loads sibling files; paths do not depend on the working directory.
-VM names use lower-case ASCII letters, digits, `-` and `_`, beginning with a
-letter or digit, at most 64 characters. The exact filename and internal name
-must agree. Duplicate entries and unknown keys fail validation.
+5. **Settings.** Add the VM to `host_list.toml`, write its
+   `<vm_name>_settings.toml` and install the controller with every VM's
+   attestation.
 
-`min_ram` and `max_ram` describe **total guest RAM**, in binary size units or
-bytes, aligned to the live device block size (64 MiB for `win11_gpu`).
-The policy derives the device allocation from observed
-RAM and live device state; there is no configured boot/base-RAM value. Both
-Windows requests and host grants honour these bounds. The underlying VM must
-have enough supported memory capacity; impossible limits fail closed. This
-change does not edit libvirt VM definitions.
-
-`free_ram` is the memory a guest keeps free above what it is using, and the
-only policy size an administrator sets. There is no built-in value. The guest
-asks for more when free memory falls below it and returns memory when it has
-more than that spare. The other sizes follow from it: reclaim never plans below
-half of it (also the level treated as critical), memory is returned only once
-the surplus exceeds an eighth of it, and native Low pressure asks for at least
-half of it. A Windows guest removes at most one and a half times `free_ram`
-per request; a Linux guest may return its whole surplus at once. Use a multiple
-of eight device blocks so every derived size stays block aligned.
-
-Reclaim history (1 second) and stop timeout (30 seconds) are built in. One
-polling interval drives host polling and guest sampling; freshness, request
-lifetime and maximum sample gaps follow it. Device size and block size come
-from live state. `/usr/bin/virsh`, the Windows service name and control-file
-path are built in. Per-VM state and attestation paths are derived from the
-validated name.
-Freshness/request lifetime is six poll intervals and the maximum sample gap is
-three. Windows service identity is `VirtioMemService`.
-
-
-### Capacity and stalled removals
-
-Growth admission leaves an additional 256 MiB above the configured host reserve
-to absorb changes between planning and execution. The final check still enforces
-the configured hard reserve; other host activity can lower available memory
-later. Failed or partial guest requests retry with exponential delays from one
-to thirty seconds. A transition into native Low or across a numeric safety floor bypasses an Add delay; an
-opposite-direction request is also allowed immediately. Retained requests are
-always retransmitted unchanged while unresolved.
-
-The unpatched-driver shrink workaround is still present. If it reaches its
-minimum target and memory then stops moving for the convergence timeout, the
-controller settles at the actual allocation and reports the original request's
-result. This releases the request slot for renewed pressure. It does not force
-Windows to return unevictable memory. Normal progress is not interrupted by
-this idle deadline.
-
-## Optional telemetry and the control channel
-
-Both optional telemetry paths may be omitted. No diagnostic publisher or output
-file is created in that case. When configured, the guest path writes Windows
-diagnostics and the host path writes a separate Linux diagnostic file. Output
-failures are reported without stopping memory control. Provision write access
-for the service account if choosing a custom diagnostic directory.
-
-Memory sampling needed by the guest policy and the request/reply channel remain
-active. The internal control channel retains its historical filename
-`C:\ProgramData\VirtioMemService\telemetry.json` to preserve pending requests;
-it is no longer a telemetry setting. Its `.host-status` and request-state
-sidecars are derived automatically. Do not use this path or its sidecars as an
-optional diagnostic output. `watch` and `metrics` read the control data when
-explicitly run and require no telemetry settings.
-
-## Startup memory
-
-A Windows Restart can retain QEMU's live virtio-mem requested size and does not
-apply the saved domain definition. To reset the requested allocation to the
-saved zero value, use a full guest shutdown followed by a start. The supplied
-`restart-vm-attest.sh` performs that cold restart for reviewed geometry changes;
-it stops the controller first and refreshes attestation before installation.
-Do not clear retained request state to reduce RAM: an unresolved request must
-still receive its correlated result. A service-session change alone is not
-proof of a VM reboot and must not trigger forced memory removal.
-
-The live block size can therefore differ from the saved block size until a cold
-restart. Inspect both live and inactive XML when comparing test runs.
-
-
-The persistent libvirt definition starts virtio-mem with zero requested bytes.
-No startup allocation is stored in these application settings. Windows requests
-device RAM when its memory policy needs it; the boot-memory allocation remains
-a property of the VM definition. Updating the saved startup setting does not
-force-unplug memory from an already running guest.
-
-## Deployment and migration
-
-The installer requires the controller instance and one explicit, current
-attestation per VM; it never selects evidence from an old test run:
-
-```bash
-deploy/config_files/install-host.sh win11_gpu win11_gpu=/path/to/current-attestation.json
-```
-
-`install-host.sh` validates and snapshots the global settings, host list and
-all listed VM files, hashes the complete snapshot and installs the same files
-under `/etc/virtio-mem-host/`. Existing installed files and obsolete instance
-configs are backed up. The unit now reads `host_list.toml`. Run one controller
-for the host list: separate controllers cannot share pool accounting.
-
-`make win11-deploy` reads the selected `<vm_name>_settings.toml` and
-generates the Windows `config.json` schema 9. It holds only what installing
-the service needs: its name, the account it runs as and its stop timeout.
-The VM name, limits, policy and poll interval come from the host at run
-time, as for a Linux guest, so changing them needs no Windows deployment.
-Deploy the host before the Windows service: a new service under an old host
-waits for settings that never come.
-
-The tracked values were carried over: 15 GiB device pool, 4 GiB host headroom,
-5/10/300-second timings, priority 100, Windows account and executable path.
-The reviewed VM now has explicit total-RAM limits of 6–27 GiB. Its previous
-telemetry path remains the internal channel, so no optional output is enabled.
-
-For other deployments, keep copies of the old files before migration. Rename
-`host.toml` to `host_list.toml`, use `vm_name` instead of `name`, and rename
-`vm-settings.toml` to `<vm_name>_settings.toml` with the new field set. Create
-one `<vm_name>_settings.toml` per entry. Remove `global_settings` imports and
-move global values into the sibling `global-settings.toml`. Old manifests,
-inline VM/global configs and JSON administrator manifests are rejected with a
-migration error rather than silently accepted. Review custom policy tuning
-against the documented built-in defaults before replacing it. Custom service
-names, control paths or checkpoint locations require explicit state migration;
-do not discard pending requests, checkpoints or latches to get past validation.
-Windows deployment retains configuration/binary/registry backups and refuses
-an automatic upgrade from older wire schemas when their policy or channel
-settings differ from the generated settings.
-
-## Adding another VM
-
-Create its own `<vm_name>_settings.toml`, add its identity, alias and priority
-to `host_list.toml`, and pass one `--attestation VM=PATH` per VM to `host-deploy`.
-The installed attestation is `/etc/virtio-mem-host/<vm_name>.attestation.json`;
-retained state is `/var/lib/virtio-mem-host/state/<vm_name>-requests.json`.
-Deploy the Windows service separately for each guest. `pool_bytes` describes
-shared **device** RAM; the per-VM bounds describe total RAM.
+6. **Guest service.** Install it in the guest (below). It waits, saying so
+   in its log, until the controller has published its settings.
 
 ## Linux guests
 
-One controller manages Windows and Linux guests from the same host list. A
-VM's settings file selects the guest with `guest_os = "linux"`; omitted means
-Windows. A Linux settings file holds only `min_ram`, `max_ram`, `free_ram`,
-`guest_os` and `vm_name`: `install_path` and `service_account` are Windows
-settings and are rejected.
-[debian13_settings.toml](debian13_settings.toml) is the tracked example. It is
-not yet in `host_list.toml`, so the installed controller does not manage it.
+The guest service is `virtio-mem-guest`, run by systemd as an unprivileged
+dynamic user ([unit](../guest-linux/systemd/virtio-mem-guest.service)). It
+has no configuration file.
 
-The Linux guest runs `virtio-mem-guest` under systemd
-([unit](../../guest-linux/systemd/virtio-mem-guest.service)). It and the Windows
-service are one program on two platforms: the request protocol, worker,
-transports and service loop are the shared `virtio-mem-guest` crate, and each
-guest adds only its memory counters, pressure signal, clock and how it opens
-the control channel. It has no configuration file: the host publishes the VM's name, `min_ram`, `max_ram`
-and the policy derived from `free_ram` with every status, and the guest
-starts or restarts with them. Changing a Linux VM's settings on the host is
-all it takes.
-
-| Item | Linux guest |
+| Item | Location |
 |---|---|
-| Service identity on the wire | `virtio-mem-guest` |
-| Control channel | virtio-serial port `org.virtio-mem.control.0` |
+| Binary | `/usr/local/libexec/virtio-mem-guest` |
 | Durable request state | `/var/lib/virtio-mem-guest/control.json.request-state` |
 | Control files, without the channel | `/var/lib/virtio-mem-guest/control.json` and `control.json.host-status` |
 
-Add the control channel to the domain while the controller is stopped, then
-refresh the compatibility attestation before restarting it. Libvirt supplies
-the host socket; the host finds it in the domain XML and needs the `qemu`
-supplementary group to connect, as for the wake port.
+Install with the Debian package (`cargo xtask linux package`), or on a
+development VM with `cargo xtask linux deploy` ([tools](tools.md)).
 
-```xml
-<channel type='unix'>
-  <target type='virtio' name='org.virtio-mem.control.0'/>
-  <alias name='ua-virtiomem-control'/>
-</channel>
-```
+At start the service checks and logs its readiness: virtio-mem driver bound,
+pressure stall information and its trigger, how hot-plugged memory is
+onlined, the movable zone, swap and the commit model. The same report is
+published with each sample's diagnostics, so `metrics` records it.
 
-With the channel, the guest needs no guest agent and the host has no file
-access to the guest. Without it, the host reads and writes the control files
-through `qemu-guest-agent`, which must then run with file commands allowed
-(RHEL-family guests block them by default). The host uses whichever route
-the guest's publications arrive on, and the guest logs which one it uses at
-start.
+Memory onlining: the kernel guarantees removal only from the movable zone.
+Debian's default onlining (`online`, `contig-zones`) removed memory fully in
+measured runs, but if removals come back partial after long uptime, boot the
+guest with `memory_hotplug.online_policy=auto-movable`. Avoid
+`memhp_default_state=online_movable`: it confines the kernel's own memory to
+boot RAM however large the guest grows.
 
-Install the release binary and unit in the guest:
+How Linux memory is read:
+
+- Total and available are `MemTotal` and `MemAvailable`.
+- File cache the guest is re-reading from disk (`workingset_refault_file`)
+  counts as in use, so the guest grows until the re-reads stop and gives the
+  memory back a step at a time once they have. Cache can therefore take pool
+  memory up to `max_ram`.
+- Pressure comes from `/proc/pressure/memory`. A trigger (100 ms of stall in
+  1 s, or 200 ms in 2 s without `CAP_SYS_RESOURCE`) wakes the service and
+  asks for memory at once. Reclaim waits until the ten-second average is
+  zero.
+- Under strict overcommit (`vm.overcommit_memory=2` with a RAM-scaled limit)
+  the kernel's `CommitLimit` and `Committed_AS` are honoured. Otherwise the
+  commit reserve never asks for memory.
+
+The unit sets `OOMScoreAdjust=-900`: the service is what asks for more
+memory, so it must be among the last processes the kernel kills.
+
+## Windows guests
+
+The Windows service is `VirtioMemService`
+(`C:\Program Files\VirtioMemService\virtio-mem-service.exe`, running as
+LocalService). Its install configuration is
+`C:\ProgramData\VirtioMemService\config.json`; limits and policy come from
+the host as for Linux. Deploy it with `make windows-deploy` from a checkout
+whose `site/windows-build.mk` names the VM. Deployment gives LocalService
+access to the control channel's device instance
+(`\\.\Global\org.virtio-mem.control.0`) and checks that the service stays
+running. Without the port the service uses the control files through the
+guest agent.
+
+The Windows `viomem` driver has a removal defect. Until a fixed driver is
+deployed the controller applies two workarounds to Windows guests only:
+it widens the usable region and extends a stalled shrink step by step. A
+shrink that reaches its minimum and stops moving for the convergence
+timeout settles at what the guest kept.
+
+## Observing
 
 ```bash
-cargo xtask linux build
-# In the guest:
-install -D -m 0755 virtio-mem-guest /usr/local/libexec/virtio-mem-guest
-install -m 0644 virtio-mem-guest.service /etc/systemd/system/
-systemctl daemon-reload && systemctl enable --now virtio-mem-guest
+cargo xtask watch --config /etc/virtio-mem-host/host_list.toml
+cargo xtask metrics --config /etc/virtio-mem-host/host_list.toml
+virtio-mem-host status --config /etc/virtio-mem-host/host_list.toml --vm VM
 ```
 
-The service waits, logging that it is waiting, until the host has published
-its settings.
+The controller logs every decision to the journal
+(`journalctl -u virtio-mem-host@INSTANCE`). See [tools](tools.md) for the
+recorder's files and incident bundles.
 
-Linux memory is reported in the shared telemetry fields as follows.
+## Recovering
 
-- Physical total and available are `MemTotal` and `MemAvailable`.
-- Under strict overcommit (`vm.overcommit_memory=2` with a RAM-scaled limit)
-  the commit pair is the kernel's `CommitLimit` and `Committed_AS`, which it
-  enforces. Otherwise the commit limit is `MemTotal + SwapTotal` and the
-  commit total is that less `MemAvailable + SwapFree`; its headroom is never
-  below available RAM, so the commit reserve asks for nothing.
-- File cache the guest is re-reading from disk (the kernel's
-  `workingset_refault_file`) is reported as in use rather than available, so
-  the guest grows until the re-reads stop and gives that memory back a step
-  at a time once they have.
-- Native pressure comes from `/proc/pressure/memory`. A pressure trigger
-  (100 ms of stall in 1 s, or 200 ms in 2 s without `CAP_SYS_RESOURCE`) is
-  Low, an urgent growth trigger that wakes the service at once. Exactly zero
-  `some avg10` is High, the only state that permits reclaim; anything else
-  is Neutral. A kernel without pressure stall information reports nothing,
-  which allows growth and never reclaim.
-- The driver version field carries the kernel release, since the Linux
-  virtio-mem driver ships with its kernel.
+**A latched controller.** When a resize ends in a state the controller
+cannot prove safe, it latches (`actuation_latched` in the journal, `watch`
+and `metrics`) and stops resizing until an operator clears it. Install the
+current controller and attestation, then:
 
-The guest polls on the host's interval. A pressure trigger, or a status
-arriving on the control channel, wakes it early. Up to four consecutive
-failed polls are skipped with reclaim history reset, because
-host status and the guest's counters are not read atomically; the fifth ends
-the service and systemd restarts it. A retained request survives both.
+```bash
+deploy/scripts/recover-latch.sh INSTANCE "why it is safe to resume"
+```
 
-The host applies the Windows driver workarounds (usable-region widening and
-shrink extension) only to Windows guests. For a Linux guest a growth is held
-until the guest plugs it, and a removal that has not moved for the convergence
-timeout settles at what the guest returned and reports a partial result.
+It stops the unit, runs `virtio-mem-host clear-latch`, which first settles a
+stuck shrink at what the guest kept and records the reason in the state,
+and starts the unit again. `VIRTIO_MEM_HOST_BIN`, `VIRTIO_MEM_HOST_CONFIG`
+and `VIRTIO_MEM_CONNECT` override the installed paths and libvirt URI.
 
-### Windows guests on the control channel
+**A stopped controller.** The unit is fail-stop (`Restart=no`): a failure
+needs a person to look. Read `systemctl status` and the journal, fix the
+cause, then `systemctl start`. Durable state means a pending request is
+resumed, not lost.
 
-A Windows guest uses the same control channel as a Linux guest, the port
-`org.virtio-mem.control.0` (see [Linux guests](#linux-guests) for the domain
-XML). The service opens it as `\\.\Global\org.virtio-mem.control.0`.
-Windows deployment gives LocalService read/write access to that port's
-device instance only, backs up its previous security property and restarts
-the port if it changed; it does not alter the QEMU guest-agent port. Without
-the port the service uses the control files through the guest agent, as
-before.
+**A guest service restart or guest reboot.** The guest's one unresolved
+request is durable and is sent again unchanged until the host resolves it.
+Never delete request state to get past an error: the request must still
+receive its result.
 
-The separate wake port, `org.virtio-mem.wake.0`, is now needed only by
-Windows services built before the control channel; the host still answers
-it for them. A record on the control channel wakes the other side itself.
+**Attestation drift.** A resize refused with `live compatibility evidence
+drifted: FIELD` means the VM changed since it was attested. Check that the
+change was intended, attest again and install.
+
+**Startup memory.** A guest reboot keeps QEMU's live device size. Only a
+full shutdown and start applies the saved definition (`requested` zero).
+Do not clear request state to reduce RAM.
+
+## Upgrading
+
+Order: **controller first, then guest services.** A new controller serves
+every older guest; a new guest under an older controller may wait for
+settings that never come, and says so in its log.
+
+1. Stop nothing by hand: `install-host.sh` stops and restarts the unit.
+2. If the release notes say the attestation format changed, attest every
+   VM again first. Version 2 (2026-11-13) replaced `trusted_development_guest`
+   with `guest_os` in the review; update each review file accordingly.
+3. Install the controller.
+4. Upgrade each guest service (package or `make windows-deploy`).
+
+### Compatibility
+
+What each side reads and sends is versioned, and each rule is enforced by
+the protocol.
+
+| Guest | Publishes | Needs a controller that | Under an older controller |
+|---|---|---|---|
+| Windows, before 2026-11-13 | version 4 or 5, control files, own `config.json` | reads versions 4–6 (all current) | — |
+| Linux or Windows, control files | version 6 | publishes settings with its status | waits for settings, logs that it is waiting |
+| Linux or Windows, control channel | version 6 | answers on the control channel | after 30 s without settings on the channel, uses the control files if a fresh status with settings is there (the older controller writes it through the guest agent, which must allow file commands); otherwise keeps waiting |
+
+The controller sends settings only to a guest whose last publication is
+version 6 or that has published nothing yet, so a guest built before
+settings were published keeps its own configuration. It answers a guest on
+whichever route the guest's publications arrive on, and sends every status
+over a connected control channel, so a guest waiting there for its first
+settings receives them.
+
+| File | Version | Read by |
+|---|---|---|
+| Compatibility attestation | 2 | Controller and `host-deploy`; version 1 is refused with a message to attest again |
+| Host status, memory request | 1 | Both sides |
+| Guest publication | 6 (reads 4–6) | Controller and tools |
+| Windows `config.json` | schema 9 | Windows service |

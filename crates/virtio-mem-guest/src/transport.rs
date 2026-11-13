@@ -34,6 +34,12 @@ pub trait Transport: std::fmt::Debug {
         false
     }
 
+    /// True for the control channel, which a host built before it never
+    /// answers on.
+    fn is_channel(&self) -> bool {
+        false
+    }
+
     fn describe(&self) -> String;
 }
 
@@ -163,6 +169,10 @@ impl<S: Read + Write + std::fmt::Debug> Transport for StreamTransport<S> {
     fn status_arrived(&mut self) -> bool {
         self.receive();
         self.arrived
+    }
+
+    fn is_channel(&self) -> bool {
+        true
     }
 
     fn describe(&self) -> String {

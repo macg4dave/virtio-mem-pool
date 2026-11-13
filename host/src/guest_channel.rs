@@ -231,11 +231,13 @@ impl<Q: GuestFileReader + GuestFileWriter, T: UnixClock> GuestLink for GuestChan
         Ok(envelope)
     }
 
-    /// Over the control channel every status is sent: it costs nothing and
-    /// keeps the guest's view fresh. To the files, only a semantic change or
-    /// a refresh before the guest would consider the last status stale is
-    /// written: every write is a guest-agent round trip that can collide
-    /// with the guest's own file access.
+    /// Every status goes over a connected control channel: it costs nothing,
+    /// keeps the guest's view fresh, and is how a guest on the channel gets
+    /// its first settings, before it has published anything. The files are
+    /// written too unless the guest's publications arrive on the channel,
+    /// and then only for a semantic change or a refresh before the guest
+    /// would consider the last status stale: every write is a guest-agent
+    /// round trip that can collide with the guest's own file access.
     fn publish_status(&self, status: &HostMemoryStatus) -> Result<(), String> {
         let mut bytes = serde_json::to_vec(status)
             .map_err(|error| format!("encode host memory status: {error}"))?;
@@ -244,10 +246,14 @@ impl<Q: GuestFileReader + GuestFileWriter, T: UnixClock> GuestLink for GuestChan
             return Err("host memory status exceeds its byte limit".to_owned());
         }
         #[cfg(unix)]
-        if let Some(control) = self.control.as_ref().filter(|_| self.via_control.get()) {
-            control.send(&bytes);
-            *self.last_status.borrow_mut() = Some(status.clone());
-            return Ok(());
+        if let Some(control) = &self.control {
+            if control.connected() {
+                control.send(&bytes);
+            }
+            if self.via_control.get() {
+                *self.last_status.borrow_mut() = Some(status.clone());
+                return Ok(());
+            }
         }
         let changed = self.last_status.borrow().as_ref().is_none_or(|last| {
             last.requested_bytes != status.requested_bytes
@@ -554,6 +560,29 @@ mod tests {
             0,
             "nothing on the channel yet: the files are read"
         );
+        // A guest that has published nothing yet waits for its settings on
+        // the channel, so the status goes there as well as to the files.
+        let first = HostMemoryStatus {
+            version: MEMORY_REQUEST_VERSION,
+            vm_name: "guest".to_owned(),
+            service_name: "VirtioMemService".to_owned(),
+            device_alias: "memory0".to_owned(),
+            observed_unix_millis: 999_000,
+            device_size_bytes: 8 << 30,
+            block_size_bytes: 2 << 20,
+            requested_bytes: 0,
+            current_bytes: 0,
+            result: None,
+            guest_settings: None,
+        };
+        channel.publish_status(&first).unwrap();
+        let mut expected_first = serde_json::to_vec(&first).unwrap();
+        expected_first.push(b'\n');
+        let mut received_first = vec![0; expected_first.len()];
+        guest.read_exact(&mut received_first).unwrap();
+        assert_eq!(received_first, expected_first);
+        assert_eq!(channel.files.written.lock().unwrap().len(), 1);
+        channel.files.written.lock().unwrap().clear();
         let latest = envelope("session-a", 995_000, 1);
         guest.write_all(line(&latest).as_bytes()).unwrap();
         assert_eq!(channel.read(), Ok(latest));
@@ -587,7 +616,11 @@ mod tests {
             .write_all(line(&envelope("session-a", 100_000, 2)).as_bytes())
             .unwrap();
         assert_eq!(channel.read().unwrap().sequence, 0);
-        channel.publish_status(&status).unwrap();
+        let moved = HostMemoryStatus {
+            requested_bytes: 2 << 20,
+            ..status
+        };
+        channel.publish_status(&moved).unwrap();
         assert_eq!(channel.files.written.lock().unwrap().len(), 1);
     }
 

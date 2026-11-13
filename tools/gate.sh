@@ -71,4 +71,16 @@ echo "==> gate on $host"
   export CARGO_TARGET_DIR='$remote_dir/target'
   . \"\$HOME/.cargo/env\" 2>/dev/null || true
   cargo run --quiet --locked -p virtio-mem-xtask -- gate checks"
+
+# On a Windows workstation the Windows guest builds natively too. This is
+# not the native gate on a Windows VM (cargo xtask windows all), which also
+# runs the release build that gets deployed.
+case $(uname -s) in
+  MINGW* | MSYS* | CYGWIN*)
+    windows=(-p virtio-mem-core -p virtio-mem-guest -p virtio-mem-guest-windows)
+    echo "==> Windows guest: tests and Clippy here"
+    cargo test "${windows[@]}" --locked --quiet
+    cargo clippy "${windows[@]}" --all-targets --locked --quiet -- -D warnings
+    ;;
+esac
 echo "==> gate passed for tree ${tree:0:12}"

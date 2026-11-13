@@ -1,6 +1,7 @@
 mod attestation;
 mod build_identity;
 mod controller_status;
+mod debian;
 mod host_deploy;
 mod host_run;
 mod linux;
@@ -26,6 +27,7 @@ Usage:
   cargo xtask host-run --config PATH --max-run-seconds N [OPTIONS]
   cargo xtask preflight VM_NAME ALIAS [OPTIONS]
   cargo xtask linux build
+  cargo xtask linux package --output DIRECTORY
   cargo xtask linux deploy SSH_DESTINATION --output PATH [--apply]
   cargo xtask linux status SSH_DESTINATION
   cargo xtask linux uninstall SSH_DESTINATION --output PATH [--apply] [--discard-state]
@@ -87,14 +89,17 @@ No-actuation preflight options:
   --apply-service-restart       Restart only the named Windows service.
 
 Qualification commands:
-  start VM ALIAS --ssh-target TARGET --mode resident|committed [--apply] [OPTIONS]
+  start VM ALIAS --ssh-target TARGET --mode resident|committed|file-cache [--apply] [OPTIONS]
   status RUN_ID [--output-root PATH]
   review RUN_ID [--output-root PATH]
 
 Qualification options:
   --apply                    Start the workload; otherwise validate only.
   --elevate                  Use one sudo boundary for controller and libvirt observation.
-  --mode MODE                Required resident or committed workload behavior.
+  --mode MODE                Required resident or committed workload behavior;
+                             file-cache (Linux) keeps files' page cache in use.
+  --guest-os windows|linux   The guest's operating system; default windows.
+  --cache-dir PATH           Guest directory for the file-cache workload.
   --peak-bytes N             Required peak allocation.
   --retained-bytes N         Required allocation retained between peaks.
   --max-allocation-bytes N   Required independent workload safety cap.
@@ -112,12 +117,13 @@ Qualification options:
   --expect-no-resize          Require observe-only mode and unchanged requested/current allocation.
   --expect-no-reclaim         Require growth without any lower requested target; replaces --expect-reclaim-bytes.
   --require-renewed-during-pending-shrink Require an observed pending shrink before renewed pressure.
-  --remote-workload PATH     Required Windows workload executable path.
+  --remote-workload PATH     Required workload executable path in the guest.
   --controller-unit UNIT     Required virtio-mem-host@INSTANCE unit whose config holds VM.
-  --guest-service NAME       Required Windows service identity.
-  --apply-service-restart    Restart the named service after the controller is active.
+  --guest-service NAME       Required guest service identity on the wire.
+  --apply-service-restart    Restart the named Windows service after the controller is active.
   --guest-service-cycle-timeout-seconds N Required bound for that explicit restart.
-  --telemetry-path PATH      Required protected Windows telemetry path read through QGA.
+  --telemetry-path PATH      Required guest control publication path (read from the
+                             controller's copy, else through QGA).
   --telemetry-max-age-seconds N Required telemetry freshness bound.
   --telemetry-future-tolerance-seconds N Required future-clock tolerance.
   --connect URI              Libvirt URI; default qemu:///system.

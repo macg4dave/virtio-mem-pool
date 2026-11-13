@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use virtio_mem_core::settings::GuestOs;
 use virtio_mem_core::{parse_virtio_mem_xml_for_alias, RawTelemetryEnvelope};
 use virtio_mem_host::config::HostConfig;
 use virtio_mem_host::guest_channel::PublicationCopyFirst;
@@ -28,6 +29,9 @@ const CONTROLLER_GUARD_ROOT: &str = "/run/virtio-mem-qualification";
 enum WorkloadMode {
     Committed,
     Resident,
+    /// Linux only: files read through repeatedly, so page cache is the
+    /// working set.
+    FileCache,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -39,6 +43,9 @@ struct Config {
     ssh_target: String,
     connect_uri: String,
     controller_unit: String,
+    /// Runs before Linux support name no guest and were Windows.
+    #[serde(default)]
+    guest_os: GuestOs,
     guest_service: String,
     #[serde(default)]
     apply_service_restart: bool,
@@ -49,6 +56,9 @@ struct Config {
     telemetry_max_age_seconds: u64,
     telemetry_future_tolerance_seconds: u64,
     mode: WorkloadMode,
+    /// Where the file-cache workload writes its files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cache_dir: Option<String>,
     peak_bytes: u64,
     retained_bytes: u64,
     max_allocation_bytes: u64,
@@ -127,7 +137,8 @@ struct PrivilegedSample {
     block_size_bytes: u64,
     host_mem_available_bytes: Option<u64>,
     guest_dommemstat_kib: serde_json::Map<String, Value>,
-    windows_raw_telemetry: RawTelemetryEnvelope,
+    #[serde(alias = "windows_raw_telemetry")]
+    guest_raw_telemetry: RawTelemetryEnvelope,
     qga_reply: String,
 }
 
@@ -196,6 +207,8 @@ fn parse_start(args: &[String], repo: &Path) -> Result<StartOptions, String> {
     let vm_name = scope(&args[0], "VM_NAME")?;
     let device_alias = identifier(&args[1], "ALIAS")?;
     let mut ssh_target = None;
+    let mut guest_os = GuestOs::Windows;
+    let mut cache_dir = None;
     let mut mode = None;
     let mut peak_bytes = None;
     let mut retained_bytes = None;
@@ -236,9 +249,18 @@ fn parse_start(args: &[String], repo: &Path) -> Result<StartOptions, String> {
                 mode = Some(match value(args, &mut index, "--mode")?.as_str() {
                     "resident" => WorkloadMode::Resident,
                     "committed" => WorkloadMode::Committed,
-                    _ => return Err("--mode must be resident or committed".to_owned()),
+                    "file-cache" => WorkloadMode::FileCache,
+                    _ => return Err("--mode must be resident, committed or file-cache".to_owned()),
                 })
             }
+            "--guest-os" => {
+                guest_os = match value(args, &mut index, "--guest-os")?.as_str() {
+                    "windows" => GuestOs::Windows,
+                    "linux" => GuestOs::Linux,
+                    _ => return Err("--guest-os must be windows or linux".to_owned()),
+                }
+            }
+            "--cache-dir" => cache_dir = Some(value(args, &mut index, "--cache-dir")?),
             "--peak-bytes" => peak_bytes = Some(number(args, &mut index, "--peak-bytes")?),
             "--retained-bytes" => {
                 retained_bytes = Some(number(args, &mut index, "--retained-bytes")?)
@@ -382,18 +404,45 @@ fn parse_start(args: &[String], repo: &Path) -> Result<StartOptions, String> {
         telemetry_future_tolerance_seconds,
         "--telemetry-future-tolerance-seconds",
     )?;
-    if remote_workload.is_empty()
-        || remote_workload.chars().any(char::is_control)
-        || remote_workload.chars().any(|c| "&|<>^%!\"".contains(c))
-    {
-        return Err("--remote-workload contains characters unsafe for cmd.exe".to_owned());
+    match guest_os {
+        GuestOs::Windows => {
+            if remote_workload.is_empty()
+                || remote_workload.chars().any(char::is_control)
+                || remote_workload.chars().any(|c| "&|<>^%!\"".contains(c))
+            {
+                return Err("--remote-workload contains characters unsafe for cmd.exe".to_owned());
+            }
+            virtio_mem_core::windows_service_config::normalize_windows_path(&telemetry_path)?;
+            if mode == WorkloadMode::FileCache || cache_dir.is_some() {
+                return Err("the file-cache workload is for Linux guests".to_owned());
+            }
+        }
+        GuestOs::Linux => {
+            for (option, path) in [
+                ("--remote-workload", Some(&remote_workload)),
+                ("--telemetry-path", Some(&telemetry_path)),
+                ("--cache-dir", cache_dir.as_ref()),
+            ] {
+                if let Some(path) = path {
+                    posix_path(path, option)?;
+                }
+            }
+            if (mode == WorkloadMode::FileCache) != cache_dir.is_some() {
+                return Err("--mode file-cache and --cache-dir go together".to_owned());
+            }
+            if apply_service_restart {
+                return Err(
+                    "--apply-service-restart restarts a Windows service; it is not available for Linux guests"
+                        .to_owned(),
+                );
+            }
+        }
     }
     scope(&connect_uri, "--connect")?;
     identifier(&controller_unit, "--controller-unit")?;
     identifier(&guest_service, "--guest-service")?;
     // The unit may run a shared config; the running config must contain the VM.
     crate::host_deploy::controller_instance(&controller_unit)?;
-    virtio_mem_core::windows_service_config::normalize_windows_path(&telemetry_path)?;
     if max_allocation_bytes == 0
         || peak_bytes == 0
         || peak_bytes > max_allocation_bytes
@@ -483,6 +532,7 @@ fn parse_start(args: &[String], repo: &Path) -> Result<StartOptions, String> {
             ssh_target,
             connect_uri,
             controller_unit,
+            guest_os,
             guest_service,
             apply_service_restart,
             guest_service_cycle_timeout_seconds,
@@ -491,6 +541,7 @@ fn parse_start(args: &[String], repo: &Path) -> Result<StartOptions, String> {
             telemetry_max_age_seconds,
             telemetry_future_tolerance_seconds,
             mode,
+            cache_dir,
             peak_bytes,
             retained_bytes,
             max_allocation_bytes,
@@ -1207,7 +1258,7 @@ fn sample_host(
     }
     let now = now_millis()?;
     sample
-        .windows_raw_telemetry
+        .guest_raw_telemetry
         .validate_for(
             &config.vm_name,
             &config.guest_service,
@@ -1215,8 +1266,8 @@ fn sample_host(
             seconds_millis(config.telemetry_max_age_seconds)?,
             seconds_millis(config.telemetry_future_tolerance_seconds)?,
         )
-        .map_err(|error| format!("configured Windows telemetry failed validation: {error}"))?;
-    let evidence = json!({"version": SCHEMA_VERSION, "run_id": config.run_id, "unix_millis": sample.unix_millis, "workload_phase": phase, "vm_state": sample.vm_state.trim(), "requested_bytes": sample.requested_bytes, "current_bytes": sample.current_bytes, "device_size_bytes": sample.device_size_bytes, "block_size_bytes": sample.block_size_bytes, "host_mem_available_bytes": sample.host_mem_available_bytes, "guest_dommemstat_kib": sample.guest_dommemstat_kib, "windows_raw_telemetry": sample.windows_raw_telemetry});
+        .map_err(|error| format!("guest publication failed validation: {error}"))?;
+    let evidence = json!({"version": SCHEMA_VERSION, "run_id": config.run_id, "unix_millis": sample.unix_millis, "workload_phase": phase, "vm_state": sample.vm_state.trim(), "requested_bytes": sample.requested_bytes, "current_bytes": sample.current_bytes, "device_size_bytes": sample.device_size_bytes, "block_size_bytes": sample.block_size_bytes, "host_mem_available_bytes": sample.host_mem_available_bytes, "guest_dommemstat_kib": sample.guest_dommemstat_kib, "guest_raw_telemetry": sample.guest_raw_telemetry});
     append_json(&run_dir.join("host-metrics.jsonl"), &evidence)?;
     if let Some(previous) = observations.last_requested {
         if previous != sample.requested_bytes {
@@ -1274,8 +1325,8 @@ fn sample_host(
         phase: phase.to_owned(),
         requested_bytes: sample.requested_bytes,
         current_bytes: sample.current_bytes,
-        telemetry_session_id: sample.windows_raw_telemetry.session_id.clone(),
-        telemetry_sequence: sample.windows_raw_telemetry.sequence,
+        telemetry_session_id: sample.guest_raw_telemetry.session_id.clone(),
+        telemetry_sequence: sample.guest_raw_telemetry.sequence,
     });
     Ok(())
 }
@@ -1319,6 +1370,60 @@ fn preflight_guest_health(
 }
 
 fn remote_guest_health(config: &Config, repo: &Path, stage: &str) -> Result<Value, String> {
+    match config.guest_os {
+        GuestOs::Windows => remote_windows_health(config, repo, stage),
+        GuestOs::Linux => remote_linux_health(config, repo, stage),
+    }
+}
+
+/// The guest service runs, no package manager is changing the guest and no
+/// reboot is pending.
+fn remote_linux_health(config: &Config, repo: &Path, stage: &str) -> Result<Value, String> {
+    let report = remote_text(config, repo, &linux_health_script(&config.guest_service))?;
+    let facts = key_values(&report);
+    let fact = |key: &str| facts.get(key).map_or("", String::as_str);
+    if fact("service") != "active" {
+        return Err(format!(
+            "guest service {} is {:?}, not active",
+            config.guest_service,
+            fact("service")
+        ));
+    }
+    if fact("package_manager") != "idle" {
+        return Err(
+            "a package manager is running in the guest; refusing to overlap qualification"
+                .to_owned(),
+        );
+    }
+    if fact("reboot_required") != "no" {
+        return Err("the guest has a pending reboot (/run/reboot-required)".to_owned());
+    }
+    Ok(json!({
+        "stage": stage,
+        "guest_service": config.guest_service,
+        "authenticated_guest_command": true,
+        "installer_running": false,
+        "pending_reboot": false,
+    }))
+}
+
+/// `key=value` lines; anything else is ignored.
+fn key_values(text: &str) -> std::collections::BTreeMap<String, String> {
+    text.lines()
+        .filter_map(|line| line.split_once('='))
+        .map(|(key, value)| (key.trim().to_owned(), value.trim().to_owned()))
+        .collect()
+}
+
+fn linux_health_script(service: &str) -> String {
+    format!(
+        "printf 'service=%s\\n' \"$(systemctl is-active {service} 2>/dev/null)\"; \
+         if pgrep -x 'apt|apt-get|dpkg|unattended-upgr' >/dev/null; then echo package_manager=busy; else echo package_manager=idle; fi; \
+         if [ -e /run/reboot-required ]; then echo reboot_required=yes; else echo reboot_required=no; fi"
+    )
+}
+
+fn remote_windows_health(config: &Config, repo: &Path, stage: &str) -> Result<Value, String> {
     let service = remote_text(config, repo, &format!("sc query {}", config.guest_service))?;
     if !service.contains("RUNNING") {
         return Err(format!(
@@ -1527,8 +1632,33 @@ fn workload_command(config: &Config) -> String {
     let mode = match config.mode {
         WorkloadMode::Committed => "committed",
         WorkloadMode::Resident => "resident",
+        WorkloadMode::FileCache => "file-cache",
     };
-    format!("\"{}\" --workload-id {} --mode {mode} --peak-bytes {} --retained-bytes {} --max-allocation-bytes {} --peak-hold-seconds {} --settled-hold-seconds {} --renewed-hold-seconds {} --refresh-interval-seconds {}", config.remote_workload, config.run_id, config.peak_bytes, config.retained_bytes, config.max_allocation_bytes, config.peak_hold_seconds, config.settled_hold_seconds, config.renewed_hold_seconds, config.resident_refresh_seconds)
+    // Windows runs it under cmd.exe, Linux under sh; both paths were checked
+    // for characters either shell would interpret.
+    let program = match config.guest_os {
+        GuestOs::Windows => format!("\"{}\"", config.remote_workload),
+        GuestOs::Linux => format!("'{}'", config.remote_workload),
+    };
+    let mut command = format!("{program} --workload-id {} --mode {mode} --peak-bytes {} --retained-bytes {} --max-allocation-bytes {} --peak-hold-seconds {} --settled-hold-seconds {} --renewed-hold-seconds {} --refresh-interval-seconds {}", config.run_id, config.peak_bytes, config.retained_bytes, config.max_allocation_bytes, config.peak_hold_seconds, config.settled_hold_seconds, config.renewed_hold_seconds, config.resident_refresh_seconds);
+    if let Some(directory) = &config.cache_dir {
+        command.push_str(&format!(" --cache-dir '{directory}'"));
+    }
+    command
+}
+
+/// An absolute guest path a POSIX shell takes literally inside single quotes.
+fn posix_path(path: &str, option: &str) -> Result<(), String> {
+    if !path.starts_with('/')
+        || path.chars().any(char::is_control)
+        || path.contains(['\'', '\\'])
+        || path.split('/').any(|part| part == "..")
+    {
+        return Err(format!(
+            "{option} must be an absolute guest path without quotes or .."
+        ));
+    }
+    Ok(())
 }
 
 fn archive_controller_log(config: &Config, run_dir: &Path, repo: &Path) {
@@ -1702,7 +1832,7 @@ fn capture_live_state_direct(
 fn capture_privileged_sample(config: &Config, repo: &Path) -> Result<PrivilegedSample, String> {
     let live = capture_live_state_direct(config, repo, "privileged_sample")?;
     let dommemstat = virsh(config, repo, &["dommemstat", &config.vm_name])?;
-    let qga_reply = virsh(
+    let ping = virsh(
         config,
         repo,
         &[
@@ -1710,7 +1840,14 @@ fn capture_privileged_sample(config: &Config, repo: &Path) -> Result<PrivilegedS
             &config.vm_name,
             r#"{"execute":"guest-ping"}"#,
         ],
-    )?;
+    );
+    // A Windows guest is reached through its agent; a Linux guest on the
+    // control channel needs none, so its absence is recorded, not fatal.
+    let qga_reply = match (ping, config.guest_os) {
+        (Ok(reply), _) => reply,
+        (Err(error), GuestOs::Linux) => format!("unavailable: {error}"),
+        (Err(error), GuestOs::Windows) => return Err(error),
+    };
     let reader = PublicationCopyFirst::new(
         &config.vm_name,
         VirshGuestFiles::new(
@@ -1729,9 +1866,9 @@ fn capture_privileged_sample(config: &Config, repo: &Path) -> Result<PrivilegedS
     let contents = String::from_utf8(bytes)
         .map_err(|error| format!("QGA raw telemetry is not valid UTF-8: {error}"))?;
     let line = last_complete_record(&contents)
-        .ok_or_else(|| "configured Windows telemetry has no complete record".to_owned())?;
-    let windows_raw_telemetry: RawTelemetryEnvelope = serde_json::from_str(line)
-        .map_err(|error| format!("configured Windows telemetry is invalid JSON: {error}"))?;
+        .ok_or_else(|| "the guest publication has no complete record".to_owned())?;
+    let guest_raw_telemetry: RawTelemetryEnvelope = serde_json::from_str(line)
+        .map_err(|error| format!("the guest publication is invalid JSON: {error}"))?;
     Ok(PrivilegedSample {
         version: SCHEMA_VERSION,
         run_id: config.run_id.clone(),
@@ -1744,7 +1881,7 @@ fn capture_privileged_sample(config: &Config, repo: &Path) -> Result<PrivilegedS
         block_size_bytes: live.block_size_bytes,
         host_mem_available_bytes: live.host_mem_available_bytes,
         guest_dommemstat_kib: whitespace_pairs(&dommemstat),
-        windows_raw_telemetry,
+        guest_raw_telemetry,
         qga_reply: qga_reply.trim().to_owned(),
     })
 }
@@ -2383,6 +2520,86 @@ mod tests {
             .expect("telemetry path");
         arguments[telemetry + 1] = "/run/telemetry.jsonl".to_owned();
         assert!(parse_start(&arguments, Path::new("/repo")).is_err());
+    }
+
+    fn linux_start_arguments() -> Vec<String> {
+        let mut arguments = valid_start_arguments();
+        for (option, value) in [
+            ("--remote-workload", "/usr/local/bin/virtio-mem-workload"),
+            ("--guest-service", "virtio-mem-guest"),
+            ("--telemetry-path", "/var/lib/virtio-mem-guest/control.json"),
+        ] {
+            let position = arguments.iter().position(|item| item == option).unwrap();
+            arguments[position + 1] = value.to_owned();
+        }
+        arguments.extend(strings(&["--guest-os", "linux"]));
+        arguments
+    }
+
+    #[test]
+    fn a_linux_guest_runs_the_linux_workload_under_sh() {
+        let options = parse_start(&linux_start_arguments(), Path::new("/repo")).expect("linux");
+        assert_eq!(options.config.guest_os, GuestOs::Linux);
+        let command = workload_command(&options.config);
+        assert!(command.starts_with("'/usr/local/bin/virtio-mem-workload' --workload-id "));
+        assert!(!command.contains("--cache-dir"));
+
+        let mut cache = linux_start_arguments();
+        let mode = cache.iter().position(|item| item == "--mode").unwrap();
+        cache[mode + 1] = "file-cache".to_owned();
+        assert!(parse_start(&cache, Path::new("/repo"))
+            .unwrap_err()
+            .contains("--cache-dir"));
+        cache.extend(strings(&["--cache-dir", "/var/tmp/qualification-cache"]));
+        let options = parse_start(&cache, Path::new("/repo")).expect("file cache");
+        let command = workload_command(&options.config);
+        assert!(command.contains(" --mode file-cache "));
+        assert!(command.ends_with(" --cache-dir '/var/tmp/qualification-cache'"));
+
+        for (option, unsafe_value) in [
+            ("--remote-workload", "/usr/bin/x'; reboot; '"),
+            ("--telemetry-path", "relative/control.json"),
+            ("--remote-workload", "/usr/../bin/x"),
+        ] {
+            let mut arguments = linux_start_arguments();
+            let position = arguments.iter().position(|item| item == option).unwrap();
+            arguments[position + 1] = unsafe_value.to_owned();
+            assert!(
+                parse_start(&arguments, Path::new("/repo")).is_err(),
+                "{unsafe_value}"
+            );
+        }
+        let mut windows_cache = valid_start_arguments();
+        windows_cache.extend(strings(&["--cache-dir", "/tmp/x"]));
+        assert!(parse_start(&windows_cache, Path::new("/repo")).is_err());
+        let mut restart = linux_start_arguments();
+        restart.extend(strings(&[
+            "--apply-service-restart",
+            "--guest-service-cycle-timeout-seconds",
+            "30",
+        ]));
+        assert!(parse_start(&restart, Path::new("/repo")).is_err());
+    }
+
+    #[test]
+    fn linux_health_reads_service_package_manager_and_reboot_state() {
+        let script = linux_health_script("virtio-mem-guest");
+        assert!(script.contains("systemctl is-active virtio-mem-guest"));
+        let facts = key_values("service=active\npackage_manager=idle\nreboot_required=no\nnoise\n");
+        assert_eq!(facts["service"], "active");
+        assert_eq!(facts.len(), 3);
+    }
+
+    #[test]
+    fn a_run_recorded_before_linux_support_reads_as_windows() {
+        let mut config = parse_start(&valid_start_arguments(), Path::new("/repo"))
+            .expect("windows")
+            .config;
+        config.cache_dir = None;
+        let mut value = serde_json::to_value(&config).unwrap();
+        value.as_object_mut().unwrap().remove("guest_os");
+        let old: Config = serde_json::from_value(value).unwrap();
+        assert_eq!(old.guest_os, GuestOs::Windows);
     }
 
     #[test]
