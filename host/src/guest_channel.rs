@@ -223,7 +223,8 @@ impl<Q: GuestFileReader, T: UnixClock> GuestChannel<Q, T> {
             .map_err(|error| {
                 if waiting_on_channel {
                     format!(
-                        "no current guest publication on the control channel, and the control                          files are unavailable: {error}"
+                        "no current guest publication on the control channel, and the \
+                         control files are unavailable: {error}"
                     )
                 } else {
                     format!("guest publication unavailable: {error}")
