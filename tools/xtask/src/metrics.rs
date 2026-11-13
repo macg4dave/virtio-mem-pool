@@ -1,6 +1,6 @@
 //! `cargo xtask metrics`: a read-only recorder for stress tests of one
 //! virtio-mem guest. Each sample appends a row to `samples.csv` (host RAM,
-//! QEMU RSS, the device, Windows' own view read over the guest agent); new
+//! QEMU RSS, the device, the guest's own view read over the guest agent); new
 //! controller journal entries go to `events.jsonl`; `summary.json` keeps
 //! running minima, maxima, request latencies and event counts, and is
 //! rewritten every minute and at exit, so a killed run still leaves one.
@@ -1702,6 +1702,7 @@ mod tests {
 vm_name='{name}'
 min_ram='4GB'
 max_ram='16GB'
+free_ram='2GB'
 install_path='C:\Program Files\VirtioMemService\virtio-mem-service.exe'
 service_account='NT AUTHORITY\LocalService'
 "#

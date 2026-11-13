@@ -2,6 +2,7 @@
 //! agent writes beside the publication, applies the core guest policy, and
 //! keeps the one unresolved request durable before it is ever published.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use virtio_mem_core::demand::GuestDiagnostics;
@@ -105,7 +106,11 @@ impl GuestRequests {
         Ok(decision.request)
     }
 
-    pub fn diagnostics(&self, boot_uptime_millis: Option<u64>) -> GuestDiagnostics {
+    pub fn diagnostics(
+        &self,
+        boot_uptime_millis: Option<u64>,
+        environment: BTreeMap<String, String>,
+    ) -> GuestDiagnostics {
         GuestDiagnostics {
             build_id: crate::BUILD_ID.to_owned(),
             boot_uptime_millis,
@@ -113,6 +118,7 @@ impl GuestRequests {
             policy: self.requester.diagnostics().clone(),
             last_consumed_result: self.last_consumed_result.clone(),
             result_consumed_unix_millis: self.result_consumed_unix_millis,
+            environment,
         }
     }
 

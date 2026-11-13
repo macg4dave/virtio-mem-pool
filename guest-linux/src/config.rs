@@ -32,9 +32,10 @@ mod tests {
         let path = directory.join("config.json");
         assert!(load(&path).unwrap_err().contains("required"));
 
-        let vm: VmSettings =
-            toml::from_str("min_ram='2GB'\nmax_ram='5GB'\nguest_os='linux'\nvm_name='debian'")
-                .unwrap();
+        let vm: VmSettings = toml::from_str(
+            "min_ram='2GB'\nmax_ram='5GB'\nfree_ram='512MB'\nguest_os='linux'\nvm_name='debian'",
+        )
+        .unwrap();
         let generated = vm.linux_service_config(&GlobalSettings::default()).unwrap();
         std::fs::write(&path, serde_json::to_vec(&generated).unwrap()).unwrap();
         assert_eq!(load(&path).unwrap(), generated);

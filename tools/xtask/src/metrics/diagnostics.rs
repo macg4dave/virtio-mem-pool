@@ -202,7 +202,7 @@ impl Diagnostics {
                             guest.session_id != *session && uptime < *previous
                         })
                     {
-                        observed.event(now, "metrics_guest_reboot_detected", &[("uptime_ms", uptime.to_string())], "Windows boot uptime decreased; this is distinct from a service session change".to_owned());
+                        observed.event(now, "metrics_guest_reboot_detected", &[("uptime_ms", uptime.to_string())], "guest boot uptime decreased; this is distinct from a service session change".to_owned());
                     }
                     self.last_uptime = Some((guest.session_id.clone(), uptime));
                 }
@@ -377,6 +377,7 @@ mod tests {
         guest.diagnostics = Some(GuestDiagnostics {
             build_id: "test-build".to_owned(),
             driver_file_version: Ok("1.2.3.4".to_owned()),
+            environment: std::collections::BTreeMap::new(),
             boot_uptime_millis: Some(uptime),
             policy: Default::default(),
             last_consumed_result: None,

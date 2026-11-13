@@ -26,6 +26,7 @@ Usage:
   cargo xtask host-run --config PATH --max-run-seconds N [OPTIONS]
   cargo xtask preflight VM_NAME ALIAS [OPTIONS]
   cargo xtask linux config VM_SETTINGS
+  cargo xtask linux build
   cargo xtask windows <check|sync|build|test|lint|fetch|all>
   cargo xtask windows deploy MANIFEST --output PATH [--apply]
   cargo xtask windows service-cycle SERVICE --output PATH [--apply]

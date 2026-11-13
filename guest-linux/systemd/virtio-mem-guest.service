@@ -19,6 +19,11 @@ DynamicUser=yes
 StateDirectory=virtio-mem-guest
 StateDirectoryMode=0755
 UMask=0022
+# The kernel serves memory-pressure triggers with windows shorter than two
+# seconds only to a process holding CAP_SYS_RESOURCE. Without it the service
+# still runs, on two-second windows. It holds no other capability.
+AmbientCapabilities=CAP_SYS_RESOURCE
+CapabilityBoundingSet=CAP_SYS_RESOURCE
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true

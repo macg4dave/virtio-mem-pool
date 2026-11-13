@@ -6,6 +6,11 @@
 min_ram = "6GB"
 max_ram = "27GB"
 
+# Memory the guest keeps free above what it is using. It asks the host for
+# more when free memory falls below this and returns memory when it has more
+# than this spare. Use a multiple of eight device blocks (512 MiB here).
+free_ram = "2GB"
+
 # This identity must match host_list.toml and the libvirt domain name. Filenames
 # are exactly <vm_name>_settings.toml; names use lower-case ASCII, digits, - or _.
 vm_name = "win11_gpu"

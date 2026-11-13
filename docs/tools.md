@@ -26,3 +26,9 @@ cargo xtask linux config deploy/config_files/debian13_settings.toml
 
 Prints the Linux guest service configuration generated from a VM settings file
 and its sibling global settings. See [Linux guests](../deploy/config_files/README.md#linux-guests).
+
+cargo xtask linux build
+
+Release-builds the Linux guest service with the checkout's build identity
+(`<commit>` or `<commit>-dirty.<source digest>`) compiled in, and checks that
+the binary reports it.

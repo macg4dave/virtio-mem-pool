@@ -71,7 +71,7 @@ mod tests {
             service_name: GuestOs::Linux.service_name().to_owned(),
             control_path: GuestOs::Linux.control_path().to_owned(),
             poll_interval_millis: 1000,
-            policy: GlobalSettings::default().guest_policy(),
+            policy: GlobalSettings::default().guest_policy(1 << 29, 5 << 30),
             min_ram: 2 << 30,
             max_ram: 5 << 30,
         }

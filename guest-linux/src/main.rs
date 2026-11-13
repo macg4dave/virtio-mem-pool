@@ -8,6 +8,7 @@ use signal_hook::consts::signal::{SIGINT, SIGTERM};
 use virtio_mem_guest_linux::config::{self, DEFAULT_CONFIG_PATH};
 use virtio_mem_guest_linux::meminfo::ProcMeminfo;
 use virtio_mem_guest_linux::pressure::ProcPressure;
+use virtio_mem_guest_linux::readiness;
 use virtio_mem_guest_linux::requests::GuestRequests;
 use virtio_mem_guest_linux::worker::{process_session_id, GuestWorker, SystemClock};
 use virtio_mem_guest_linux::BUILD_ID;
@@ -52,16 +53,27 @@ fn run(config_path: &Path) -> Result<(), String> {
     requests.set_ram_limits(config.min_ram, config.max_ram)?;
     let mut worker = GuestWorker::new(
         ProcMeminfo::default(),
-        ProcPressure,
+        ProcPressure::open(),
         SystemClock::default(),
         requests,
         &config.control_path,
         Duration::from_millis(config.poll_interval_millis),
-    )?;
+    )?
+    .with_environment(readiness::environment);
     eprintln!(
         "virtio-mem-guest {BUILD_ID} started: vm={} control={}",
         config.vm_name, config.control_path
     );
+    let ready = readiness::assess(&readiness::Probe::read());
+    let facts: Vec<String> = ready
+        .environment
+        .iter()
+        .map(|(name, value)| format!("{name}={value}"))
+        .collect();
+    eprintln!("environment: {}", facts.join(" "));
+    for warning in &ready.warnings {
+        eprintln!("warning: {warning}");
+    }
     worker.run(&stop)
 }
 

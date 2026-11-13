@@ -74,6 +74,8 @@ pub struct TargetEstimate {
 struct CandidateHistoryEntry {
     monotonic_millis: u64,
     desired_now_bytes: u64,
+    /// `desired_now_bytes` plus the margin, where the RAM limits allow it.
+    target_now_bytes: u64,
     floor_now_bytes: u64,
 }
 
@@ -202,6 +204,14 @@ impl TargetEstimator {
             ));
         }
         instantaneous.effective_maximum_bytes = maximum;
+        // Growth and reclaim both aim half a hysteresis band above demand.
+        // Aiming at demand itself leaves the device on the growth threshold,
+        // where every fluctuation in guest memory costs a host resize.
+        let margin = align_up(self.config.downward_hysteresis_bytes / 2, block)?;
+        let target_now = instantaneous
+            .desired_now_bytes
+            .saturating_add(margin)
+            .clamp(minimum, maximum);
         instantaneous.desired_now_bytes = instantaneous.desired_now_bytes.clamp(minimum, maximum);
         instantaneous.floor_now_bytes = instantaneous.floor_now_bytes.clamp(minimum, maximum);
 
@@ -216,13 +226,15 @@ impl TargetEstimator {
         }
         self.state.last_visible_base_bytes = Some(visible_base);
         if self.state.session_id.is_empty() {
-            self.state.desired_bytes = geometry.current_bytes.max(instantaneous.desired_now_bytes);
+            self.state.desired_bytes = geometry.current_bytes;
             self.state.safe_floor_bytes = geometry.current_bytes;
+        }
+        if instantaneous.desired_now_bytes > self.state.desired_bytes {
+            self.state.desired_bytes = target_now;
         }
         self.state.desired_bytes = self
             .state
             .desired_bytes
-            .max(instantaneous.desired_now_bytes)
             .min(instantaneous.effective_maximum_bytes);
 
         // Reclaim requires a continuous window of native High observations.
@@ -245,11 +257,13 @@ impl TargetEstimator {
             }) {
                 last.desired_now_bytes =
                     last.desired_now_bytes.max(instantaneous.desired_now_bytes);
+                last.target_now_bytes = last.target_now_bytes.max(target_now);
                 last.floor_now_bytes = last.floor_now_bytes.max(instantaneous.floor_now_bytes);
             } else {
                 self.state.history.push_back(CandidateHistoryEntry {
                     monotonic_millis: sample.monotonic_millis,
                     desired_now_bytes: instantaneous.desired_now_bytes,
+                    target_now_bytes: target_now,
                     floor_now_bytes: instantaneous.floor_now_bytes,
                 });
             }
@@ -282,7 +296,14 @@ impl TargetEstimator {
                 .ok_or(TargetEstimatorError::ArithmeticOverflow)?
                 <= self.state.desired_bytes
             {
-                self.state.desired_bytes = window_desired;
+                // At most `window_desired` plus the margin, so never a rise.
+                self.state.desired_bytes = self
+                    .state
+                    .history
+                    .iter()
+                    .map(|entry| entry.target_now_bytes)
+                    .max()
+                    .unwrap_or(window_desired);
             }
             self.state.safe_floor_bytes = self
                 .state
@@ -706,7 +727,7 @@ mod tests {
                 geometry(8 * GIB),
             )
             .expect("growth estimate");
-        assert_eq!(initial.desired_bytes, 10 * GIB);
+        assert_eq!(initial.desired_bytes, 10 * GIB + 128 * MIB);
         assert!(!initial.history_ready);
         assert_eq!(initial.safe_floor_bytes, 8 * GIB);
 
@@ -722,13 +743,77 @@ mod tests {
                 )
                 .expect("window sample");
             if sequence < 11 {
-                assert_eq!(result.desired_bytes, 10 * GIB);
+                assert_eq!(result.desired_bytes, 10 * GIB + 128 * MIB);
             } else {
                 assert!(result.history_ready);
-                assert_eq!(result.desired_bytes, 4 * GIB);
+                assert_eq!(result.desired_bytes, 4 * GIB + 128 * MIB);
                 assert_eq!(result.safe_floor_bytes, 3 * GIB);
             }
         }
+    }
+
+    #[test]
+    fn growth_and_reclaim_aim_half_a_band_above_demand_so_noise_causes_no_resize() {
+        let policy = TargetPolicyConfig {
+            configured_minimum_bytes: 0,
+            history_window_millis: 1_000,
+            ..config()
+        };
+        let mut estimator = TargetEstimator::new(policy).unwrap();
+        let mut sequence = 0;
+        let mut estimate = |used: u64, current: u64| {
+            sequence += 1;
+            estimator
+                .estimate(
+                    sample(sequence * 1_000, sequence, memory(current, used, 32 * GIB)),
+                    geometry(current),
+                )
+                .unwrap()
+        };
+        // 2 MiB short of the 2 GiB reserve with 4 GiB plugged.
+        let short = estimate(2 * GIB + 2 * MIB, 4 * GIB);
+        assert_eq!(short.desired_now_bytes, 4 * GIB + 2 * MIB);
+        assert_eq!(short.desired_bytes, 4 * GIB + 130 * MIB);
+
+        // Use that moves less than the margin either way changes nothing.
+        let grown = 4 * GIB + 130 * MIB;
+        for used in [2 * GIB + 2 * MIB, 2 * GIB + 130 * MIB, 2 * GIB - 124 * MIB] {
+            assert_eq!(estimate(used, grown).desired_bytes, grown, "{used}");
+        }
+        // A full band of surplus is returned, again to half a band above use.
+        estimate(GIB, grown);
+        let idle = estimate(GIB, grown);
+        assert!(idle.history_ready);
+        assert_eq!(idle.desired_bytes, 3 * GIB + 128 * MIB);
+    }
+
+    #[test]
+    fn the_margin_never_lifts_the_target_past_the_ram_limits() {
+        let policy = TargetPolicyConfig {
+            configured_minimum_bytes: 0,
+            history_window_millis: 1_000,
+            ..config()
+        };
+        // Fixed RAM is 8 GiB; an idle guest returns to min_ram exactly.
+        let mut estimator = TargetEstimator::new(policy).unwrap();
+        estimator.set_ram_limits(10 * GIB, 12 * GIB).unwrap();
+        let mut idle = memory(4 * GIB, 0, 32 * GIB);
+        idle.physical_available_bytes = idle.physical_total_bytes - GIB;
+        estimator
+            .estimate(sample(1_000, 0, idle), geometry(4 * GIB))
+            .unwrap();
+        let settled = estimator
+            .estimate(sample(2_000, 1, idle), geometry(4 * GIB))
+            .unwrap();
+        assert_eq!(settled.desired_bytes, 2 * GIB);
+        // Demand just under max_ram is capped at it.
+        let busy = estimator
+            .estimate(
+                sample(3_000, 2, memory(4 * GIB, 2 * GIB - 2 * MIB, 32 * GIB)),
+                geometry(4 * GIB),
+            )
+            .unwrap();
+        assert_eq!(busy.desired_bytes, 4 * GIB);
     }
 
     #[test]
@@ -740,7 +825,7 @@ mod tests {
                 geometry(8 * GIB),
             )
             .expect("first growth sample");
-        assert_eq!(first.desired_bytes, 10 * GIB);
+        assert_eq!(first.desired_bytes, 10 * GIB + 128 * MIB);
 
         let second = estimator
             .estimate(
@@ -748,7 +833,7 @@ mod tests {
                 geometry(10 * GIB),
             )
             .expect("second growth sample");
-        assert_eq!(second.desired_bytes, 12 * GIB);
+        assert_eq!(second.desired_bytes, 12 * GIB + 128 * MIB);
 
         for sequence in 2..=12 {
             let result = estimator
@@ -763,7 +848,7 @@ mod tests {
                 .expect("settling sample");
             if sequence == 12 {
                 assert!(result.history_ready);
-                assert_eq!(result.desired_bytes, 10 * GIB);
+                assert_eq!(result.desired_bytes, 10 * GIB + 128 * MIB);
             }
         }
     }
@@ -807,6 +892,7 @@ mod tests {
             history: VecDeque::from([CandidateHistoryEntry {
                 monotonic_millis: 1,
                 desired_now_bytes: 4 * GIB,
+                target_now_bytes: 4 * GIB,
                 floor_now_bytes: 3 * GIB,
             }]),
         };
@@ -911,7 +997,7 @@ mod tests {
             assert!(estimator.state.history.len() <= MAX_TARGET_HISTORY_ENTRIES);
             if sequence == 10_000 {
                 assert!(result.history_ready);
-                assert_eq!(result.desired_bytes, 9 * GIB);
+                assert_eq!(result.desired_bytes, 9 * GIB + 128 * MIB);
             }
         }
     }

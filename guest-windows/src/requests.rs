@@ -135,6 +135,7 @@ impl GuestRequests {
             policy: self.requester.diagnostics().clone(),
             last_consumed_result: self.last_consumed_result.clone(),
             result_consumed_unix_millis: self.result_consumed_unix_millis,
+            environment: std::collections::BTreeMap::new(),
         }
     }
 

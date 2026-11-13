@@ -934,6 +934,7 @@ dependencies = [
 name = "virtio-mem-guest-linux"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "serde_json",
  "signal-hook",
  "toml",

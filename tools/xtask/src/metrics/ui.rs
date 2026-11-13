@@ -450,7 +450,7 @@ fn draw_device(frame: &mut Frame, area: Rect, live: &Live) {
 }
 
 fn draw_guest(frame: &mut Frame, area: Rect, live: &Live) {
-    let block = panel("Windows guest");
+    let block = panel("Guest");
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let Some((read_millis, telemetry)) = &live.guest else {

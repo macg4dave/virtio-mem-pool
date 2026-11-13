@@ -822,7 +822,7 @@ fn build(
     let age = sample
         .guest_age
         .map_or("never".to_owned(), |age| format!("{}s ago", age.as_secs()));
-    frame.top("WINDOWS (guest agent)", &format!("read {age}"));
+    frame.top("GUEST (guest agent)", &format!("read {age}"));
     match &sample.guest.telemetry {
         None if !command.guest => frame.message("guest reads disabled (--no-guest)", DIM),
         None => frame.message("guest publication unavailable", RED),

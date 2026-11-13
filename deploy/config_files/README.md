@@ -23,7 +23,7 @@ cargo xtask metrics --config deploy/config_files/host_list.toml [--duration-seco
 ```
 
 Read-only, like `watch`. On a terminal it opens a live UI: host, device and
-Windows panels, a memory chart (host available, Windows available, device
+guest panels, a memory chart (host available, guest available, device
 current and requested), request results and latencies, problem and incident
 counters, and the controller's events alongside lifecycle events. A red
 `N INCIDENTS` badge in the header means a crash or restart was recorded.
@@ -143,7 +143,7 @@ kept) when requested ≠ current.
   global file uses all defaults; multiple VMs still require an explicit pool.
 - `host_list.toml`: one `[[vm]]` per VM with `vm_name`, libvirt device `alias`
   and `priority`. Optional `telemetry_path` writes diagnostics on the Linux host.
-- `<vm_name>_settings.toml`: `min_ram`, `max_ram`, `install_path`,
+- `<vm_name>_settings.toml`: `min_ram`, `max_ram`, `free_ram`, `install_path`,
   `service_account`, `vm_name` and optional Windows `telemetry_path`. A Linux
   guest instead sets `guest_os = "linux"`; see [Linux guests](#linux-guests).
 
@@ -160,16 +160,22 @@ Windows requests and host grants honour these bounds. The underlying VM must
 have enough supported memory capacity; impossible limits fail closed. This
 change does not edit libvirt VM definitions.
 
-Guest reserve/floor thresholds, grow/reclaim steps, reclaim history, hysteresis
-and stop timeout have conservative built-in defaults. One polling
-interval drives host polling and guest sampling; freshness, request lifetime
-and maximum sample gaps follow it. Device size and block size come from live
-state. `/usr/bin/virsh`, the Windows service name and control-file path are
-built in. Per-VM state and attestation paths are derived from the validated name.
-The current memory-policy defaults are: 2 GiB physical/commit reserves,
-1 GiB safety floors, demand-sized growth (at least 1 GiB for native Low
-pressure), 3 GiB reclaim steps, 1-second reclaim
-history, 256 MiB hysteresis and 30-second stop timeout.
+`free_ram` is the memory a guest keeps free above what it is using, and the
+only policy size an administrator sets. There is no built-in value. The guest
+asks for more when free memory falls below it and returns memory when it has
+more than that spare. The other sizes follow from it: reclaim never plans below
+half of it (also the level treated as critical), memory is returned only once
+the surplus exceeds an eighth of it, and native Low pressure asks for at least
+half of it. A Windows guest removes at most one and a half times `free_ram`
+per request; a Linux guest may return its whole surplus at once. Use a multiple
+of eight device blocks so every derived size stays block aligned.
+
+Reclaim history (1 second) and stop timeout (30 seconds) are built in. One
+polling interval drives host polling and guest sampling; freshness, request
+lifetime and maximum sample gaps follow it. Device size and block size come
+from live state. `/usr/bin/virsh`, the Windows service name and control-file
+path are built in. Per-VM state and attestation paths are derived from the
+validated name.
 Freshness/request lifetime is six poll intervals and the maximum sample gap is
 three. Windows service identity is `VirtioMemService`.
 
@@ -280,8 +286,8 @@ shared **device** RAM; the per-VM bounds describe total RAM.
 
 One controller manages Windows and Linux guests from the same host list. A
 VM's settings file selects the guest with `guest_os = "linux"`; omitted means
-Windows, so existing files are unchanged. A Linux settings file holds only
-`min_ram`, `max_ram`, `guest_os` and `vm_name`: `install_path`,
+Windows. A Linux settings file holds only `min_ram`, `max_ram`, `free_ram`,
+`guest_os` and `vm_name`: `install_path`,
 `service_account` and `telemetry_path` are Windows settings and are rejected.
 [debian13_settings.toml](debian13_settings.toml) is the tracked example. It is
 not yet in `host_list.toml`, so the installed controller does not manage it.

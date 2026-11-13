@@ -7,6 +7,11 @@
 min_ram = "2GB"
 max_ram = "5GB"
 
+# Memory the guest keeps free above what it is using. It asks the host for
+# more when free memory falls below this and returns memory when it has more
+# than this spare. Use a multiple of eight device blocks (16 MiB here).
+free_ram = "512MB"
+
 # A Linux guest runs virtio-mem-guest under systemd. It has no install path,
 # service account or optional telemetry output to configure here.
 guest_os = "linux"

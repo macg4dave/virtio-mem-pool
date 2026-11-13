@@ -71,8 +71,7 @@ Linux. "Keep" means the Windows answer is also correct here.
 | Pressure signal | A categorical Low/Neutral/High, polled | Pressure stall information. Use PSI **triggers** (kernel wakes the service when stall time crosses a threshold) for growth, not the ten-second average read once a second: the OOM killer can act faster than a poll. Keep the average only as the "calm" test for reclaim | M2 |
 | Commit accounting | Commit total and limit | Linux has no enforced commit under default overcommit. Current mapping (RAM plus swap, less available plus free swap) is a stand-in. Decide whether the commit reserve should exist at all for Linux, and honour strict overcommit where it is enabled | M2 |
 | Page cache | Counted as available | Linux fills free RAM with cache by design. Treating all cache as surplus shrinks a file-heavy guest until it thrashes its cache. Reclaim needs a cache-aware floor (working-set refault activity, or a configurable cache allowance) | M2 |
-| Reserve sizes | Fixed 2 GiB reserve, 1 GiB floor, 3 GiB shrink step | Wrong for a 2–5 GiB Linux VM: the reserve is as large as the guest. Size reserves relative to the VM, with per-VM overrides | M2 |
-| Fixed (boot) RAM | Large; never a concern | Linux boots in little RAM, but boot RAM must hold the kernel plus page metadata for every byte that can be plugged (about 1.6 %), and kernel memory cannot live in movable zones. Validate boot RAM against the device size before managing a VM | M2 |
+| Free memory target | Fixed 2 GiB reserve, 1 GiB floor, 3 GiB shrink step from the Windows test | Done: one required per-VM setting, `free_ram`; every policy size derives from it and nothing is built in. Fixed (boot) RAM needs no check of its own: the administrator sets `min_ram` | — |
 | Removal reliability | Driver workaround on the host | Linux removes memory reliably only from the movable zone. How hot-plugged memory is onlined (`online_movable`, `auto-movable` policy and ratio) decides whether reclaim works. The guest must check and report this; the product must document or set it | M2 |
 | Stalled removal | Host lowers the target step by step | Not applicable. The Linux driver retries by itself. The host holds, then settles partial. The settle delay needs its own evidence-based value | M2 |
 | Transport | Host reads and writes guest files through the QEMU guest agent | Works on Debian. Not a product answer: RHEL-family guests block guest-agent file commands by default, the agent gives root file access far beyond this need, and writes are not atomic. A dedicated virtio-serial port carrying the same records suits both guest OSes (the wake channel already uses one). Decision required | M3 |
@@ -90,7 +89,7 @@ Linux. "Keep" means the Windows answer is also correct here.
 | B1 | `viomem` Windows driver removal bug | All Windows milestones; mixed-fleet qualification (M6) | Patched driver deployed and verified; then delete the fenced workaround |
 | B2 | ~~Go-ahead to install the controller on `pc101`~~ | — | Cleared 2026-11-13: the owner allows the controller to be updated and installed |
 | B3 | ~~Attestation requires `windows_driver_version`~~ | — | Cleared 2026-11-13: the review field is now `guest_driver_version` and older reviews are still read. `trusted_development_guest` remains (T0.6) |
-| B4 | Policy defaults sized for one large Windows VM | Meaningful Linux behaviour: on `debian13` the reserve alone is 2 GiB of a 5 GiB guest (M1 results, M2) | Relative reserves and per-VM overrides (T2.3) |
+| B4 | ~~Policy sizes fixed for one Windows VM~~ | — | Cleared 2026-11-13: per-VM `free_ram` replaces every built-in size |
 | B5 | Removal reliability on Debian's default onlining is unmeasured | Signing off reclaim for Linux (M2) | Measurement on `debian13` under each onlining policy (T2.5) |
 | B6 | Transport depends on guest-agent file commands | RHEL-family guests; packaging (M4); the final sandbox | Transport decision and implementation (T3.1, T3.2) |
 | B7 | Linux gate runs only by hand on `pc101`; host and `xtask` do not build on the Windows workstation | Trustworthy review of every change | Scripted Linux gate (T0.4) |
@@ -125,6 +124,8 @@ shape. No behaviour change for `win11_gpu`.
   `guest-linux/` (`virtio-mem-guest-linux`). The installed Windows names
   (`virtio-mem-service.exe`, `VirtioMemService`) stay until T6.2, because
   changing them needs a Windows deployment that B1 blocks.
+- [ ] **T0.10** Make the metrics recorder say when it cannot read the
+  controller journal, instead of recording zero controller events.
 - [ ] **T0.9** Decide the fate of pre-release migration code in `host-deploy`
   (legacy config handling): keep with a removal date, or delete.
 
@@ -132,22 +133,20 @@ Exit: `grep` for site names finds only examples and fixtures; the gate runs
 from one command; the standards' references resolve; `win11_gpu` behaves as
 before.
 
-### M1 — First Linux VM under the real controller
+### M1 — First Linux VM under the real controller (closed 2026-11-13)
 
 Prove the existing design end to end before changing it. Needs B2 and B3.
 
 - [x] **T1.1** Attest `debian13` with the guest-neutral review.
 - [x] **T1.2** Run the controller against `debian13` in observe-only mode
   first, then actuating.
-- [ ] **T1.3** Observe one growth and one removal end to end (done, from
-  the controller journal); record them with `xtask metrics` (left, needs T1.4).
-- [ ] **T1.4** Make `watch` and `metrics` label and read a Linux guest
-  correctly (guest-neutral panels and column names; no Windows-only fields
-  required).
-- [ ] **T1.5** Stamp the Linux binary with a build identity, as the Windows
-  build is, so a capture names what ran.
-- [ ] **T1.6** Write down every surprise as a task in M2 or M3 rather than
-  patching around it.
+- [x] **T1.3** Observe growth and removal end to end and record them with
+  `xtask metrics`.
+- [x] **T1.4** `watch` and `metrics` label a Linux guest correctly, and a
+  guest service incident points at the guest OS's own logs.
+- [x] **T1.5** `cargo xtask linux build` stamps the Linux binary with the
+  checkout's build identity; the stamped build is installed on `debian13`.
+- [x] **T1.6** Surprises are written below and assigned to tasks.
 
 Exit: a recorded capture showing a completed Add and a completed or partial
 Remove on `debian13`, with no latch, and the Windows VM unaffected.
@@ -164,6 +163,20 @@ blocks, default onlining, no swap):
   produces a run of 2 MiB and 14 MiB requests, each a full host resize.
 - With no wake channel each step waits for a poll on both sides.
 
+Recorded capture, 2026-11-13 (`.artifacts/metrics/m1-debian13/`, guest build
+`6134275b136c-dirty.4efd11acb388`): 1.5 GiB used in five steps, held, then
+freed.
+
+- 8 Adds (1,518 MiB) and 2 Removes (1,520 MiB), all Completed. No refusal,
+  latch or incident. The device moved between 1,468 and 2,988 MiB.
+- Host grant to completion averaged 0.9 s for Add and 1.3 s for Remove.
+  Guest issue to completion averaged 3.1 s and 3.5 s: most of the delay is
+  polling, not resizing (T2.1, T3.2).
+- Guest available memory dipped to 1,735 MiB against the 2 GiB reserve while
+  growth caught up.
+- Run without journal access, the recorder reports zero controller events
+  and "0 completed requests" with no warning (T0.10).
+
 ### M2 — Linux-native policy and signals
 
 Replace the Windows carry-overs with Linux answers. Needs M1 evidence.
@@ -172,18 +185,16 @@ Replace the Windows carry-overs with Linux answers. Needs M1 evidence.
   unit needs on the target kernels.
 - [ ] **T2.2** Decide the Linux commit model: drop the commit reserve for
   default overcommit, honour `CommitLimit` under strict overcommit.
-- [ ] **T2.3** Relative reserve, floor and step sizes with per-VM overrides in
-  settings; defaults backed by M1 and M5 captures. Include a minimum growth
-  step or upward hysteresis so boundary noise does not cause block-sized
-  resizes. Removes B4.
+- [x] **T2.3** Per-VM `free_ram` in the settings file replaces the built-in
+  reserve, floor and step sizes (owner decision, 2026-11-13).
+- [ ] **T2.10** Minimum growth step or upward hysteresis, so noise at the
+  `free_ram` boundary does not cause block-sized resizes.
 - [ ] **T2.4** Cache-aware reclaim floor, measured with a file-heavy workload.
 - [ ] **T2.5** Measure removal under each onlining policy; choose the
   recommended one; have the guest report zone layout and onlining policy.
   Removes B5.
 - [ ] **T2.6** Guest readiness check at start and in diagnostics: driver
-  present, PSI available, onlining policy, swap, boot RAM against device size.
-- [ ] **T2.7** Host-side validation that a VM's fixed RAM can carry its
-  device, refusing to manage one that cannot.
+  present, PSI available, onlining policy, swap.
 - [ ] **T2.8** Replace the provisional Linux thresholds (pressure level,
   failed-poll limit, stalled-removal delay) with measured defaults or settings.
 - [ ] **T2.9** Move guest-side code that is identical on both guests behind
@@ -257,7 +268,7 @@ Exit: one controller, one pool, both guest types, qualified together.
 | `win11-*` targets and tasks | `Makefile`, `.vscode/tasks.json` | Generic targets driven by configuration | T0.3 |
 | Tests that load tracked site files | `host/src/config.rs`, `tools/xtask/src/linux.rs`, `tools/xtask/src/metrics.rs`, `tools/xtask/src/watch.rs` | Test fixtures | T0.7 |
 | `windows_driver_version`, `trusted_development_guest` | `host/src/attestation.rs` | Guest-neutral review | T0.6 |
-| Fixed reserves, floors, steps and one-second reclaim history | `GlobalSettings::guest_policy` in core settings | Relative defaults with overrides | T2.3 |
+| ~~Fixed reserves, floors and steps~~ | Core settings | Replaced by per-VM `free_ram` | T2.3 |
 | Control file named `telemetry.json`; field `demand_report_path` | Core settings, Windows config | Accurate names at the next Windows schema change | T6.2 |
 | Built-in `/usr/bin/virsh`, `/etc/virtio-mem-host`, `/var/lib/virtio-mem-host`, `/usr/local/libexec` | Host config, units, `xtask` | Packaging defaults, overridable | T4.2 |
 | `viomem` shrink extension and usable-region widening | `host/src/runtime.rs` (fenced) | Deleted when B1 clears; already limited to Windows guests | T6.1 |
@@ -278,6 +289,9 @@ Made by the owner on 2026-11-12:
   get no generated file (T3.3).
 - **Controller:** it may be updated and installed on `pc101` without asking
   each time (2026-11-13).
+- **Policy sizes:** the fixed reserves were a Windows test artefact; a
+  required per-VM `free_ram` replaces them. No boot-RAM check: `min_ram` is
+  the administrator's control (2026-11-13).
 - **Scope:** Debian first. Other Linux distributions later; keep the guest
   free of Debian-specific code so they remain possible.
 

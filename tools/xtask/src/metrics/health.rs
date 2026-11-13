@@ -672,15 +672,10 @@ fn guest_incident(
         details,
         sections: vec![
             (
-                "Windows evidence (read inside the guest)".to_owned(),
-                format!(
-                    "Event Viewer > Windows Logs > System: Service Control Manager 7031/7034 \
-                     (unexpected stop), 7036 (state change).\nWindows Logs > Application: \
-                     Application Error 1000 and Windows Error Reporting 1001 for {}.\n\
-                     PowerShell: Get-WinEvent -FilterHashtable @{{LogName='System'; \
-                     ProviderName='Service Control Manager'; StartTime='{}'}}",
-                    previous.service_name,
-                    iso_utc(previous.observed_unix_millis.saturating_sub(60_000)),
+                "guest evidence (read inside the guest)".to_owned(),
+                guest_evidence_hint(
+                    &previous.service_name,
+                    &iso_utc(previous.observed_unix_millis.saturating_sub(60_000)),
                 ),
             ),
             (
@@ -796,11 +791,42 @@ fn file_tail(path: &str) -> String {
     }
 }
 
+/// Where the guest keeps its own record of a service stop, for the guest OS
+/// that publishes under `service_name`. The host cannot read it.
+fn guest_evidence_hint(service_name: &str, since: &str) -> String {
+    if service_name == virtio_mem_core::settings::GuestOs::Linux.service_name() {
+        format!(
+            "systemd journal: journalctl -u {service_name} --utc --since '{since}'\n\
+             Service state and last exit: systemctl status {service_name}\n\
+             Kernel out-of-memory kills: journalctl -k --utc --since '{since}' \
+             --grep 'Out of memory'"
+        )
+    } else {
+        format!(
+            "Event Viewer > Windows Logs > System: Service Control Manager 7031/7034 \
+             (unexpected stop), 7036 (state change).\nWindows Logs > Application: \
+             Application Error 1000 and Windows Error Reporting 1001 for {service_name}.\n\
+             PowerShell: Get-WinEvent -FilterHashtable @{{LogName='System'; \
+             ProviderName='Service Control Manager'; StartTime='{since}'}}"
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::GuestRead;
     use super::*;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn guest_service_incidents_point_at_the_guest_os_own_logs() {
+        let linux = guest_evidence_hint("virtio-mem-guest", "2026-11-13T02:00:00Z");
+        assert!(linux.contains("journalctl -u virtio-mem-guest"));
+        assert!(!linux.contains("Event Viewer"));
+        let windows = guest_evidence_hint("VirtioMemService", "2026-11-13T02:00:00Z");
+        assert!(windows.contains("Get-WinEvent") && windows.contains("VirtioMemService"));
+        assert!(windows.contains("StartTime='2026-11-13T02:00:00Z'"));
+    }
     use std::time::Duration;
     use virtio_mem_core::MemoryTelemetrySnapshot;
 

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -76,6 +78,10 @@ pub struct GuestDiagnostics {
     /// Retained until the next consumed result so a slower recorder sees it.
     pub last_consumed_result: Option<MemoryResult>,
     pub result_consumed_unix_millis: Option<u64>,
+    /// Facts the guest reports about its own environment, name to value.
+    /// The guest chooses the names; nothing here is interpreted by policy.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub environment: BTreeMap<String, String>,
 }
 
 /// One guest publication: memory counters, Windows' native signal and the
@@ -299,7 +305,17 @@ mod tests {
             policy: GuestPolicyDiagnostics::default(),
             last_consumed_result: None,
             result_consumed_unix_millis: None,
+            environment: BTreeMap::new(),
         });
+        let encoded = serde_json::to_string(&new).unwrap();
+        assert!(
+            !encoded.contains("environment"),
+            "a guest with no facts publishes the earlier format"
+        );
+        let parsed: RawTelemetryEnvelope = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(parsed, new);
+        new.diagnostics.as_mut().unwrap().environment =
+            BTreeMap::from([("online_policy".to_owned(), "contig-zones".to_owned())]);
         let parsed: RawTelemetryEnvelope =
             serde_json::from_slice(&serde_json::to_vec(&new).unwrap()).unwrap();
         assert_eq!(parsed, new);

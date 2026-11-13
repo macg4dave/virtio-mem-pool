@@ -569,7 +569,7 @@ mod tests {
         let request = first.request.clone().expect("growth request");
         assert!(first.persist);
         assert_eq!(request.operation, MemoryOperation::Add);
-        assert_eq!(request.bytes, 2 * GIB);
+        assert_eq!(request.bytes, 2 * GIB + 128 * MIB);
         assert_eq!(guest.state().pending.as_ref(), Some(&request));
 
         // No result yet, then a stale status: retransmit the same identity.
@@ -781,7 +781,7 @@ mod tests {
             .request
             .expect("growth despite a historical 2 MiB-block result");
         assert_eq!(request.operation, MemoryOperation::Add);
-        assert_eq!(request.bytes, 1872 * MIB);
+        assert_eq!(request.bytes, 2000 * MIB);
         assert!(request.bytes.is_multiple_of(live.block_size_bytes));
 
         // Current geometry and historical result identity remain validated.
@@ -795,7 +795,7 @@ mod tests {
     #[test]
     fn shared_policy_reclaims_after_one_second_of_continuous_high_memory() {
         let mut guest = GuestRequester::new(
-            crate::settings::GlobalSettings::default().guest_policy(),
+            crate::settings::GlobalSettings::default().guest_policy(2 * GIB, 3 * GIB),
             "guest",
             "service",
             "session",

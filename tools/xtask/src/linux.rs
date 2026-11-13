@@ -1,7 +1,9 @@
 //! Linux guest tooling: generates the guest service's runtime configuration
-//! from the administrator settings, as Windows deployment does for its guest.
+//! from the administrator settings, as Windows deployment does for its guest,
+//! and builds the guest service stamped with the identity of its source.
 
 use std::path::Path;
+use std::process::Command;
 
 use virtio_mem_core::settings;
 
@@ -12,8 +14,44 @@ pub fn run(arguments: &[String], repo: &Path) -> Result<(), String> {
             println!("{}", service_config_json(&repo.join(manifest))?);
             Ok(())
         }
-        _ => Err("linux requires: config VM_SETTINGS".to_owned()),
+        ["build"] => build(repo),
+        _ => Err("linux requires: config VM_SETTINGS | build".to_owned()),
     }
+}
+
+const GUEST_PACKAGE: &str = "virtio-mem-guest-linux";
+const GUEST_BINARY: &str = "virtio-mem-guest";
+
+/// Release-build the guest service with the checkout's build identity
+/// compiled in, so `virtio-mem-guest version` and every publication name the
+/// exact source that produced the binary.
+fn build(repo: &Path) -> Result<(), String> {
+    let identity = crate::windows::checkout_identity(repo)?;
+    let status = Command::new("cargo")
+        .args(["build", "--release", "--locked", "-p", GUEST_PACKAGE])
+        .env("VIRTIO_MEM_BUILD_ID", &identity.build_id)
+        .current_dir(repo)
+        .status()
+        .map_err(|error| format!("run cargo: {error}"))?;
+    if !status.success() {
+        return Err(format!("cargo build -p {GUEST_PACKAGE} failed: {status}"));
+    }
+    let binary = repo.join("target").join("release").join(GUEST_BINARY);
+    let reported = Command::new(&binary)
+        .arg("version")
+        .output()
+        .map_err(|error| format!("run {}: {error}", binary.display()))?;
+    let reported = String::from_utf8_lossy(&reported.stdout);
+    if reported.trim() != identity.build_id {
+        return Err(format!(
+            "{} reports build {:?}, expected {}",
+            binary.display(),
+            reported.trim(),
+            identity.build_id
+        ));
+    }
+    println!("Built {} as build {}", binary.display(), identity.build_id);
+    Ok(())
 }
 
 /// The `/etc/virtio-mem-guest/config.json` for one Linux VM's settings file

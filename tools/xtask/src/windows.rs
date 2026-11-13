@@ -463,6 +463,23 @@ fn sync_source(config: &Config, repo: &Path) -> Result<(), String> {
     result
 }
 
+/// The build identity of this checkout as it stands: every tracked and
+/// untracked, unignored file that exists.
+pub(crate) fn checkout_identity(repo: &Path) -> Result<BuildIdentity, String> {
+    let listed = process::checked_output(
+        "git",
+        &[
+            process::os("ls-files"),
+            process::os("--cached"),
+            process::os("--others"),
+            process::os("--exclude-standard"),
+            process::os("-z"),
+        ],
+        repo,
+    )?;
+    source_identity(repo, &existing_paths(repo, &listed)?)
+}
+
 /// Identifies the exact files being synchronised: the commit, whether the
 /// working tree differs from it, and a digest of every synchronised file.
 fn source_identity(repo: &Path, nul_separated: &[u8]) -> Result<BuildIdentity, String> {

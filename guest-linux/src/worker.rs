@@ -2,6 +2,7 @@
 //! the one add/remove request, and publish both. It never resizes anything
 //! itself; the host executes requests.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -94,6 +95,7 @@ pub struct GuestWorker<M, P, C> {
     next_sequence: u64,
     previous_monotonic_millis: Option<u64>,
     consecutive_failures: u32,
+    environment: fn() -> BTreeMap<String, String>,
 }
 
 impl<M: MemorySource, P: PressureSource, C: Clock> GuestWorker<M, P, C> {
@@ -119,7 +121,14 @@ impl<M: MemorySource, P: PressureSource, C: Clock> GuestWorker<M, P, C> {
             next_sequence: 0,
             previous_monotonic_millis: None,
             consecutive_failures: 0,
+            environment: BTreeMap::new,
         })
+    }
+
+    /// Publish these guest facts with every sample's diagnostics.
+    pub fn with_environment(mut self, environment: fn() -> BTreeMap<String, String>) -> Self {
+        self.environment = environment;
+        self
     }
 
     /// One sample, decision and publication.
@@ -169,7 +178,10 @@ impl<M: MemorySource, P: PressureSource, C: Clock> GuestWorker<M, P, C> {
                 native_pressure: envelope.native_pressure,
             })
             .map_err(|error| format!("guest memory request failed: {error}"))?;
-        envelope.diagnostics = Some(self.requests.diagnostics(self.clock.boot_uptime_millis()));
+        envelope.diagnostics = Some(
+            self.requests
+                .diagnostics(self.clock.boot_uptime_millis(), (self.environment)()),
+        );
         let mut encoded = serde_json::to_vec(&envelope)
             .map_err(|error| format!("encode publication: {error}"))?;
         encoded.push(b'\n');
@@ -226,7 +238,10 @@ impl<M: MemorySource, P: PressureSource, C: Clock> GuestWorker<M, P, C> {
                 if remaining.is_zero() {
                     break;
                 }
-                std::thread::sleep(remaining.min(STOP_CHECK_INTERVAL));
+                // Urgent pressure does not wait for the interval to end.
+                if self.pressure.wait(remaining.min(STOP_CHECK_INTERVAL)) {
+                    break;
+                }
             }
         }
         Ok(())
@@ -277,7 +292,7 @@ mod tests {
     struct Pressure(MemoryResourceNotificationState);
 
     impl PressureSource for Pressure {
-        fn state(&self) -> Option<MemoryResourceNotificationState> {
+        fn state(&mut self) -> Option<MemoryResourceNotificationState> {
             Some(self.0)
         }
     }
@@ -322,7 +337,7 @@ mod tests {
             available_bytes: u64,
         ) -> GuestWorker<Memory, Pressure, StepClock> {
             let mut requests = GuestRequests::open(
-                GlobalSettings::default().guest_policy(),
+                GlobalSettings::default().guest_policy(2 * GIB, 3 * GIB),
                 "debian",
                 "virtio-mem-guest",
                 session,
@@ -385,10 +400,17 @@ mod tests {
     #[test]
     fn without_host_status_the_worker_publishes_telemetry_and_no_request() {
         let fixture = Fixture::new("no-status");
-        let mut worker = fixture.worker("session-a", 0, 100 * MIB);
+        let worker = fixture.worker("session-a", 0, 100 * MIB);
+        let mut worker = worker.with_environment(|| {
+            BTreeMap::from([("pressure_signal".to_owned(), "psi".to_owned())])
+        });
         let envelope = worker.poll_once().unwrap();
         assert_eq!(envelope.request, None);
         assert_eq!(envelope.sequence, 0);
+        assert_eq!(
+            envelope.diagnostics.as_ref().unwrap().environment["pressure_signal"],
+            "psi"
+        );
         assert_eq!(
             envelope.native_pressure,
             Some(MemoryResourceNotificationState::High)
@@ -402,11 +424,11 @@ mod tests {
         let fixture = Fixture::new("request");
         fixture.write_status(0, 0, None);
         // 1 GiB total, 512 MiB available: 1.5 GiB short of the 2 GiB reserve,
-        // and at least 1 GiB of device RAM is needed to reach min_ram.
+        // plus the 128 MiB margin that keeps the device off the threshold.
         let mut worker = fixture.worker("session-a", 0, 512 * MIB);
         let request = worker.poll_once().unwrap().request.expect("request");
         assert_eq!(request.operation, MemoryOperation::Add);
-        assert_eq!(request.bytes, GIB + 512 * MIB);
+        assert_eq!(request.bytes, GIB + 640 * MIB);
         assert_eq!(fixture.retained().pending, Some(request.clone()));
         assert_eq!(fixture.published().request, Some(request.clone()));
 
@@ -420,7 +442,7 @@ mod tests {
         // The host grew the device and published the correlated result.
         fixture.write_status(
             1,
-            GIB + 512 * MIB,
+            request.bytes,
             Some(MemoryResult {
                 request: request.clone(),
                 outcome: MemoryOutcome::Completed,
@@ -433,8 +455,8 @@ mod tests {
         // host reports plugged: that poll is skipped, not fatal.
         restarted.poll_or_skip().unwrap();
         assert_eq!(fixture.retained().pending, Some(request.clone()));
-        restarted.memory.device_bytes = GIB + 512 * MIB;
-        restarted.memory.available_bytes = 2 * GIB;
+        restarted.memory.device_bytes = request.bytes;
+        restarted.memory.available_bytes = 2 * GIB + 128 * MIB;
         let envelope = restarted.poll_once().unwrap();
         assert_eq!(
             envelope.sequence, 2,
@@ -457,14 +479,15 @@ mod tests {
     fn surplus_memory_is_returned_only_after_qualified_history() {
         let fixture = Fixture::new("reclaim");
         // 5 GiB total with 4.5 GiB available: 0.5 GiB in use plus the 2 GiB
-        // reserve, less 1 GiB of fixed RAM, wants 1.5 GiB of the 4 GiB device.
+        // reserve and the 128 MiB margin, less 1 GiB of fixed RAM, wants
+        // 1,664 MiB of the 4 GiB device.
         let mut worker = fixture.worker("session-a", 4 * GIB, 4 * GIB + 512 * MIB);
         fixture.write_status(1, 4 * GIB, None);
         assert_eq!(worker.poll_once().unwrap().request, None, "no history yet");
         fixture.write_status(2, 4 * GIB, None);
         let request = worker.poll_once().unwrap().request.expect("reclaim");
         assert_eq!(request.operation, MemoryOperation::Remove);
-        assert_eq!(request.bytes, 2 * GIB + 512 * MIB);
+        assert_eq!(request.bytes, 2 * GIB + 384 * MIB);
     }
 
     #[test]

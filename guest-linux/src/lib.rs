@@ -7,6 +7,7 @@ pub mod config;
 pub mod files;
 pub mod meminfo;
 pub mod pressure;
+pub mod readiness;
 pub mod requests;
 pub mod worker;
 
