@@ -40,12 +40,18 @@ CapabilityBoundingSet=CAP_SYS_RESOURCE
 # talks to the host only over the descriptor systemd opens for it.
 # Not set, deliberately: PrivateUsers= would confine CAP_SYS_RESOURCE to a
 # user namespace, where the kernel's pressure-trigger check does not see it;
-# ProcSubset=pid would hide /proc/meminfo and /proc/pressure.
+# ProcSubset=pid would hide /proc/meminfo and /proc/pressure;
+# PrivateDevices= would stop OpenFile= above: systemd opens the port inside
+# the private /dev, where it does not exist, and "graceful" then silently
+# leaves the service on the control files (found on a live guest with the
+# port, 2026-11-13). The device policy below keeps the same lockdown and
+# allows only the virtio console ports for that open.
+DevicePolicy=closed
+DeviceAllow=char-virtio-portsdev rw
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-PrivateDevices=true
 PrivateNetwork=true
 ProtectProc=invisible
 ProtectKernelTunables=true
