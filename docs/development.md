@@ -4,7 +4,8 @@ How to build, check and test this repository, and which checks need which
 platform. [The roadmap](roadmap.md) holds intended design and open work;
 [the Rust standards](../.github/prompts/rust.md) hold coding rules;
 [administration](administration.md) covers installing and running the
-product.
+product; [prior art](prior-art.md) lists related projects, their licenses
+and the rule for importing third-party code.
 
 ## Workspace
 

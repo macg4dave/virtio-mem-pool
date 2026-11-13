@@ -3,7 +3,7 @@ name = "virtio-mem-core"
 version = "0.1.0"
 edition = "2021"
 authors = ["macg4dave"]
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "Platform-neutral virtio-mem policy, state validation, and protocol parsing"
 
 [dependencies]

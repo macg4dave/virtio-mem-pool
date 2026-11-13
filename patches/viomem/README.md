@@ -85,3 +85,12 @@ visible to Windows, so its 12 GiB minimum is met. The VM was not stopped or
 rebooted. Evidence is in `.artifacts/viomem-driver/ram-live-growth.json` and
 `ram-windows-verification.json`. The Linux controller remains stopped until
 the operator restarts `virtio-mem-host@win11_gpu.service`.
+
+## License
+
+`full-region-removal.patch` modifies `viomem/sys/viomem.c` from
+`virtio-win/kvm-guest-drivers-windows`, which is under the BSD-3-Clause
+license (Copyright 2009-2025 Red Hat, Inc. and/or its affiliates, and
+other contributors; see that repository's `LICENSE`). The patch is offered
+under the same license so that it can be submitted upstream. The rest of
+this directory is under this repository's license, GPL-3.0-or-later.

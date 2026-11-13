@@ -3,7 +3,7 @@ name = "virtio-mem-guest-linux"
 version = "0.1.0"
 edition = "2021"
 authors = ["macg4dave"]
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "Linux guest service that decides and publishes guest memory requests from /proc telemetry"
 
 [dependencies]

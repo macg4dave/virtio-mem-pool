@@ -3,7 +3,7 @@ name = "virtio-mem-guest"
 version = "0.1.0"
 edition = "2021"
 authors = ["macg4dave"]
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "The guest side of the virtio-mem request protocol, shared by the Windows and Linux guest services"
 
 [dependencies]

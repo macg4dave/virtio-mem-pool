@@ -3,7 +3,7 @@ name = "virtio-mem-host"
 version = "0.1.0"
 edition = "2021"
 authors = ["macg4dave"]
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "RHEL systemd controller executing guest virtio-mem requests from a shared pool"
 
 [dependencies]

@@ -3,7 +3,7 @@ name = "virtio-mem-guest-windows"
 version = "0.1.0"
 edition = "2021"
 authors = ["macg4dave"]
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "Windows service that decides and publishes guest memory requests with native telemetry"
 
 [dependencies]
