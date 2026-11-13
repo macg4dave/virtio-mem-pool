@@ -844,7 +844,7 @@ mod tests {
             std::env::temp_dir().join(format!("virtio-mem-deploy-test-{}", std::process::id()));
         let source = crate::repo_root()
             .expect("root")
-            .join("deploy/config_files/host_list.toml");
+            .join("fixtures/config/host_list.toml");
         let snapshot = snapshot_configuration(&source, &directory).expect("snapshot");
         let original = HostSettings::load(&snapshot).expect("settings");
         let config = &original.vms[0];

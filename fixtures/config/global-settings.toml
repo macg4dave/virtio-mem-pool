@@ -1,0 +1,6 @@
+pool_bytes = "15GB"
+host_min_headroom_bytes = "4GB"
+observe_only = false
+poll_interval_seconds = 1
+command_timeout_seconds = 10
+convergence_timeout_seconds = 300

@@ -6,6 +6,8 @@ const PACKAGES: &[&str] = &[
     "-p",
     "virtio-mem-core",
     "-p",
+    "virtio-mem-guest",
+    "-p",
     "virtio-mem-host",
     "-p",
     "virtio-mem-xtask",

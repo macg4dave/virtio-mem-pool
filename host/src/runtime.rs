@@ -151,6 +151,8 @@ pub struct VmController<G, S, R> {
     status_unpublished_reported: bool,
     health_report: Option<(Instant, u64, u64)>,
     last_observed_request: Option<virtio_mem_core::RequestIdentity>,
+    /// The publication version of the guest's last valid record.
+    guest_version: Option<u16>,
 }
 
 impl<G, S, R> VmController<G, S, R> {
@@ -185,6 +187,7 @@ impl<G, S, R> VmController<G, S, R> {
             status_unpublished_reported: false,
             health_report: None,
             last_observed_request: None,
+            guest_version: None,
         })
     }
 }
@@ -198,6 +201,8 @@ pub struct HostRuntime<G, S, R, H> {
     poll_interval: Duration,
     #[cfg(unix)]
     wake: Vec<std::sync::Arc<crate::wake::WakePeer>>,
+    #[cfg(unix)]
+    controls: Vec<std::sync::Arc<crate::control_channel::ControlChannel>>,
     #[cfg(unix)]
     memory_events: Option<crate::wake::MemoryEvents>,
 }
@@ -227,6 +232,8 @@ where
             #[cfg(unix)]
             wake: Vec::new(),
             #[cfg(unix)]
+            controls: Vec::new(),
+            #[cfg(unix)]
             memory_events: None,
         })
     }
@@ -235,9 +242,11 @@ where
     pub fn with_wake(
         mut self,
         peers: Vec<std::sync::Arc<crate::wake::WakePeer>>,
+        controls: Vec<std::sync::Arc<crate::control_channel::ControlChannel>>,
         events: Option<crate::wake::MemoryEvents>,
     ) -> Self {
         self.wake = peers;
+        self.controls = controls;
         self.memory_events = events;
         self
     }
@@ -248,9 +257,10 @@ where
                 return Err(error);
             }
             #[cfg(unix)]
-            if !self.wake.is_empty() {
+            if !self.wake.is_empty() || !self.controls.is_empty() {
                 crate::wake::wait(
                     &self.wake,
+                    &self.controls,
                     self.memory_events.as_mut(),
                     stop,
                     self.poll_interval,
@@ -423,6 +433,7 @@ where
         let (request, base_ram) = match self.guest.read() {
             Ok(envelope) => {
                 self.guest_unavailable_reported = false;
+                self.guest_version = Some(envelope.version);
                 if let Some(path) = &self.config.telemetry_path {
                     let result = serde_json::to_vec(&envelope)
                         .map_err(|error| error.to_string())
@@ -1280,7 +1291,10 @@ where
                 requested_bytes: state.requested_bytes,
                 current_bytes: state.current_bytes,
                 result: refusal.or_else(|| self.control.journal.result.clone()),
-                guest_settings: self.config.guest_settings,
+                guest_settings: self
+                    .config
+                    .guest_settings
+                    .filter(|_| virtio_mem_core::sends_guest_settings_to(self.guest_version)),
             })
         });
         match published {
@@ -1518,6 +1532,10 @@ mod tests {
         /// Report Windows' total as fixed RAM plus this device's current
         /// allocation, as a real guest does; otherwise a fixed 8 GiB.
         device: Option<Device>,
+        /// Publish this record version instead of the current one.
+        version: Option<u16>,
+        /// Publish nothing, as a guest still waiting for its settings.
+        silent: bool,
     }
 
     #[derive(Clone, Default)]
@@ -1547,6 +1565,9 @@ mod tests {
 
     impl GuestLink for Guest {
         fn read(&self) -> Result<RawTelemetryEnvelope, String> {
+            if self.0.borrow().silent {
+                return Err("no publication yet".to_owned());
+            }
             let mut envelope = RawTelemetryEnvelope::new(
                 "guest",
                 "VirtioMemService",
@@ -1568,6 +1589,9 @@ mod tests {
             );
             envelope.request = self.0.borrow().request.clone();
             envelope.native_pressure = self.0.borrow().native;
+            if let Some(version) = self.0.borrow().version {
+                envelope.version = version;
+            }
             if let Some(device) = &self.0.borrow().device {
                 envelope.memory.physical_total_bytes = device.live().current_bytes;
             }
@@ -1636,6 +1660,7 @@ mod tests {
             observe_only: false,
             min_ram: 0,
             max_ram: u64::MAX,
+            guest_settings: None,
             telemetry_path: None,
         }
     }
@@ -1723,6 +1748,36 @@ mod tests {
             round(&mut runtime);
             assert_eq!(*fixture.targets.borrow(), [expected]);
         }
+    }
+
+    #[test]
+    fn guest_settings_reach_only_guests_that_can_read_them() {
+        let settings =
+            virtio_mem_core::settings::GlobalSettings::default().guest_policy(GIB, 8 * GIB);
+        let published = virtio_mem_core::GuestSettings {
+            policy: settings,
+            min_ram: 4 * GIB,
+            max_ram: 16 * GIB,
+            poll_interval_millis: 5000,
+        };
+        let sent = |silent: bool, version: Option<u16>| {
+            let mut fixture = Fixture::new("guest-settings", 100, 4 * GIB);
+            fixture.config.guest_settings = Some(published);
+            {
+                let mut guest = fixture.guest.0.borrow_mut();
+                guest.silent = silent;
+                guest.version = version;
+            }
+            let mut runtime = runtime(vec![fixture.controller(None)], 64 * GIB, None);
+            round(&mut runtime);
+            let statuses = &fixture.guest.0.borrow().statuses;
+            statuses.last().expect("a status").guest_settings
+        };
+        // A guest still waiting for its settings, and a current one, get them.
+        assert_eq!(sent(true, None), Some(published));
+        assert_eq!(sent(false, None), Some(published));
+        // A guest built before settings were published would reject them.
+        assert_eq!(sent(false, Some(5)), None);
     }
 
     #[test]

@@ -1,14 +1,18 @@
-# Provision only the named doorbell device for LocalService. Run elevated while
-# VirtioMemService is stopped. The QEMU guest-agent port is never modified.
-function Set-VirtioMemWakeChannelAccess {
-    param([Parameter(Mandatory=$true)][string] $BackupDirectory)
-    if (-not ('VirtioMemWakeAccess' -as [type])) {
+# Give LocalService read/write access to one named virtio-serial port, and
+# nothing else. Run elevated while VirtioMemService is stopped. The QEMU
+# guest-agent port is never modified.
+function Set-VirtioMemPortAccess {
+    param(
+        [Parameter(Mandatory=$true)][string] $PortName,
+        [Parameter(Mandatory=$true)][string] $BackupDirectory
+    )
+    if (-not ('VirtioMemPortAccess' -as [type])) {
         Add-Type -TypeDefinition @'
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
-public static class VirtioMemWakeAccess {
+public static class VirtioMemPortAccess {
     [StructLayout(LayoutKind.Sequential)] struct DeviceInfo {
         public uint Size; public Guid ClassGuid; public uint DevInst; public UIntPtr Reserved;
     }
@@ -35,10 +39,10 @@ public static class VirtioMemWakeAccess {
         return Encoding.Unicode.GetString(bytes, 0, checked((int)needed)).TrimEnd('\0');
     }
     // Returns the exact device instance, previous descriptor and whether a
-    // restart is needed. Missing optional port is a supported polling fallback.
-    public static string[] Configure(bool apply, string expectedInstance) {
+    // restart is needed. A missing port is a supported fallback.
+    public static string[] Configure(string port, bool apply, string expectedInstance) {
         var target = new StringBuilder(2048);
-        if (QueryDosDevice("org.virtio-mem.wake.0", target, target.Capacity) == 0) {
+        if (QueryDosDevice(port, target, target.Capacity) == 0) {
             int error = Marshal.GetLastWin32Error();
             if (error == 2) return null;
             throw new Win32Exception(error);
@@ -60,26 +64,26 @@ public static class VirtioMemWakeAccess {
                 if (!SetupDiGetDeviceInstanceId(set, ref info, id, (uint)id.Capacity, out needed)) throw new Win32Exception();
                 if (previous == desired) return new [] {id.ToString(), previous, "unchanged"};
                 if (!apply) return new [] {id.ToString(), previous, "changed"};
-                if (!String.Equals(expectedInstance, id.ToString(), StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("wake device changed during provisioning");
+                if (!String.Equals(expectedInstance, id.ToString(), StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("port device changed during provisioning");
                 byte[] bytes = Encoding.Unicode.GetBytes(desired + "\0");
                 if (!SetupDiSetDeviceRegistryProperty(set, ref info, 24, bytes, (uint)bytes.Length)) throw new Win32Exception();
                 return new [] {id.ToString(), previous, "changed"};
             }
-            throw new InvalidOperationException("named wake port has no matching device instance");
+            throw new InvalidOperationException("named port has no matching device instance");
         } finally { SetupDiDestroyDeviceInfoList(set); }
     }
 }
 '@
     }
-    $result = [VirtioMemWakeAccess]::Configure($false, $null)
-    if ($null -eq $result) { return 'absent; polling fallback' }
-    [ordered]@{instance_id=$result[0]; previous_security=$result[1]; action=$result[2]} |
-        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $BackupDirectory 'wake-device-security.json')
+    $result = [VirtioMemPortAccess]::Configure($PortName, $false, $null)
+    if ($null -eq $result) { return 'absent; control files fallback' }
+    [ordered]@{port=$PortName; instance_id=$result[0]; previous_security=$result[1]; action=$result[2]} |
+        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $BackupDirectory ($PortName + '-security.json'))
     if ($result[2] -eq 'changed') {
-        $applied = [VirtioMemWakeAccess]::Configure($true, $result[0])
-        if ($null -eq $applied) { throw 'wake device disappeared during provisioning' }
+        $applied = [VirtioMemPortAccess]::Configure($PortName, $true, $result[0])
+        if ($null -eq $applied) { throw 'port device disappeared during provisioning' }
         & pnputil.exe /restart-device $result[0] | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "wake device restart failed: $LASTEXITCODE" }
+        if ($LASTEXITCODE -ne 0) { throw "port device restart failed: $LASTEXITCODE" }
     }
     return $result[2]
 }

@@ -396,6 +396,13 @@ fn record(
     let guest_files = VirshGuestFiles::new(virsh.clone(), &command.vm);
     let started_millis = lock(live).started_millis;
     let mut journal = JournalFollower::start(&command.unit, started_millis, repo);
+    if let Some(reason) = &journal.unreadable {
+        let mut live = lock(live);
+        live.mark(format!(
+            "controller journal unreadable: controller events are not recorded ({reason})"
+        ));
+        live.summary.journal_unreadable = Some(reason.clone());
+    }
     let mut qemu = QemuProcess::default();
     let mut cpu = CpuMeter::default();
     let mut pressure = pressure::Meter::default();
@@ -441,6 +448,12 @@ fn record(
                 collection_millis: started.elapsed().as_secs_f64() * 1000.0,
             };
             let new_events = journal.read(repo);
+            if let Some(reason) = &journal.unreadable {
+                let mut live = lock(live);
+                if live.summary.journal_unreadable.is_none() {
+                    live.summary.journal_unreadable = Some(reason.clone());
+                }
+            }
             let mut observed = lifecycle.observe(&sample, &new_events);
             diagnostics.observe(
                 &sample,
@@ -997,15 +1010,39 @@ struct JournalFollower {
     unit: String,
     cursor: Option<String>,
     since_seconds: u64,
+    /// Why controller events cannot be read, while that is so. A user
+    /// without system-journal access sees an empty journal, not an error.
+    unreadable: Option<String>,
+}
+
+/// Why the system journal cannot be read, judged from what a read of the
+/// journal's own first process (always present) returned.
+fn journal_access(result: Result<String, String>) -> Option<String> {
+    match result {
+        Err(error) => Some(error),
+        Ok(text) if text.trim().is_empty() => Some(
+            "no system journal entries are visible to this user; \
+             run as root or as a member of systemd-journal or adm"
+                .to_owned(),
+        ),
+        Ok(_) => None,
+    }
 }
 
 impl JournalFollower {
     /// Starts after the newest existing entry, so a run records only its own.
     fn start(unit: &str, started_millis: u64, repo: &Path) -> Self {
+        let probe = ["-n", "1", "-o", "json", "--no-pager", "_PID=1"].map(process::os);
         let mut follower = Self {
             unit: unit.to_owned(),
             cursor: None,
             since_seconds: started_millis / 1000,
+            unreadable: journal_access(process::bounded_text(
+                "journalctl",
+                &probe,
+                repo,
+                COMMAND_TIMEOUT,
+            )),
         };
         let arguments = ["-u", unit, "-n", "1", "-o", "json", "--no-pager"].map(process::os);
         if let Ok(text) = process::bounded_text("journalctl", &arguments, repo, COMMAND_TIMEOUT) {
@@ -1027,9 +1064,12 @@ impl JournalFollower {
             Some(cursor) => format!("--after-cursor={cursor}"),
             None => format!("--since=@{}", self.since_seconds),
         }));
-        let Ok(text) = process::bounded_text("journalctl", &arguments, repo, COMMAND_TIMEOUT)
-        else {
-            return Vec::new();
+        let text = match process::bounded_text("journalctl", &arguments, repo, COMMAND_TIMEOUT) {
+            Ok(text) => text,
+            Err(error) => {
+                self.unreadable = Some(error);
+                return Vec::new();
+            }
         };
         let mut events = Vec::new();
         for (event, cursor) in text.lines().filter_map(JournalEvent::from_json) {
@@ -1037,6 +1077,24 @@ impl JournalFollower {
             events.push(event);
         }
         events
+    }
+}
+
+#[cfg(test)]
+mod journal_tests {
+    use super::journal_access;
+
+    #[test]
+    fn an_empty_or_failed_journal_read_is_reported_not_counted_as_zero() {
+        assert_eq!(journal_access(Ok("{\"MESSAGE\":\"x\"}\n".to_owned())), None);
+        assert!(journal_access(Ok(String::new()))
+            .unwrap()
+            .contains("systemd-journal"));
+        assert!(journal_access(Ok("\n".to_owned())).is_some());
+        assert_eq!(
+            journal_access(Err("journalctl failed".to_owned())),
+            Some("journalctl failed".to_owned())
+        );
     }
 }
 
@@ -1088,6 +1146,9 @@ struct RequestTotals {
 struct Summary {
     vm: String,
     unit: String,
+    /// Controller events could not be read, so their counts are not zero
+    /// but unknown.
+    journal_unreadable: Option<String>,
     started_millis: u64,
     host_floor_bytes: u64,
     telemetry_max_age_millis: u64,
@@ -1159,6 +1220,7 @@ impl Summary {
         Self {
             vm: command.vm.clone(),
             unit: command.unit.clone(),
+            journal_unreadable: None,
             started_millis,
             host_floor_bytes: command.host_floor_bytes,
             telemetry_max_age_millis: command.telemetry_max_age.as_millis() as u64,
@@ -1467,6 +1529,10 @@ impl Summary {
         json!({
             "vm": self.vm,
             "unit": self.unit,
+            "controller_journal": match &self.journal_unreadable {
+                Some(reason) => json!({ "readable": false, "reason": reason }),
+                None => json!({ "readable": true }),
+            },
             "started_utc": iso_utc(self.started_millis),
             "updated_utc": iso_utc(now_millis),
             "duration_seconds": now_millis.saturating_sub(self.started_millis) / 1000,
@@ -1549,8 +1615,13 @@ impl Summary {
                 format!("{:.0}", stat.min)
             }
         };
+        let journal = if self.journal_unreadable.is_some() {
+            "CONTROLLER JOURNAL UNREADABLE, controller counts unknown; "
+        } else {
+            ""
+        };
         format!(
-            "{} samples; min host avail {} MiB, min guest avail {} MiB; \
+            "{journal}{} samples; min host avail {} MiB, min guest avail {} MiB; \
              {} completed requests; {} latches; {} guest read failures; {} incidents",
             self.samples,
             minimum(&self.host_available_mib),
@@ -1620,7 +1691,7 @@ mod tests {
     fn tracked_config() -> String {
         crate::repo_root()
             .expect("repository root")
-            .join("deploy/config_files/host_list.toml")
+            .join("fixtures/config/host_list.toml")
             .to_string_lossy()
             .into_owned()
     }
@@ -1697,7 +1768,7 @@ mod tests {
                 list.push_str(&format!(
                     "[[vm]]\nvm_name='{name}'\nalias='{alias}'\npriority=100\n"
                 ));
-                let mut vm = format!(
+                let vm = format!(
                     r#"
 vm_name='{name}'
 min_ram='4GB'
@@ -1709,9 +1780,6 @@ service_account='NT AUTHORITY\LocalService'
                 );
                 if diagnostics {
                     list.push_str(&format!("telemetry_path='/tmp/{name}-diagnostics.json'\n"));
-                    vm.push_str(
-                        "telemetry_path='C:\\ProgramData\\VirtioMemService\\diagnostics.json'\n",
-                    );
                 }
                 std::fs::write(root.join(format!("{name}_settings.toml")), vm)
                     .expect("VM settings");

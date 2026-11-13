@@ -1,0 +1,6 @@
+min_ram = "6GB"
+max_ram = "27GB"
+free_ram = "2GB"
+vm_name = "windows-guest"
+install_path = 'C:\Program Files\VirtioMemService\virtio-mem-service.exe'
+service_account = 'NT AUTHORITY\LocalService'

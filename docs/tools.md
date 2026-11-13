@@ -30,10 +30,17 @@ RAM, file cache and how much of it the guest service is keeping, memory
 pressure, the page-cache refault rate, a history graph and the last changes
 in total RAM. `--csv` prints one row per sample; `-h` lists the options.
 
-cargo xtask linux config deploy/config_files/debian13_settings.toml
+cargo xtask linux deploy SSH_DESTINATION --output PATH [--apply]
+cargo xtask linux status SSH_DESTINATION
+cargo xtask linux uninstall SSH_DESTINATION --output PATH [--apply] [--discard-state]
 
-Prints the Linux guest service configuration generated from a VM settings file
-and its sibling global settings. See [Linux guests](../deploy/config_files/README.md#linux-guests).
+Install, inspect or remove the Linux guest service on a development guest
+over SSH (the account needs passwordless `sudo`). Deploy builds the stamped
+binary first, installs it with the unit, the RAM monitor
+(`virtio-mem-watch-ram`) and the qualification workload
+(`virtio-mem-workload`), restarts the service and checks what it reads back.
+Without `--apply` they only record what they would do. Uninstall keeps the
+durable request state unless told to discard it.
 
 cargo xtask linux build
 

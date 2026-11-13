@@ -24,10 +24,6 @@ impl std::ops::Deref for ServiceConfig {
 }
 
 impl ServiceConfig {
-    pub fn poll_interval(&self) -> Duration {
-        Duration::from_millis(self.file.poll_interval_millis)
-    }
-
     pub fn shutdown_timeout(&self) -> Duration {
         Duration::from_millis(self.file.shutdown_timeout_millis)
     }
@@ -38,13 +34,7 @@ impl ServiceConfig {
             .and_then(|()| self.file.validate_paths(&self.config_path))
             .map_err(ConfigurationError::InvalidFile)?;
         #[cfg(windows)]
-        {
-            validate_file_identity(&self.config_path, &self.demand_report_path)?;
-            if let Some(path) = &self.telemetry_path {
-                validate_file_identity(&self.config_path, path)?;
-                validate_file_identity(&self.demand_report_path, path)?;
-            }
-        }
+        validate_file_identity(&self.config_path, virtio_mem_core::settings::CONTROL_PATH)?;
         Ok(())
     }
 
@@ -130,37 +120,14 @@ pub(crate) fn validate_file_identity(config: &str, report: &str) -> Result<(), C
 /// A valid configuration shared by this crate's tests.
 #[cfg(test)]
 pub(crate) fn test_config() -> ServiceConfig {
-    const MIB: u64 = 1024 * 1024;
     ServiceConfig {
         file: WindowsServiceConfigFile {
             schema_version: WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION,
-            min_ram: 1 << 30,
-            max_ram: 64 << 30,
-            telemetry_path: None,
-            vm_name: "test-vm".to_owned(),
             service_name: "TestService".to_owned(),
             display_name: "Test service".to_owned(),
             description: "Test configuration".to_owned(),
-            demand_report_path: r"C:\test\telemetry.jsonl".to_owned(),
             service_account: r"NT AUTHORITY\LocalService".to_owned(),
-            poll_interval_millis: 20,
             shutdown_timeout_millis: 30,
-            policy: virtio_mem_core::GuestMemoryPolicy {
-                target: virtio_mem_core::TargetPolicyConfig {
-                    configured_minimum_bytes: 0,
-                    physical_reserve_bytes: 2048 * MIB,
-                    commit_reserve_bytes: 2048 * MIB,
-                    safe_floor_physical_reserve_bytes: 1024 * MIB,
-                    safe_floor_commit_reserve_bytes: 1024 * MIB,
-                    history_window_millis: 600_000,
-                    maximum_gap_millis: 60_000,
-                    downward_hysteresis_bytes: 256 * MIB,
-                },
-                grow_step_bytes: 1024 * MIB,
-                shrink_step_bytes: 64 * MIB,
-                host_status_max_age_millis: 60_000,
-                request_lifetime_millis: 30_000,
-            },
         },
         config_path: DEFAULT_CONFIG_PATH.to_owned(),
     }
@@ -183,15 +150,9 @@ mod tests {
     }
 
     #[test]
-    fn rejects_empty_identity_paths_and_zero_timings() {
+    fn rejects_empty_identity_and_zero_timings() {
         let mut config = test_config();
         config.file.service_name.clear();
-        assert!(config.validate().is_err());
-        let mut config = test_config();
-        config.file.demand_report_path.clear();
-        assert!(config.validate().is_err());
-        let mut config = test_config();
-        config.file.poll_interval_millis = 0;
         assert!(config.validate().is_err());
         let mut config = test_config();
         config.file.shutdown_timeout_millis = 0;
@@ -201,9 +162,10 @@ mod tests {
     #[test]
     fn rejects_path_collisions_and_control_characters() {
         let mut config = test_config();
-        config.config_path = r"c:\TEST\.\TELEMETRY.jsonl".to_owned();
+        config.config_path = virtio_mem_core::settings::CONTROL_PATH.to_uppercase();
         assert!(config.validate().is_err());
-        config.config_path = virtio_mem_core::request_state_path(&config.demand_report_path);
+        config.config_path =
+            virtio_mem_core::request_state_path(virtio_mem_core::settings::CONTROL_PATH);
         assert!(config.validate().is_err());
         let mut config = test_config();
         config.file.description.push('\0');
@@ -220,7 +182,7 @@ mod tests {
         std::fs::write(&path, serde_json::to_vec(&expected.file).unwrap()).unwrap();
         let loaded = ServiceConfig::load_from_path(&path).expect("configuration should load");
         assert_eq!(loaded, expected);
-        assert_eq!(loaded.poll_interval(), Duration::from_millis(20));
+        assert_eq!(loaded.shutdown_timeout(), Duration::from_millis(30));
 
         let mut old = expected.file.clone();
         old.schema_version = 99;

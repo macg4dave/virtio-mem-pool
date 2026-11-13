@@ -134,7 +134,8 @@ impl WakePeer {
                 .command
                 .run(&["dumpxml".to_owned(), self.vm.clone()])
                 .map_err(|e| e.to_string())?;
-            let path = channel_path(&xml)?.ok_or("virtio-serial wake channel is absent")?;
+            let path = channel_path(&xml, MEMORY_WAKE_CHANNEL_NAME)?
+                .ok_or("virtio-serial wake channel is absent")?;
             let stream = UnixStream::connect(path).map_err(|e| e.to_string())?;
             stream.set_nonblocking(true).map_err(|e| e.to_string())?;
             Ok(stream)
@@ -190,16 +191,21 @@ impl WakePeer {
     }
 }
 
-/// Wait for a hint from any VM or the periodic fallback, with bounded stop
-/// latency. Hints only accelerate a complete, guarded controller round.
+/// Wait for a hint or a control record from any VM, or the periodic
+/// fallback, with bounded stop latency. Either only accelerates a complete,
+/// guarded controller round.
 pub fn wait(
     peers: &[Arc<WakePeer>],
+    controls: &[Arc<crate::control_channel::ControlChannel>],
     mut events: Option<&mut MemoryEvents>,
     stop: &AtomicBool,
     timeout: Duration,
 ) {
     for peer in peers {
         peer.connect();
+    }
+    for control in controls {
+        control.connect();
     }
     let started = Instant::now();
     while !stop.load(Ordering::Acquire) && started.elapsed() < timeout {
@@ -213,6 +219,13 @@ pub fn wait(
                 })
             })
             .collect();
+        descriptors.extend(controls.iter().filter_map(|control| {
+            control.raw_fd().map(|fd| libc::pollfd {
+                fd,
+                events: libc::POLLIN,
+                revents: 0,
+            })
+        }));
         if let Some(events) = events.as_ref().filter(|e| !e.closed) {
             descriptors.push(libc::pollfd {
                 fd: events.output.as_raw_fd(),
@@ -239,6 +252,9 @@ pub fn wait(
             for peer in peers {
                 peer.drain();
             }
+            for control in controls {
+                control.pump();
+            }
             return;
         }
         if result < 0 && io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
@@ -251,7 +267,8 @@ pub fn wait(
     }
 }
 
-fn channel_path(xml: &str) -> Result<Option<String>, String> {
+/// The host socket of the domain's virtio-serial port `name`, if it has one.
+pub(crate) fn channel_path(xml: &str, name: &str) -> Result<Option<String>, String> {
     let mut reader = Reader::from_str(xml);
     let mut in_channel = false;
     let mut source = None;
@@ -271,7 +288,7 @@ fn channel_path(xml: &str) -> Result<Option<String>, String> {
                 }
                 if tag.name().as_ref() == b"target" {
                     matched = attribute(&tag, b"type")?.as_deref() == Some("virtio")
-                        && attribute(&tag, b"name")?.as_deref() == Some(MEMORY_WAKE_CHANNEL_NAME);
+                        && attribute(&tag, b"name")?.as_deref() == Some(name);
                 }
             }
             Event::End(tag) if tag.name().as_ref() == b"channel" => {
@@ -306,8 +323,15 @@ mod tests {
     #[test]
     fn discovers_only_the_dedicated_channel() {
         let xml = "<domain><devices><channel type='unix'><source path='/qga'/><target type='virtio' name='org.qemu.guest_agent.0'/></channel><channel type='unix'><source path='/wake'/><target type='virtio' name='org.virtio-mem.wake.0'/></channel></devices></domain>";
-        assert_eq!(channel_path(xml), Ok(Some("/wake".to_owned())));
-        assert_eq!(channel_path("<domain/>"), Ok(None));
+        assert_eq!(
+            channel_path(xml, MEMORY_WAKE_CHANNEL_NAME),
+            Ok(Some("/wake".to_owned()))
+        );
+        assert_eq!(channel_path(xml, "org.virtio-mem.control.0"), Ok(None));
+        assert_eq!(
+            channel_path("<domain/>", MEMORY_WAKE_CHANNEL_NAME),
+            Ok(None)
+        );
     }
 
     #[test]
@@ -325,6 +349,7 @@ mod tests {
         let started = Instant::now();
         wait(
             &[Arc::clone(&peer)],
+            &[],
             None,
             &AtomicBool::new(false),
             Duration::from_secs(5),

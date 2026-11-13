@@ -16,7 +16,3 @@ free_ram = "2GB"
 vm_name = "win11_gpu"
 install_path = 'C:\Program Files\VirtioMemService\virtio-mem-service.exe'
 service_account = 'NT AUTHORITY\LocalService'
-
-# Optional Windows diagnostic output; omitted means no diagnostic file writes.
-# It must differ from the internal control file and configuration/binary paths.
-# telemetry_path = 'C:\ProgramData\VirtioMemService\diagnostics.json'

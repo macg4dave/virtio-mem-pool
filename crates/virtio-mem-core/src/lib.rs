@@ -8,6 +8,7 @@ pub mod guest_policy;
 pub mod memory_request;
 pub mod pool;
 pub mod settings;
+pub mod stream;
 pub mod target_controller;
 pub mod units;
 pub mod virtio_mem;
@@ -23,8 +24,8 @@ pub use controller_status::{
     RecoveryState, CONTROLLER_STATUS_VERSION, MAX_CONTROLLER_STATUS_BYTES,
 };
 pub use demand::{
-    DemandError, MemoryResourceNotificationState, MemoryTelemetrySnapshot, RawTelemetryEnvelope,
-    RAW_TELEMETRY_VERSION,
+    sends_guest_settings_to, DemandError, MemoryResourceNotificationState, MemoryTelemetrySnapshot,
+    RawTelemetryEnvelope, GUEST_SETTINGS_VERSION, RAW_TELEMETRY_VERSION,
 };
 pub use error::VirtioMemError;
 pub use guest_policy::{
@@ -32,12 +33,14 @@ pub use guest_policy::{
 };
 pub use memory_request::{
     bounded_reason, host_status_path, request_state_path, GuestSettings, HostMemoryStatus,
-    MemoryOperation,
-    MemoryOutcome, MemoryRequest, MemoryRequestJournal, MemoryResult, RequestAdmission,
-    RequestIdentity, MAX_HOST_STATUS_BYTES, MAX_REQUEST_LIFETIME_MILLIS, MEMORY_REQUEST_VERSION,
-    MEMORY_WAKE_CHANNEL_NAME,
+    MemoryOperation, MemoryOutcome, MemoryRequest, MemoryRequestJournal, MemoryResult,
+    RequestAdmission, RequestIdentity, MAX_HOST_STATUS_BYTES, MAX_REQUEST_LIFETIME_MILLIS,
+    MEMORY_REQUEST_VERSION, MEMORY_WAKE_CHANNEL_NAME,
 };
 pub use pool::{allocate_pool, PoolAllocation, PoolError, PoolMember};
+pub use stream::{
+    RecordReader, RecordWriter, MAX_STREAM_RECORD_BYTES, MEMORY_CONTROL_CHANNEL_NAME,
+};
 pub use target_controller::{
     TargetEstimate, TargetEstimator, TargetEstimatorError, TargetGeometry, TargetPolicyConfig,
     TargetSample,

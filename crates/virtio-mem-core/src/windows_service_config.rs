@@ -1,29 +1,22 @@
-//! The Windows memory service's configuration file format. It lives here so
-//! the service and the deployment tooling share one serialization.
+//! The Windows memory service's configuration file. It holds only what
+//! installing the service needs: its SCM identity, the account it runs as and
+//! how long it may take to stop. Like the Linux guest, the service takes its
+//! VM name, limits, policy and poll interval from the host at run time.
 
 use serde::{Deserialize, Serialize};
 
-use crate::GuestMemoryPolicy;
-
-pub const WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION: u32 = 8;
+/// Version 9 removed everything the host now publishes.
+pub const WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION: u32 = 9;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WindowsServiceConfigFile {
     pub schema_version: u32,
-    pub vm_name: String,
     pub service_name: String,
     pub display_name: String,
     pub description: String,
-    pub demand_report_path: String,
     pub service_account: String,
-    pub poll_interval_millis: u64,
     pub shutdown_timeout_millis: u64,
-    pub policy: GuestMemoryPolicy,
-    pub min_ram: u64,
-    pub max_ram: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub telemetry_path: Option<String>,
 }
 
 impl WindowsServiceConfigFile {
@@ -35,7 +28,6 @@ impl WindowsServiceConfigFile {
             ));
         }
         for value in [
-            &self.vm_name,
             &self.service_name,
             &self.display_name,
             &self.description,
@@ -48,43 +40,29 @@ impl WindowsServiceConfigFile {
                 );
             }
         }
-        if !crate::memory_request::valid_identity(&self.vm_name)
-            || !crate::memory_request::valid_identity(&self.service_name)
+        if !crate::memory_request::valid_identity(&self.service_name)
             || self.service_name.contains(['/', '\\'])
         {
-            return Err("VM/service identity must be ASCII of at most 128 bytes; service names cannot contain slashes".to_owned());
+            return Err(
+                "the service name must be ASCII of at most 128 bytes, without slashes".to_owned(),
+            );
         }
-        normalize_windows_path(&self.demand_report_path)?;
-        for millis in [self.poll_interval_millis, self.shutdown_timeout_millis] {
-            if millis == 0 || millis >= u64::from(u32::MAX) {
-                return Err("configuration timing is zero or too large".to_owned());
-            }
+        if self.shutdown_timeout_millis == 0 || self.shutdown_timeout_millis >= u64::from(u32::MAX)
+        {
+            return Err("shutdown_timeout_millis is zero or too large".to_owned());
         }
-        crate::settings::validate_ram_limits(self.min_ram, self.max_ram)?;
-        self.policy.validate()
+        Ok(())
     }
 
-    /// The publication path also names its handoff files, host status and
-    /// durable request state as `<path>.<suffix>`; the configuration must be
-    /// none of them.
+    /// The control publication also names its host status and durable
+    /// request state as `<path>.<suffix>`; the configuration must be none of
+    /// them.
     pub fn validate_paths(&self, config_path: &str) -> Result<(), String> {
         let config = normalize_windows_path(config_path)?;
-        if let Some(path) = &self.telemetry_path {
-            let telemetry = normalize_windows_path(path)?;
-            let control = normalize_windows_path(&self.demand_report_path)?;
-            if telemetry == config
-                || telemetry == control
-                || telemetry.starts_with(&format!("{control}."))
-            {
-                return Err(
-                    "optional telemetry collides with configuration or control files".to_owned(),
-                );
-            }
-        }
-        let report = normalize_windows_path(&self.demand_report_path)?;
+        let report = normalize_windows_path(crate::settings::CONTROL_PATH)?;
         if config == report || config.starts_with(&format!("{report}.")) {
             return Err(
-                "configuration path collides with the telemetry publication or its derived files"
+                "configuration path collides with the control publication or its derived files"
                     .to_owned(),
             );
         }
@@ -183,44 +161,31 @@ mod tests {
     #[test]
     fn configuration_cannot_alias_any_derived_publication_file() {
         let config = WindowsServiceConfigFile {
-            min_ram: 1 << 30,
-            max_ram: 64 << 30,
-            telemetry_path: None,
             schema_version: WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION,
-            vm_name: "guest".to_owned(),
             service_name: "VirtioMemService".to_owned(),
             display_name: "Virtio memory".to_owned(),
             description: "Virtio memory".to_owned(),
-            demand_report_path: r"C:\Data\telemetry.json".to_owned(),
             service_account: r"NT AUTHORITY\LocalService".to_owned(),
-            poll_interval_millis: 1000,
             shutdown_timeout_millis: 1000,
-            policy: crate::GuestMemoryPolicy {
-                target: crate::TargetPolicyConfig {
-                    configured_minimum_bytes: 0,
-                    physical_reserve_bytes: 1,
-                    commit_reserve_bytes: 1,
-                    safe_floor_physical_reserve_bytes: 1,
-                    safe_floor_commit_reserve_bytes: 1,
-                    history_window_millis: 1,
-                    maximum_gap_millis: 1,
-                    downward_hysteresis_bytes: 1,
-                },
-                grow_step_bytes: 1,
-                shrink_step_bytes: 1,
-                host_status_max_age_millis: 1,
-                request_lifetime_millis: 1,
-            },
         };
         config.validate().unwrap();
-        config.validate_paths(r"C:\Data\config.json").unwrap();
+        config
+            .validate_paths(r"C:\ProgramData\VirtioMemService\config.json")
+            .unwrap();
+        let control = crate::settings::CONTROL_PATH;
         for path in [
-            crate::host_status_path(r"c:/data/TELEMETRY.json"),
-            crate::request_state_path(r"C:\Data\telemetry.json"),
-            r"C:\Data\telemetry.json.tmp-12".to_owned(),
-            r"C:\Data\telemetry.json".to_owned(),
+            crate::host_status_path(&control.to_uppercase()),
+            crate::request_state_path(control),
+            format!("{control}.tmp-12"),
+            control.to_owned(),
         ] {
             assert!(config.validate_paths(&path).is_err(), "{path}");
         }
+        let mut old = serde_json::to_value(&config).unwrap();
+        old["policy"] = serde_json::json!({});
+        assert!(
+            serde_json::from_value::<WindowsServiceConfigFile>(old).is_err(),
+            "an older configuration is refused, not half read"
+        );
     }
 }

@@ -40,8 +40,9 @@ pub struct HostConfig {
     pub observe_only: bool,
     pub min_ram: u64,
     pub max_ram: u64,
-    /// Published with the host status to a guest that takes its limits and
-    /// policy from the host. A Windows guest carries its own configuration.
+    /// Published with the host status: every current guest takes its limits
+    /// and policy from the host. Guests built before that are never sent it
+    /// (see `virtio_mem_core::sends_guest_settings_to`).
     pub guest_settings: Option<virtio_mem_core::GuestSettings>,
     pub telemetry_path: Option<String>,
 }
@@ -106,7 +107,7 @@ impl HostConfig {
             observe_only: globals.observe_only,
             min_ram: vm.min_ram,
             max_ram: vm.max_ram,
-            guest_settings: (vm.guest_os == GuestOs::Linux).then(|| vm.guest_settings(globals)),
+            guest_settings: Some(vm.guest_settings(globals)),
             telemetry_path: entry.telemetry_path.clone(),
         }
     }
@@ -117,10 +118,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tracked_configuration_loads_without_optional_telemetry() {
-        let path =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../deploy/config_files/host_list.toml");
-        let settings = HostSettings::load(&path).expect("tracked config");
+    fn fixture_configuration_loads_without_optional_telemetry() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/config/host_list.toml");
+        let settings = HostSettings::load(&path).expect("fixture config");
         assert_eq!(settings.vms.len(), 1);
         assert!(settings.vms[0].telemetry_path.is_none());
         assert_eq!(settings.vms[0].guest_os, GuestOs::Windows);
@@ -130,16 +130,17 @@ mod tests {
         );
         assert_eq!(
             settings.vms[0].policy_state_path,
-            "/var/lib/virtio-mem-host/state/win11_gpu-requests.json"
+            "/var/lib/virtio-mem-host/state/windows-guest-requests.json"
         );
         assert!(HostConfig::load_vm(&path, Some("absent")).is_err());
     }
 
     #[test]
     fn a_linux_guest_resolves_its_own_control_path_and_service_identity() {
-        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../deploy/config_files");
-        let globals = settings::load_globals(&directory).expect("tracked globals");
-        let vm = settings::load_vm(&directory.join("debian13_settings.toml")).expect("tracked VM");
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/config");
+        let globals = settings::load_globals(&directory).expect("fixture globals");
+        let vm =
+            settings::load_vm(&directory.join("linux-guest_settings.toml")).expect("fixture VM");
         let entry = HostVm {
             vm_name: vm.vm_name.clone(),
             alias: "ua-virtiomem0".to_owned(),

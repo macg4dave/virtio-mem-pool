@@ -39,7 +39,7 @@ pub struct Probe {
 impl Probe {
     pub fn read() -> Self {
         let text = |path: &str, maximum: usize| {
-            crate::files::read_bounded(Path::new(path), maximum)
+            virtio_mem_guest::files::read_bounded(Path::new(path), maximum)
                 .ok()
                 .flatten()
                 .and_then(|bytes| String::from_utf8(bytes).ok())

@@ -66,7 +66,7 @@ impl Config {
         let mut renewed_hold = None;
         let mut refresh_interval = None;
 
-        for pair in arguments.chunks_exact(2) {
+        for pair in arguments.as_chunks::<2>().0 {
             let slot = pair[0].as_str();
             let value = pair[1].as_str();
             match slot {

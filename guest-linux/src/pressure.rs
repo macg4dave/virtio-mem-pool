@@ -46,17 +46,7 @@ pub fn trigger_description() -> &'static str {
     TRIGGER.get().copied().unwrap_or("none")
 }
 
-pub trait PressureSource {
-    /// The state for this sample. A trigger event seen since the last call is
-    /// consumed by it.
-    fn state(&mut self) -> Option<MemoryResourceNotificationState>;
-
-    /// Wait up to `timeout`; true when urgent pressure arrived first.
-    fn wait(&mut self, timeout: Duration) -> bool {
-        std::thread::sleep(timeout);
-        false
-    }
-}
+pub use virtio_mem_guest::worker::PressureSource;
 
 #[derive(Debug, Default)]
 pub struct ProcPressure {
@@ -103,9 +93,11 @@ impl PressureSource for ProcPressure {
         if fired == Some(true) {
             return Some(MemoryResourceNotificationState::Low);
         }
-        let bytes =
-            crate::files::read_bounded(std::path::Path::new(PRESSURE_PATH), MAX_PRESSURE_BYTES)
-                .ok()??;
+        let bytes = virtio_mem_guest::files::read_bounded(
+            std::path::Path::new(PRESSURE_PATH),
+            MAX_PRESSURE_BYTES,
+        )
+        .ok()??;
         classify(std::str::from_utf8(&bytes).ok()?, fired.is_some())
     }
 

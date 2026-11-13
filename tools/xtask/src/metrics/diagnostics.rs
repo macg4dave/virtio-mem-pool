@@ -345,7 +345,7 @@ mod tests {
             "--config".to_owned(),
             crate::repo_root()
                 .unwrap()
-                .join("deploy/config_files/host_list.toml")
+                .join("fixtures/config/host_list.toml")
                 .display()
                 .to_string(),
         ])
@@ -356,7 +356,7 @@ mod tests {
 
     fn sample(now: u64, session: &str, uptime: u64) -> Sample {
         let mut guest = RawTelemetryEnvelope::new(
-            "win11_gpu",
+            "windows-guest",
             "VirtioMemService",
             session,
             now,

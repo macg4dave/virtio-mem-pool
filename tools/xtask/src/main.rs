@@ -25,8 +25,10 @@ Usage:
   cargo xtask host-deploy INSTANCE --config PATH --attestation VM=PATH... [OPTIONS]
   cargo xtask host-run --config PATH --max-run-seconds N [OPTIONS]
   cargo xtask preflight VM_NAME ALIAS [OPTIONS]
-  cargo xtask linux config VM_SETTINGS
   cargo xtask linux build
+  cargo xtask linux deploy SSH_DESTINATION --output PATH [--apply]
+  cargo xtask linux status SSH_DESTINATION
+  cargo xtask linux uninstall SSH_DESTINATION --output PATH [--apply] [--discard-state]
   cargo xtask windows <check|sync|build|test|lint|fetch|all>
   cargo xtask windows deploy MANIFEST --output PATH [--apply]
   cargo xtask windows service-cycle SERVICE --output PATH [--apply]

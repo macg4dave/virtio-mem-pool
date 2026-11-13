@@ -379,7 +379,7 @@ mod tests {
     }
 
     /// Live check against a running VM with a guest agent:
-    /// `VIRTIO_MEM_LIVE_VM=win11_gpu cargo test -p virtio-mem-host live_ -- --ignored`
+    /// `VIRTIO_MEM_LIVE_VM=<domain> cargo test -p virtio-mem-host live_ -- --ignored`
     #[test]
     #[ignore]
     fn live_session_matches_virsh_on_a_running_vm() {

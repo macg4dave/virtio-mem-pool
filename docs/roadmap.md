@@ -74,9 +74,9 @@ Linux. "Keep" means the Windows answer is also correct here.
 | Free memory target | Fixed 2 GiB reserve, 1 GiB floor, 3 GiB shrink step from the Windows test | Done: one required per-VM setting, `free_ram`; every policy size derives from it and nothing is built in. Fixed (boot) RAM needs no check of its own: the administrator sets `min_ram` | — |
 | Removal reliability | Driver workaround on the host | Linux removes memory reliably only from the movable zone. How hot-plugged memory is onlined (`online_movable`, `auto-movable` policy and ratio) decides whether reclaim works. The guest must check and report this; the product must document or set it | M2 |
 | Stalled removal | Host lowers the target step by step | Not applicable. The Linux driver retries by itself. The host holds, then settles partial. The settle delay needs its own evidence-based value | M2 |
-| Transport | Host reads and writes guest files through the QEMU guest agent | Works on Debian. Not a product answer: RHEL-family guests block guest-agent file commands by default, the agent gives root file access far beyond this need, and writes are not atomic. A dedicated virtio-serial port carrying the same records suits both guest OSes (the wake channel already uses one). Decision required | M3 |
-| Wake-up | Dedicated virtio-serial doorbell | Keep the idea. Folds into the transport decision | M3 |
-| Guest configuration | Generated file copied into the guest, duplicating host-side limits | Limits and policy already live on the host. If the host publishes them with its status, a Linux guest needs no generated file and cannot drift from the host. Decision required | M3 |
+| Transport | Host reads and writes guest files through the QEMU guest agent | Decided and implemented: a dedicated virtio-serial port carrying the same records. The guest-agent files remain the fallback | M3 |
+| Wake-up | Dedicated virtio-serial doorbell | The control channel wakes both sides itself; a Linux guest needs no separate wake port | — |
+| Guest configuration | Generated file copied into the guest, duplicating host-side limits | Implemented: the host publishes them with its status; a Linux guest has no configuration file | — |
 | Service model | SCM service under LocalService | systemd unit, unprivileged dynamic user, state in `/var/lib`. Keep; review the sandbox once the transport is final | M4 |
 | Installation | SSH sync, build in guest, PowerShell deploy | A Debian package with unit and defaults; `xtask linux deploy` for development. Building inside the guest is a development convenience, not the install path | M4 |
 | Driver identity | On-disk `viomem.sys` version | Kernel release, plus the driver facts that matter (module present, device block size, onlining policy) | M2 |
@@ -117,15 +117,17 @@ shape. No behaviour change for `win11_gpu`.
 - [ ] **T0.6** Make the compatibility review guest-neutral. Done: driver
   identity is `guest_driver_version`. Left: a guest-OS field, and
   `trusted_development_guest` replaced by the conditions it stood in for.
-- [ ] **T0.7** Give unit tests their own fixtures instead of tracked site
-  files (`win11_gpu` and `debian13` settings).
+- [x] **T0.7** Unit tests load neutral fixtures from `fixtures/config/`
+  (`windows-guest`, `linux-guest`) instead of tracked site files
+  (2026-11-13).
 - [x] **T0.8** Naming (done 2026-11-12): repository `virtio-mem-pool`;
   guest crates `guest-windows/` (`virtio-mem-guest-windows`) and
   `guest-linux/` (`virtio-mem-guest-linux`). The installed Windows names
   (`virtio-mem-service.exe`, `VirtioMemService`) stay until T6.2, because
   changing them needs a Windows deployment that B1 blocks.
-- [ ] **T0.10** Make the metrics recorder say when it cannot read the
-  controller journal, instead of recording zero controller events.
+- [x] **T0.10** The metrics recorder says when it cannot read the controller
+  journal (2026-11-13): a marker at start, `controller_journal` in
+  `summary.json`, and a headline that calls the controller counts unknown.
 - [ ] **T0.9** Decide the fate of pre-release migration code in `host-deploy`
   (legacy config handling): keep with a removal date, or delete.
 
@@ -215,8 +217,11 @@ Replace the Windows carry-overs with Linux answers. Needs M1 evidence.
   failed-poll limit, stalled-removal delay, and the cache floor's refault
   threshold, quiet period and settling time) with measured defaults or
   settings.
-- [ ] **T2.9** Move guest-side code that is identical on both guests behind
-  one owner, once the Linux shape is stable.
+- [x] **T2.9** Guest-side code shared by both guests has one owner
+  (2026-11-13): `crates/virtio-mem-guest` holds the request store, worker,
+  transports and service loop, taken from the Linux guest. Each guest crate
+  keeps only its memory counters, pressure signal, clock, how it opens the
+  control channel and its service manager integration.
 
 Exit: a small (2–4 GiB) and a large Linux VM both grow before the OOM killer
 acts and reclaim without cache thrash, in recorded runs, using defaults.
@@ -310,11 +315,35 @@ guest build `6134275b136c-dirty.cdf3554aac2a`, loop of 150 seconds):
   stream for both guests. Whether the guest-agent file path survives as a
   compatibility option is settled during T3.2.
 - [ ] **T3.2** Implement it behind the host's existing guest-link boundary,
-  for Linux first; Windows follows when B1 clears.
+  for Linux first; Windows follows when B1 clears. Done in source
+  (2026-11-13, unit tested, not yet run on a VM): port
+  `org.virtio-mem.control.0`, one JSON record per line each way, opened for
+  the unprivileged guest service by systemd. The guest-agent control files
+  stay as the fallback for a VM without the port and for Windows; the host
+  answers on whichever route the publication arrived. Left: a recorded run
+  on `debian13` with the port added and no guest-agent file access.
 - [ ] **T3.3** Implement host-published limits and policy, so the Linux
-  guest needs no generated configuration (decided 2026-11-12).
+  guest needs no generated configuration (decided 2026-11-12). Done in
+  source (2026-11-13, unit tested, not yet run on a VM): the host status
+  carries the guest settings for Linux guests; the guest waits for them,
+  and restarts its worker when they change. `xtask linux config` and
+  `/etc/virtio-mem-guest/config.json` are gone. Left: a recorded run.
+- [ ] **T3.5** Observation on the control channel. `watch`, `metrics` and
+  qualification read the guest's publication through the guest agent, and a
+  guest on the control channel writes no file. The host should keep each
+  guest's latest publication where those tools, which run on the host, can
+  read it, and the tools should prefer it.
 - [ ] **T3.4** Version-skew rules: which host and guest versions interoperate,
   and the upgrade order, enforced by the protocol rather than by a README.
+  First rule done (2026-11-13): guest publications are now version 6, which
+  means "reads published settings". The host sends settings only to a guest
+  that has published version 6 or nothing yet, so a guest built before
+  today keeps working from its own configuration file under a new host.
+  A new Linux guest needs a new host: under an old one it waits for
+  settings that never come, and says so in its log. Upgrade order for
+  Linux: host first. Left: the same rule for the transport (a guest on the
+  control channel under a host without it falls back to the files only if
+  the guest agent allows file commands) and a written compatibility table.
 
 Exit: a Linux guest with no guest-agent file access and no generated config
 file is managed correctly; removes B6.
@@ -327,7 +356,13 @@ file is managed correctly; removes B6.
   libvirt URI; remove built-in `/usr/bin/virsh` and `/usr/local/libexec`
   assumptions where a site may differ.
 - [ ] **T4.3** `xtask linux deploy|status|uninstall` for development VMs,
-  recording evidence as the Windows commands do.
+  recording evidence as the Windows commands do. Done in source
+  (2026-11-13, unit tested, not yet run): the guest is named by an SSH
+  destination given on the command line; deploy builds the stamped binary,
+  installs binary, unit and RAM monitor, restarts the service and checks
+  the build and hashes it reads back; uninstall keeps the request state
+  unless `--discard-state`. Every action writes JSON evidence, and runs dry
+  without `--apply`. Left: first use on `debian13`.
 - [ ] **T4.4** Final systemd sandbox review for the guest unit.
 - [ ] **T4.5** Administrator documentation: install, add a VM, recover,
   upgrade.
@@ -338,6 +373,10 @@ documented steps only.
 ### M5 — Linux qualification
 
 - [ ] **T5.1** Linux workload with resident, committed and file-cache modes.
+  Done in source (2026-11-13, unit tested, not yet run):
+  `virtio-mem-workload` in `guest-linux` takes the Windows workload's
+  options plus `--mode file-cache` and `--cache-dir`, and `xtask linux
+  deploy` installs it. Left: a run, and T5.2 to drive it.
 - [ ] **T5.2** `xtask qualification` for Linux guests.
 - [ ] **T5.3** Failure injection: guest service restart mid-request, guest
   reboot, controller restart, guest-agent or channel loss, clock step.
@@ -354,6 +393,15 @@ Needs B1.
 - [ ] **T6.1** Resume Windows on the patched driver; delete the fenced
   workaround and its tests.
 - [ ] **T6.2** Bring Windows to the M3 transport and configuration model.
+  Done in source (2026-11-13, owner direction: Windows follows the Linux
+  design): the Windows service runs the shared guest crate, takes its
+  settings from the host, uses the control channel through overlapped I/O
+  on `\\.\Global\org.virtio-mem.control.0` with the control files as
+  fallback, and no longer uses the wake port. `config.json` is schema 9,
+  install-only. The optional Windows diagnostic copy (`telemetry_path` in
+  the VM settings) is removed. Deploy provisions the control port and checks
+  that the service stays running. Left: a Windows deployment, which B1
+  blocks.
 - [ ] **T6.3** Mixed Windows and Linux soak on one controller and pool.
 - [ ] **T6.4** Release documentation and versioning.
 
@@ -370,12 +418,12 @@ Exit: one controller, one pool, both guest types, qualified together.
 | Tests that load tracked site files | `host/src/config.rs`, `tools/xtask/src/linux.rs`, `tools/xtask/src/metrics.rs`, `tools/xtask/src/watch.rs` | Test fixtures | T0.7 |
 | `windows_driver_version`, `trusted_development_guest` | `host/src/attestation.rs` | Guest-neutral review | T0.6 |
 | ~~Fixed reserves, floors and steps~~ | Core settings | Replaced by per-VM `free_ram` | T2.3 |
-| Control file named `telemetry.json`; field `demand_report_path` | Core settings, Windows config | Accurate names at the next Windows schema change | T6.2 |
+| Control file named `telemetry.json` | Core settings | An accurate name at the next Windows install-path change; `demand_report_path` is gone with schema 9 | T6.2 |
 | Built-in `/usr/bin/virsh`, `/etc/virtio-mem-host`, `/var/lib/virtio-mem-host`, `/usr/local/libexec` | Host config, units, `xtask` | Packaging defaults, overridable | T4.2 |
 | `viomem` shrink extension and usable-region widening | `host/src/runtime.rs` (fenced) | Deleted when B1 clears; already limited to Windows guests | T6.1 |
 | Windows wording in observation tools | `xtask` metrics, watch | Guest-neutral labels | T1.4 |
 | Legacy configuration migration | `tools/xtask/src/host_deploy.rs` | Decision in T0.9 | T0.9 |
-| Provisional Linux numbers: 10 % pressure, five failed polls, convergence timeout reused for stalled removal | `guest-linux/src/pressure.rs`, `guest-linux/src/worker.rs`, `host/src/runtime.rs` | Measured defaults or settings | T2.8 |
+| Provisional Linux numbers: 10 % pressure, five failed polls, convergence timeout reused for stalled removal | `guest-linux/src/pressure.rs`, `crates/virtio-mem-guest/src/worker.rs`, `host/src/runtime.rs` | Measured defaults or settings | T2.8 |
 | Hand-installed, unversioned guest binary on `debian13` | The dev VM | Stamped build, then package | T1.5, T4.1 |
 | Installed Windows names `virtio-mem-service.exe` and `VirtioMemService` | `guest-windows/`, core settings, `xtask` | Guest-neutral scheme with the next Windows deployment | T6.2 |
 | Old checkout paths ending `virtio_mem_windows_service` | `deploy/config_files/windows-build.mk`, Windows build prompt | Site configuration | T0.2 |

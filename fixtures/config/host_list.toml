@@ -1,0 +1,4 @@
+[[vm]]
+vm_name = "windows-guest"
+alias = "memory0"
+priority = 100

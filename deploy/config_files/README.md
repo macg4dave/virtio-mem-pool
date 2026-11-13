@@ -116,9 +116,10 @@ for another 30. Five or more zero grants or rejected commands within a minute
 must persist as a condition for 30 seconds. Bundles are emitted once per episode
 and rearm after recovery. Durations use the recorder's monotonic clock.
 
-These changes publish guest telemetry version 5. Updated readers accept version
-4, but older hosts reject version 5 and its new fields. Upgrade the host before
-the Windows service. The durable memory request and host-status schemas are
+Guests now publish version 6, which means the guest takes its settings
+from the host. Hosts accept versions 4 to 6 and send settings only to a
+version 6 guest or one that has published nothing yet. Upgrade the host
+before either guest service. The durable memory request and host-status schemas are
 unchanged; diagnostic fields never authorise memory changes. Existing captures
 without diagnostic fields remain readable.
 
@@ -144,8 +145,8 @@ kept) when requested ≠ current.
 - `host_list.toml`: one `[[vm]]` per VM with `vm_name`, libvirt device `alias`
   and `priority`. Optional `telemetry_path` writes diagnostics on the Linux host.
 - `<vm_name>_settings.toml`: `min_ram`, `max_ram`, `free_ram`, `install_path`,
-  `service_account`, `vm_name` and optional Windows `telemetry_path`. A Linux
-  guest instead sets `guest_os = "linux"`; see [Linux guests](#linux-guests).
+  `service_account` and `vm_name`. A Linux guest instead sets
+  `guest_os = "linux"`; see [Linux guests](#linux-guests).
 
 The host list loads sibling files; paths do not depend on the working directory.
 VM names use lower-case ASCII letters, digits, `-` and `_`, beginning with a
@@ -249,10 +250,13 @@ under `/etc/virtio-mem-host/`. Existing installed files and obsolete instance
 configs are backed up. The unit now reads `host_list.toml`. Run one controller
 for the host list: separate controllers cannot share pool accounting.
 
-`make win11-deploy` reads the selected `<vm_name>_settings.toml` and sibling
-global settings and generates Windows runtime `config.json` schema 8. This
-JSON is a deployment output, not another administrator settings file. Deploy
-matching new host and Windows binaries before runtime verification.
+`make win11-deploy` reads the selected `<vm_name>_settings.toml` and
+generates the Windows `config.json` schema 9. It holds only what installing
+the service needs: its name, the account it runs as and its stop timeout.
+The VM name, limits, policy and poll interval come from the host at run
+time, as for a Linux guest, so changing them needs no Windows deployment.
+Deploy the host before the Windows service: a new service under an old host
+waits for settings that never come.
 
 The tracked values were carried over: 15 GiB device pool, 4 GiB host headroom,
 5/10/300-second timings, priority 100, Windows account and executable path.
@@ -287,55 +291,84 @@ shared **device** RAM; the per-VM bounds describe total RAM.
 One controller manages Windows and Linux guests from the same host list. A
 VM's settings file selects the guest with `guest_os = "linux"`; omitted means
 Windows. A Linux settings file holds only `min_ram`, `max_ram`, `free_ram`,
-`guest_os` and `vm_name`: `install_path`,
-`service_account` and `telemetry_path` are Windows settings and are rejected.
+`guest_os` and `vm_name`: `install_path` and `service_account` are Windows
+settings and are rejected.
 [debian13_settings.toml](debian13_settings.toml) is the tracked example. It is
 not yet in `host_list.toml`, so the installed controller does not manage it.
 
 The Linux guest runs `virtio-mem-guest` under systemd
-([unit](../../guest-linux/systemd/virtio-mem-guest.service)) with the same policy,
-request protocol and wire format as the Windows service. Its identity and
-files are built in:
+([unit](../../guest-linux/systemd/virtio-mem-guest.service)). It and the Windows
+service are one program on two platforms: the request protocol, worker,
+transports and service loop are the shared `virtio-mem-guest` crate, and each
+guest adds only its memory counters, pressure signal, clock and how it opens
+the control channel. It has no configuration file: the host publishes the VM's name, `min_ram`, `max_ram`
+and the policy derived from `free_ram` with every status, and the guest
+starts or restarts with them. Changing a Linux VM's settings on the host is
+all it takes.
 
 | Item | Linux guest |
 |---|---|
 | Service identity on the wire | `virtio-mem-guest` |
-| Control publication | `/var/lib/virtio-mem-guest/control.json` |
-| Host status, request state | `control.json.host-status`, `control.json.request-state` |
-| Generated configuration | `/etc/virtio-mem-guest/config.json` |
+| Control channel | virtio-serial port `org.virtio-mem.control.0` |
+| Durable request state | `/var/lib/virtio-mem-guest/control.json.request-state` |
+| Control files, without the channel | `/var/lib/virtio-mem-guest/control.json` and `control.json.host-status` |
 
-Generate the configuration from the settings, then install the release binary,
-configuration and unit in the guest. The guest also needs `qemu-guest-agent`
-running, with file commands allowed, because the host reads and writes the
-control files through it.
+Add the control channel to the domain while the controller is stopped, then
+refresh the compatibility attestation before restarting it. Libvirt supplies
+the host socket; the host finds it in the domain XML and needs the `qemu`
+supplementary group to connect, as for the wake port.
+
+```xml
+<channel type='unix'>
+  <target type='virtio' name='org.virtio-mem.control.0'/>
+  <alias name='ua-virtiomem-control'/>
+</channel>
+```
+
+With the channel, the guest needs no guest agent and the host has no file
+access to the guest. Without it, the host reads and writes the control files
+through `qemu-guest-agent`, which must then run with file commands allowed
+(RHEL-family guests block them by default). The host uses whichever route
+the guest's publications arrive on, and the guest logs which one it uses at
+start.
+
+Install the release binary and unit in the guest:
 
 ```bash
-cargo xtask linux config deploy/config_files/debian13_settings.toml > config.json
-cargo build --release --locked -p virtio-mem-guest-linux
+cargo xtask linux build
 # In the guest:
 install -D -m 0755 virtio-mem-guest /usr/local/libexec/virtio-mem-guest
-install -D -m 0644 config.json /etc/virtio-mem-guest/config.json
 install -m 0644 virtio-mem-guest.service /etc/systemd/system/
 systemctl daemon-reload && systemctl enable --now virtio-mem-guest
 ```
 
+The service waits, logging that it is waiting, until the host has published
+its settings.
+
 Linux memory is reported in the shared telemetry fields as follows.
 
 - Physical total and available are `MemTotal` and `MemAvailable`.
-- The commit limit is `MemTotal + SwapTotal` and the commit total is that less
-  `MemAvailable + SwapFree`. The kernel's `CommitLimit`/`Committed_AS` are not
-  used: they are not enforced under the default overcommit heuristic. Strict
-  overcommit (`vm.overcommit_memory=2`) is not modelled.
-- Native pressure comes from `/proc/pressure/memory` (`some avg10`): 10 % or
-  more is Low, exactly zero is High and anything between is Neutral. As on
-  Windows, only High permits reclaim and Low is an urgent growth trigger. A
-  kernel without pressure stall information reports nothing, which allows
-  growth and never reclaim.
+- Under strict overcommit (`vm.overcommit_memory=2` with a RAM-scaled limit)
+  the commit pair is the kernel's `CommitLimit` and `Committed_AS`, which it
+  enforces. Otherwise the commit limit is `MemTotal + SwapTotal` and the
+  commit total is that less `MemAvailable + SwapFree`; its headroom is never
+  below available RAM, so the commit reserve asks for nothing.
+- File cache the guest is re-reading from disk (the kernel's
+  `workingset_refault_file`) is reported as in use rather than available, so
+  the guest grows until the re-reads stop and gives that memory back a step
+  at a time once they have.
+- Native pressure comes from `/proc/pressure/memory`. A pressure trigger
+  (100 ms of stall in 1 s, or 200 ms in 2 s without `CAP_SYS_RESOURCE`) is
+  Low, an urgent growth trigger that wakes the service at once. Exactly zero
+  `some avg10` is High, the only state that permits reclaim; anything else
+  is Neutral. A kernel without pressure stall information reports nothing,
+  which allows growth and never reclaim.
 - The driver version field carries the kernel release, since the Linux
   virtio-mem driver ships with its kernel.
 
-The guest polls on the configured interval; it has no wake channel yet. Up to
-four consecutive failed polls are skipped with reclaim history reset, because
+The guest polls on the host's interval. A pressure trigger, or a status
+arriving on the control channel, wakes it early. Up to four consecutive
+failed polls are skipped with reclaim history reset, because
 host status and the guest's counters are not read atomically; the fifth ends
 the service and systemd restarts it. A retained request survives both.
 
@@ -344,24 +377,17 @@ shrink extension) only to Windows guests. For a Linux guest a growth is held
 until the guest plugs it, and a removal that has not moved for the convergence
 timeout settles at what the guest returned and reports a partial result.
 
-### Prompt memory notifications
+### Windows guests on the control channel
 
-Add the optional dedicated port while the controller is stopped, then refresh
-compatibility attestation before restarting it. Do not reuse the QEMU guest-agent
-port. Libvirt supplies the Unix socket path; the host discovers it in domain XML.
+A Windows guest uses the same control channel as a Linux guest, the port
+`org.virtio-mem.control.0` (see [Linux guests](#linux-guests) for the domain
+XML). The service opens it as `\\.\Global\org.virtio-mem.control.0`.
+Windows deployment gives LocalService read/write access to that port's
+device instance only, backs up its previous security property and restarts
+the port if it changed; it does not alter the QEMU guest-agent port. Without
+the port the service uses the control files through the guest agent, as
+before.
 
-```xml
-<channel type='unix'>
-  <target type='virtio' name='org.virtio-mem.wake.0'/>
-  <alias name='ua-virtiomem-wake'/>
-</channel>
-```
-
-The host service needs the `qemu` supplementary group to connect to libvirt's
-socket. Windows deployment provisions LocalService read/write access only on
-the named wake-port device instance, backs up its previous security property
-and restarts that port if changed. It does not alter the QEMU guest-agent port.
-Installations without this port continue polling and report the missing wake
-channel. Polling remains a fallback; native Low pressure, result arrival and
-libvirt size-change events can wake earlier. Notification bytes carry no RAM
-values or authorisation. The same durable protocol and reserve checks apply.
+The separate wake port, `org.virtio-mem.wake.0`, is now needed only by
+Windows services built before the control channel; the host still answers
+it for them. A record on the control channel wakes the other side itself.

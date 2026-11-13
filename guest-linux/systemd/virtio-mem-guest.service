@@ -1,13 +1,18 @@
 [Unit]
 Description=Virtio-mem guest memory requests
 Documentation=https://github.com/macg4dave/virtio-mem-pool
-# The host exchanges the control files through the guest agent.
+# Without the control channel the host exchanges the control files through
+# the guest agent instead.
 After=qemu-guest-agent.service
 ConditionVirtualization=kvm
 
 [Service]
 Type=exec
-ExecStart=/usr/local/libexec/virtio-mem-guest run --config /etc/virtio-mem-guest/config.json
+ExecStart=/usr/local/libexec/virtio-mem-guest run
+# The control channel to the host. systemd opens it and hands the service the
+# descriptor, so the unprivileged service needs no device access. "graceful":
+# a VM without the port starts the service anyway, on the control files.
+OpenFile=/dev/virtio-ports/org.virtio-mem.control.0:control:graceful
 # When the guest runs out of memory this service is what asks for more, so
 # it must be among the last processes the kernel kills. On 2026-11-13 a
 # fast fill killed it and the guest could never grow again.
@@ -17,8 +22,9 @@ OOMScoreAdjust=-900
 Restart=on-failure
 RestartSec=5
 # Unprivileged: the service only reads /proc and writes its state directory.
-# The guest agent (root) reads the publication and writes the host status
-# beside it, so the directory and its files stay readable.
+# On the control files the guest agent (root) reads the publication and
+# writes the host status beside it, so the directory and its files stay
+# readable.
 DynamicUser=yes
 StateDirectory=virtio-mem-guest
 StateDirectoryMode=0755

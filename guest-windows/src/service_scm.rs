@@ -27,7 +27,6 @@ use crate::config::ServiceConfig;
 use crate::event_log::{
     ServiceEvent, ServiceEventId, ServiceEventLevel, ServiceEventSink, WindowsEventLog,
 };
-use crate::runtime::native_worker;
 use crate::service_host::{ServiceHost, ServiceState, StopSignal};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -235,7 +234,7 @@ fn provision_program_data_acl(config: &ServiceConfig) -> Result<(), String> {
             "automatic ACL provisioning supports only NT AUTHORITY\\LocalService".to_owned(),
         );
     }
-    let report = std::path::Path::new(&config.demand_report_path);
+    let report = std::path::Path::new(virtio_mem_core::settings::CONTROL_PATH);
     let config_path = std::path::Path::new(&config.config_path);
     let root = config_path
         .parent()
@@ -468,24 +467,7 @@ unsafe extern "system" fn service_main(argc: DWORD, argv: *mut *mut u16) {
         );
         return;
     }
-    let worker = match native_worker(&config) {
-        Ok(worker) => worker,
-        Err(error) => {
-            emit_event(
-                &event_source,
-                ServiceEvent::new(
-                    ServiceEventId::WorkerFailed,
-                    ServiceEventLevel::Error,
-                    error.to_string(),
-                ),
-            );
-            let _ = publish_status(
-                status_handle,
-                ScmServiceStatus::from_state(ServiceState::Failed),
-            );
-            return;
-        }
-    };
+    let worker = crate::platform::ProtocolWorker;
     let stop_observer = stop.clone();
     let mut host =
         ServiceHost::with_stop_and_shutdown_timeout(worker, stop, config.shutdown_timeout());

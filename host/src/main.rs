@@ -7,6 +7,7 @@ use signal_hook::flag;
 use virtio_mem_host::attestation::{read_attestation, AttestedCompatibilitySource};
 use virtio_mem_host::cli::CliCommand;
 use virtio_mem_host::config::{HostConfig, HostSettings};
+use virtio_mem_host::control_channel::ControlChannel;
 use virtio_mem_host::guest_channel::GuestChannel;
 use virtio_mem_host::host_memory::ProcMeminfoSource;
 use virtio_mem_host::ownership::DeviceOwner;
@@ -61,13 +62,16 @@ fn main() -> ExitCode {
     let mut owners = Vec::with_capacity(settings.vms.len());
     let mut vms = Vec::with_capacity(settings.vms.len());
     let mut wake = Vec::with_capacity(settings.vms.len());
+    let mut controls = Vec::with_capacity(settings.vms.len());
     for config in settings.vms {
         let peer = virtio_mem_host::wake::WakePeer::new(virsh.clone(), config.vm_name.clone());
-        match vm_controller(&virsh, config, Arc::clone(&peer)) {
+        let control = ControlChannel::new(virsh.clone(), config.vm_name.clone());
+        match vm_controller(&virsh, config, Arc::clone(&peer), Arc::clone(&control)) {
             Ok((owner, vm)) => {
                 owners.push(owner);
                 vms.push(vm);
                 wake.push(peer);
+                controls.push(control);
             }
             Err(error) => {
                 eprintln!("virtio-mem-host controller setup error: {error}");
@@ -89,7 +93,7 @@ fn main() -> ExitCode {
             None
         }
     };
-    runtime = runtime.with_wake(wake, events);
+    runtime = runtime.with_wake(wake, controls, events);
     let result = runtime.run(&stop);
     drop(owners);
     match result {
@@ -114,6 +118,7 @@ fn vm_controller(
     virsh: &Virsh,
     config: HostConfig,
     wake: Arc<virtio_mem_host::wake::WakePeer>,
+    control: Arc<ControlChannel>,
 ) -> Result<(DeviceOwner, Controller), String> {
     let owner = DeviceOwner::for_domain(virsh, &config.vm_name)?;
     let fingerprint =
@@ -127,7 +132,8 @@ fn vm_controller(
             config.raw_telemetry_max_age,
             config.raw_telemetry_future_tolerance,
         )
-        .with_wake(wake),
+        .with_wake(wake)
+        .with_control(control),
         VirshXmlSource::new(virsh.clone(), config.vm_name.clone(), config.alias.clone()),
         VirshResizeSink::new(
             virsh.clone(),

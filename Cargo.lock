@@ -931,14 +931,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "virtio-mem-guest"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "virtio-mem-core",
+ "winapi",
+]
+
+[[package]]
 name = "virtio-mem-guest-linux"
 version = "0.1.0"
 dependencies = [
  "libc",
  "serde_json",
  "signal-hook",
- "toml",
  "virtio-mem-core",
+ "virtio-mem-guest",
 ]
 
 [[package]]
@@ -949,6 +958,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "virtio-mem-core",
+ "virtio-mem-guest",
  "winapi",
 ]
 

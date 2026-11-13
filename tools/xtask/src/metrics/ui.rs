@@ -891,7 +891,7 @@ mod tests {
     fn test_command() -> Command {
         let config = crate::repo_root()
             .expect("repository root")
-            .join("deploy/config_files/host_list.toml");
+            .join("fixtures/config/host_list.toml");
         super::super::parse(&["--config".to_owned(), config.to_string_lossy().into_owned()])
             .expect("command")
     }
@@ -906,7 +906,7 @@ mod tests {
         assert!(screen(&live, &Ui::default(), 120, 40).contains("waiting for the first sample"));
 
         let telemetry = RawTelemetryEnvelope::new(
-            "win11_gpu",
+            "windows-guest",
             "VirtioMemService",
             "session",
             unix_millis(),

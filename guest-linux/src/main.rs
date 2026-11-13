@@ -1,69 +1,78 @@
-use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::time::Duration;
 
 use signal_hook::consts::signal::{SIGINT, SIGTERM};
-use virtio_mem_guest_linux::config::{self, DEFAULT_CONFIG_PATH};
+use virtio_mem_core::settings::{LINUX_CONTROL_PATH, LINUX_SERVICE_NAME};
+use virtio_mem_guest::requests::GuestIdentity;
+use virtio_mem_guest::serve::{serve, Platform, Sources};
+use virtio_mem_guest_linux::clock::SystemClock;
 use virtio_mem_guest_linux::meminfo::ProcMeminfo;
 use virtio_mem_guest_linux::pressure::ProcPressure;
-use virtio_mem_guest_linux::readiness;
-use virtio_mem_guest_linux::requests::GuestRequests;
-use virtio_mem_guest_linux::worker::{process_session_id, GuestWorker, SystemClock};
-use virtio_mem_guest_linux::BUILD_ID;
+use virtio_mem_guest_linux::{channel, kernel_release, readiness, BUILD_ID};
 
-const HELP: &str = "Usage: virtio-mem-guest [run [--config PATH]|version|help]\n\
+const HELP: &str = "Usage: virtio-mem-guest [run [--control PATH] [--channel PATH]|version|help]\n\
 Runs in the foreground until SIGTERM or SIGINT; systemd supervises it as\n\
-virtio-mem-guest.service. The default configuration is\n\
-/etc/virtio-mem-guest/config.json.";
+virtio-mem-guest.service. It has no configuration file: the host publishes\n\
+this VM's name, limits and policy with its status.\n\
+\n\
+The host is reached over the control channel when there is one: the port\n\
+named by --channel, or the one systemd opened for the unit. Otherwise the\n\
+control files are used, which the host reaches through the guest agent.\n\
+--control names the control publication and the directory of the durable\n\
+request state; the default is /var/lib/virtio-mem-guest/control.json.";
 
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
-    Run(PathBuf),
+    Run {
+        control: String,
+        channel: Option<String>,
+    },
     Version,
     Help,
+}
+
+fn absolute_file(path: &str) -> bool {
+    path.starts_with('/') && !path.ends_with('/')
 }
 
 fn parse_command(arguments: &[String]) -> Result<Command, String> {
     let arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
     match arguments.as_slice() {
-        [] | ["run"] => Ok(Command::Run(PathBuf::from(DEFAULT_CONFIG_PATH))),
-        ["run", "--config", path] if !path.is_empty() => Ok(Command::Run(PathBuf::from(path))),
-        ["version" | "--version"] => Ok(Command::Version),
-        ["help" | "--help" | "-h"] => Ok(Command::Help),
-        _ => Err("unknown command; use 'help' for usage".to_owned()),
+        ["version" | "--version"] => return Ok(Command::Version),
+        ["help" | "--help" | "-h"] => return Ok(Command::Help),
+        [] => {}
+        ["run", ..] => {}
+        _ => return Err("unknown command; use 'help' for usage".to_owned()),
     }
+    let mut control = None;
+    let mut channel = None;
+    let mut options = arguments.iter().skip(1);
+    while let Some(option) = options.next() {
+        let slot = match *option {
+            "--control" if control.is_none() => &mut control,
+            "--channel" if channel.is_none() => &mut channel,
+            _ => return Err("unknown command; use 'help' for usage".to_owned()),
+        };
+        match options.next() {
+            Some(path) if absolute_file(path) => *slot = Some((*path).to_owned()),
+            _ => return Err(format!("{option} needs an absolute file path")),
+        }
+    }
+    Ok(Command::Run {
+        control: control.unwrap_or_else(|| LINUX_CONTROL_PATH.to_owned()),
+        channel,
+    })
 }
 
-fn run(config_path: &Path) -> Result<(), String> {
-    let config = config::load(config_path)?;
+fn run(control_path: &str, channel_path: Option<&str>) -> Result<(), String> {
     let stop = Arc::new(AtomicBool::new(false));
     for signal in [SIGTERM, SIGINT] {
         signal_hook::flag::register(signal, Arc::clone(&stop))
             .map_err(|error| format!("signal setup failed: {error}"))?;
     }
-    let mut requests = GuestRequests::open(
-        config.policy,
-        &config.vm_name,
-        &config.service_name,
-        &process_session_id()?,
-        &config.control_path,
-    )?;
-    requests.set_ram_limits(config.min_ram, config.max_ram)?;
-    let mut worker = GuestWorker::new(
-        ProcMeminfo::with_cache_floor(config.policy.grow_step_bytes),
-        ProcPressure::open(),
-        SystemClock::default(),
-        requests,
-        &config.control_path,
-        Duration::from_millis(config.poll_interval_millis),
-    )?
-    .with_environment(readiness::environment);
-    eprintln!(
-        "virtio-mem-guest {BUILD_ID} started: vm={} control={}",
-        config.vm_name, config.control_path
-    );
+    let transport = channel::select(control_path, channel_path)?;
+    eprintln!("virtio-mem-guest {BUILD_ID} started; request state beside {control_path}");
     let ready = readiness::assess(&readiness::Probe::read());
     let facts: Vec<String> = ready
         .environment
@@ -74,7 +83,22 @@ fn run(config_path: &Path) -> Result<(), String> {
     for warning in &ready.warnings {
         eprintln!("warning: {warning}");
     }
-    worker.run(&stop)
+    let platform = Platform {
+        service_name: LINUX_SERVICE_NAME,
+        control_path,
+        identity: GuestIdentity {
+            build_id: BUILD_ID.to_owned(),
+            driver_version: kernel_release(),
+        },
+        environment: readiness::environment,
+    };
+    serve(&platform, transport, &stop, |settings| {
+        Ok(Sources {
+            memory: ProcMeminfo::with_cache_floor(settings.policy.grow_step_bytes),
+            pressure: ProcPressure::open(),
+            clock: SystemClock::default(),
+        })
+    })
 }
 
 fn main() -> ExitCode {
@@ -82,8 +106,8 @@ fn main() -> ExitCode {
     match parse_command(&arguments) {
         Ok(Command::Help) => println!("{HELP}"),
         Ok(Command::Version) => println!("{BUILD_ID}"),
-        Ok(Command::Run(config_path)) => {
-            if let Err(error) = run(&config_path) {
+        Ok(Command::Run { control, channel }) => {
+            if let Err(error) = run(&control, channel.as_deref()) {
                 eprintln!("virtio-mem-guest failed: {error}");
                 return ExitCode::FAILURE;
             }
@@ -110,18 +134,39 @@ mod tests {
                     .collect::<Vec<_>>(),
             )
         };
-        let default = Command::Run(PathBuf::from(DEFAULT_CONFIG_PATH));
-        assert_eq!(parse(&[]), Ok(default));
+        let run = |control: &str, channel: Option<&str>| Command::Run {
+            control: control.to_owned(),
+            channel: channel.map(str::to_owned),
+        };
+        assert_eq!(parse(&[]), Ok(run(LINUX_CONTROL_PATH, None)));
+        assert_eq!(parse(&["run"]), parse(&[]));
         assert_eq!(
-            parse(&["run", "--config", "/tmp/config.json"]),
-            Ok(Command::Run(PathBuf::from("/tmp/config.json")))
+            parse(&["run", "--control", "/tmp/control.json"]),
+            Ok(run("/tmp/control.json", None))
+        );
+        assert_eq!(
+            parse(&[
+                "run",
+                "--channel",
+                "/dev/virtio-ports/org.virtio-mem.control.0",
+                "--control",
+                "/tmp/c.json"
+            ]),
+            Ok(run(
+                "/tmp/c.json",
+                Some("/dev/virtio-ports/org.virtio-mem.control.0")
+            ))
         );
         assert_eq!(parse(&["version"]), Ok(Command::Version));
         assert_eq!(parse(&["--help"]), Ok(Command::Help));
         for bad in [
             &["install"][..],
-            &["run", "--config"],
-            &["run", "--config", ""],
+            &["run", "--control"],
+            &["run", "--control", ""],
+            &["run", "--control", "relative.json"],
+            &["run", "--channel"],
+            &["run", "--channel", "/a", "--channel", "/b"],
+            &["run", "--config", "/etc/virtio-mem-guest/config.json"],
             &["run", "extra"],
             &["version", "extra"],
         ] {

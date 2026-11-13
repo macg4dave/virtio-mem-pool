@@ -7,7 +7,21 @@ use crate::guest_policy::GuestPolicyDiagnostics;
 use crate::memory_request::{valid_identity, MemoryRequest, MemoryResult};
 
 /// Version 5 adds diagnostic explanations; readers still accept version 4.
-pub const RAW_TELEMETRY_VERSION: u16 = 5;
+///
+/// Version 6 means the guest reads `HostMemoryStatus::guest_settings`. Older
+/// guests reject a status that carries it, so the host sends it only to a
+/// guest that has published version 6 or nothing yet (see
+/// `sends_guest_settings_to`).
+pub const RAW_TELEMETRY_VERSION: u16 = 6;
+/// The first publication version whose guest reads published settings.
+pub const GUEST_SETTINGS_VERSION: u16 = 6;
+
+/// Whether a status for a guest whose last publication had `version` (`None`
+/// before any) may carry guest settings. A guest that has published nothing
+/// may be one waiting for its settings before it can start.
+pub fn sends_guest_settings_to(version: Option<u16>) -> bool {
+    version.is_none_or(|version| version >= GUEST_SETTINGS_VERSION)
+}
 
 /// Native, canonical-byte memory observations collected from the guest. The
 /// fields are Windows' counters; the Linux guest service documents how it
@@ -142,7 +156,7 @@ impl RawTelemetryEnvelope {
         max_age_millis: u64,
         future_tolerance_millis: u64,
     ) -> Result<(), DemandError> {
-        if !matches!(self.version, 4 | RAW_TELEMETRY_VERSION) {
+        if !matches!(self.version, 4 | 5 | RAW_TELEMETRY_VERSION) {
             return Err(DemandError::UnsupportedTelemetryVersion(self.version));
         }
         for (field, value) in [
@@ -323,6 +337,15 @@ mod tests {
             parsed.validate_for("guest", "VirtioMemService", 1_000_000, 60_000, 5000),
             Ok(())
         );
+    }
+
+    #[test]
+    fn only_guests_that_read_settings_are_sent_them() {
+        assert!(sends_guest_settings_to(None));
+        assert!(!sends_guest_settings_to(Some(4)));
+        assert!(!sends_guest_settings_to(Some(5)));
+        assert!(sends_guest_settings_to(Some(GUEST_SETTINGS_VERSION)));
+        assert!(sends_guest_settings_to(Some(RAW_TELEMETRY_VERSION)));
     }
 
     #[test]

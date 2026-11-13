@@ -479,6 +479,7 @@ mod tests {
             observe_only: false,
             min_ram: 0,
             max_ram: u64::MAX,
+            guest_settings: None,
             telemetry_path: None,
         }
     }

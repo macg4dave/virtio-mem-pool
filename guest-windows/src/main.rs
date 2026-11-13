@@ -1,7 +1,7 @@
 use std::process;
 
 use virtio_mem_guest_windows::{
-    install_service, native_worker, remove_service, run_as_service, start_service, stop_service,
+    install_service, remove_service, run_as_service, start_service, stop_service, ProtocolWorker,
     RuntimeWiringError, ServiceConfig, ServiceHost, BUILD_ID,
 };
 
@@ -35,8 +35,7 @@ fn parse_command(args: &[String]) -> Option<ServiceCommand> {
 
 /// A console run; `load_default` has already validated `config`.
 fn run_service(config: ServiceConfig) -> Result<(), RuntimeWiringError> {
-    let worker = native_worker(&config)?;
-    let mut host = ServiceHost::with_shutdown_timeout(worker, config.shutdown_timeout());
+    let mut host = ServiceHost::with_shutdown_timeout(ProtocolWorker, config.shutdown_timeout());
     host.run()
         .map_err(|error| RuntimeWiringError::HostExecution(error.to_string()))?;
 

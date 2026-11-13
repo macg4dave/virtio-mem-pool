@@ -907,8 +907,7 @@ fn deploy(
     let manifest_path = resolve_local(repo, manifest_path);
     let output_path = resolve_local(repo, output_path);
     let manifest = settings::load_vm(&manifest_path)?;
-    let globals = settings::load_globals(manifest_path.parent().unwrap_or(Path::new(".")))?;
-    let service_config = manifest.service_config(&globals)?;
+    let service_config = manifest.service_config()?;
     service_config.validate()?;
     service_config.validate_paths(r"C:\ProgramData\VirtioMemService\config.json")?;
     let record = required_record(config)?;
@@ -942,12 +941,7 @@ fn deploy(
                 .map_err(|error| format!("encode Windows service configuration: {error}"))?
                 .as_bytes(),
         );
-        let script = deployment_powershell(
-            &manifest,
-            &candidate_path,
-            &config_base64,
-            service_config.poll_interval_millis,
-        );
+        let script = deployment_powershell(&manifest, &candidate_path, &config_base64);
         let output = remote_powershell(config, repo, &script)?;
         Some(parse_last_json_line(&output)?)
     } else {
@@ -1265,13 +1259,11 @@ fn deployment_powershell(
     manifest: &VmSettings,
     candidate_path: &str,
     config_base64: &str,
-    poll_interval_millis: u64,
 ) -> String {
     let service = ps_literal(SERVICE_NAME);
     let candidate = ps_literal(candidate_path);
     let install = ps_literal(manifest.windows_install().map_or("", |(path, _)| path));
     let telemetry = ps_literal(CONTROL_PATH);
-    let wait_millis = poll_interval_millis.saturating_mul(3).max(1000);
     format!(
         r#"{PS_BUILD_FUNCTIONS}
 $ErrorActionPreference='Stop'
@@ -1300,7 +1292,7 @@ if(Test-Path $config) {{
   $oldConfig=Get-Content -LiteralPath $config -Raw | ConvertFrom-Json
   $newConfig=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{config_base64}')) | ConvertFrom-Json
   if($oldConfig.schema_version -ne $newConfig.schema_version) {{
-    foreach($field in @('vm_name','service_name','service_account','demand_report_path','poll_interval_millis','shutdown_timeout_millis','policy')) {{
+    foreach($field in @('service_name','service_account','shutdown_timeout_millis')) {{
       Assert-LegacySetting $oldConfig.$field $newConfig.$field $field
     }}
   }}
@@ -1312,17 +1304,16 @@ try {{
   [IO.File]::WriteAllBytes($config,[Convert]::FromBase64String('{config_base64}'))
   & $install install
   if($LASTEXITCODE -ne 0){{throw "candidate install failed with exit code $LASTEXITCODE"}}
-  {wake_access}
-  $wakeAccess=Set-VirtioMemWakeChannelAccess -BackupDirectory $backup
+  {port_access}
+  $controlAccess=Set-VirtioMemPortAccess -PortName {control_port} -BackupDirectory $backup
   & $install start
   if($LASTEXITCODE -ne 0){{throw "candidate start failed with exit code $LASTEXITCODE"}}
   (Get-Service $service).WaitForStatus('Running',[TimeSpan]::FromSeconds(30))
-  Start-Sleep -Milliseconds {wait_millis}
-  $first=Get-Content -LiteralPath $telemetry -Raw | ConvertFrom-Json
-  Start-Sleep -Milliseconds {wait_millis}
-  $second=Get-Content -LiteralPath $telemetry -Raw | ConvertFrom-Json
-  if($second.sequence -le $first.sequence){{throw 'telemetry sequence did not advance'}}
-  if($second.vm_name -ne {vm} -or $second.service_name -ne $service){{throw 'telemetry identity mismatch'}}
+  # The service publishes only once the host has sent its settings, and over
+  # the control channel it writes no file: it must still be running after a
+  # few seconds, which a configuration or start-up fault would not survive.
+  Start-Sleep -Seconds 5
+  if((Get-Service $service).Status -ne 'Running'){{throw 'the service stopped after starting'}}
   $installed=Get-CimInstance Win32_Service -Filter ("Name='"+$service.Replace("'","''")+"'")
   [ordered]@{{
     captured_unix_millis=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
@@ -1332,18 +1323,14 @@ try {{
     config_sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath $config).Hash.ToLowerInvariant()
     binary_acl=(Get-Acl -LiteralPath $install).Sddl
     config_acl=(Get-Acl -LiteralPath $config).Sddl
-    telemetry_acl=(Get-Acl -LiteralPath $telemetry).Sddl
-    wake_access=$wakeAccess
+    telemetry_acl=$(if(Test-Path -LiteralPath $telemetry){{(Get-Acl -LiteralPath $telemetry).Sddl}}else{{$null}})
+    control_port_access=$controlAccess
     service_name=$installed.Name
     service_state=$installed.State
     service_start_mode=$installed.StartMode
     service_account=$installed.StartName
     service_path=$installed.PathName
     service_error_control=$installed.ErrorControl
-    first_session_id=$first.session_id
-    first_sequence=$first.sequence
-    second_session_id=$second.session_id
-    second_sequence=$second.sequence
   }} | ConvertTo-Json -Compress
 }} catch {{
   try {{Stop-Service -Name $service -Force -ErrorAction SilentlyContinue; & sc.exe delete $service | Out-Null}} catch {{}}
@@ -1352,8 +1339,8 @@ try {{
   if(Test-Path (Join-Path $backup 'service.reg')){{& reg.exe import (Join-Path $backup 'service.reg') | Out-Null; if($priorRunning){{Start-Service -Name $service}}}}
   throw
 }}"#,
-        vm = ps_literal(&manifest.vm_name),
-        wake_access = include_str!("../../../tools/windows/Set-WakeChannelAccess.ps1"),
+        port_access = include_str!("../../../tools/windows/Set-PortAccess.ps1"),
+        control_port = ps_literal(virtio_mem_core::MEMORY_CONTROL_CHANNEL_NAME),
     )
 }
 
@@ -1660,20 +1647,18 @@ mod tests {
     }
 
     #[test]
-    fn tracked_vm_deploys_without_optional_telemetry() {
+    fn fixture_vm_deploys_without_optional_telemetry() {
         let path = crate::repo_root()
             .expect("repo")
-            .join("deploy/config_files/win11_gpu_settings.toml");
+            .join("fixtures/config/windows-guest_settings.toml");
         let vm = settings::load_vm(&path).expect("VM settings");
-        let globals = settings::load_globals(path.parent().unwrap()).expect("globals");
-        let wire = vm.service_config(&globals).unwrap();
+        let wire = vm.service_config().unwrap();
         wire.validate().expect("valid service config");
         wire.validate_paths(r"C:\ProgramData\VirtioMemService\config.json")
             .expect("distinct paths");
-        assert!(wire.telemetry_path.is_none());
-        assert_eq!(wire.demand_report_path, CONTROL_PATH);
-        let script = deployment_powershell(&vm, "candidate.exe", "e30=", wire.poll_interval_millis);
+        let script = deployment_powershell(&vm, "candidate.exe", "e30=");
         assert!(script.contains(CONTROL_PATH));
+        assert!(script.contains("Set-VirtioMemPortAccess -PortName 'org.virtio-mem.control.0'"));
         assert!(script.contains("deployment-backups"));
         assert!(script.contains("Assert-LegacySetting"));
     }

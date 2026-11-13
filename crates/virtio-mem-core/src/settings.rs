@@ -171,9 +171,6 @@ pub struct VmSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_account: Option<String>,
     pub vm_name: String,
-    /// Optional Windows diagnostic output, independent of memory requests.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub telemetry_path: Option<String>,
 }
 
 impl VmSettings {
@@ -193,11 +190,8 @@ impl VmSettings {
         match self.guest_os {
             GuestOs::Windows => self.validate_windows(),
             GuestOs::Linux => {
-                if self.install_path.is_some()
-                    || self.service_account.is_some()
-                    || self.telemetry_path.is_some()
-                {
-                    return Err("install_path, service_account and telemetry_path are Windows settings; omit them for a Linux guest".to_owned());
+                if self.install_path.is_some() || self.service_account.is_some() {
+                    return Err("install_path and service_account are Windows settings; omit them for a Linux guest".to_owned());
                 }
                 Ok(())
             }
@@ -224,21 +218,6 @@ impl VmSettings {
         if service_account.trim().is_empty() || service_account.chars().any(char::is_control) {
             return Err("service_account must be nonempty without control characters".to_owned());
         }
-        if let Some(path) = &self.telemetry_path {
-            let path = crate::windows_service_config::normalize_windows_path(path)?;
-            let control = crate::windows_service_config::normalize_windows_path(CONTROL_PATH)?;
-            let config = crate::windows_service_config::normalize_windows_path(
-                r"C:\ProgramData\VirtioMemService\config.json",
-            )?;
-            let executable = crate::windows_service_config::normalize_windows_path(install_path)?;
-            if path == control
-                || path.starts_with(&format!("{control}."))
-                || path == config
-                || path == executable
-            {
-                return Err("telemetry_path collides with control, configuration or executable files; omit it to disable diagnostics".to_owned());
-            }
-        }
         Ok(())
     }
 
@@ -252,26 +231,17 @@ impl VmSettings {
         globals.guest_policy(self.free_ram, removal_step)
     }
 
-    /// The Windows service's generated runtime configuration.
-    pub fn service_config(
-        &self,
-        globals: &GlobalSettings,
-    ) -> Result<WindowsServiceConfigFile, String> {
+    /// The Windows service's install configuration. Its limits and policy
+    /// are not in it: the host publishes them, as for a Linux guest.
+    pub fn service_config(&self) -> Result<WindowsServiceConfigFile, String> {
         let (_, service_account) = self.windows_install()?;
         Ok(WindowsServiceConfigFile {
             schema_version: WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION,
-            vm_name: self.vm_name.clone(),
             service_name: SERVICE_NAME.to_owned(),
             display_name: "Virtio Memory Service".to_owned(),
             description: "Manages guest virtio-mem requests.".to_owned(),
-            demand_report_path: CONTROL_PATH.to_owned(),
             service_account: service_account.to_owned(),
-            poll_interval_millis: globals.poll_interval_seconds * 1000,
             shutdown_timeout_millis: 30_000,
-            policy: self.guest_policy(globals),
-            min_ram: self.min_ram,
-            max_ram: self.max_ram,
-            telemetry_path: self.telemetry_path.clone(),
         })
     }
 
@@ -369,7 +339,8 @@ impl HostList {
                     || file.file_name().is_none()
                     || file.starts_with("/var/lib/virtio-mem-host")
                     || file.starts_with("/etc/virtio-mem-host")
-                    || !file.is_absolute()
+                    // Host paths are Linux paths, whatever platform checks them.
+                    || !path.starts_with('/')
                     || path.chars().any(char::is_control)
                     || !paths.insert(file)
                 {
@@ -463,7 +434,6 @@ mod tests {
                 r"C:\Program Files\VirtioMemService\virtio-mem-service.exe".to_owned(),
             ),
             service_account: Some(r"NT AUTHORITY\LocalService".to_owned()),
-            telemetry_path: None,
         }
     }
 
@@ -492,13 +462,12 @@ mod tests {
         let globals: GlobalSettings = toml::from_str("").unwrap();
         globals.validate().unwrap();
         assert!(!text.contains("guest_os"));
-        let service = settings.service_config(&globals).unwrap();
+        let service = settings.service_config().unwrap();
         service.validate().unwrap();
         service
             .validate_paths(r"C:\ProgramData\VirtioMemService\config.json")
             .unwrap();
-        assert_eq!(service.demand_report_path, CONTROL_PATH);
-        assert!(service.telemetry_path.is_none());
+        assert_eq!(service.service_account, r"NT AUTHORITY\LocalService");
         let host: HostList =
             toml::from_str("[[vm]]\nvm_name='guest'\nalias='memory0'\npriority=1").unwrap();
         host.validate().unwrap();
@@ -530,7 +499,7 @@ mod tests {
         assert_eq!((published.min_ram, published.max_ram), (2 * GIB, 5 * GIB));
         assert_eq!(published.policy, linux.guest_policy(&globals));
         assert_eq!(published.poll_interval_millis, 5000);
-        assert!(linux.service_config(&globals).is_err());
+        assert!(linux.service_config().is_err());
 
         let mut mixed = linux.clone();
         mixed.service_account = Some("root".to_owned());
@@ -590,19 +559,14 @@ mod tests {
             assert!(settings.validate().is_err());
         }
         settings = vm("guest");
-        for path in [
-            "",
-            "relative.json",
-            CONTROL_PATH,
-            r"C:\ProgramData\VirtioMemService\telemetry.json.requests",
-            r"C:\ProgramData\VirtioMemService\config.json",
-        ] {
-            settings.telemetry_path = Some(path.to_owned());
-            assert!(settings.validate().is_err(), "{path}");
-        }
-        settings.telemetry_path =
-            Some(r"C:\ProgramData\VirtioMemService\diagnostic.json".to_owned());
-        settings.validate().unwrap();
+        assert!(
+            toml::from_str::<VmSettings>(&format!(
+                "{}\ntelemetry_path='C:\\\\x.json'",
+                toml::to_string(&settings).unwrap()
+            ))
+            .is_err(),
+            "the Windows diagnostic copy is gone"
+        );
         assert!(toml::from_str::<VmSettings>(&format!(
             "{}\npoll_interval_millis=5000",
             toml::to_string(&settings).unwrap()

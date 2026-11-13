@@ -288,7 +288,7 @@ mod tests {
     fn requires_a_config_and_a_run_limit() {
         let command = parse(&args(&[
             "--config",
-            ".artifacts/run/win11_gpu.toml",
+            ".artifacts/run/guest.toml",
             "--max-run-seconds",
             "600",
             "--min-host-available-bytes",

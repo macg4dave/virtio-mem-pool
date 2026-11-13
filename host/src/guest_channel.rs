@@ -1,6 +1,10 @@
-//! The host side of the guest channel: bounded reads of the Windows
-//! publication (telemetry plus the guest's unresolved request) and writes of
-//! the host status beside it, over the QEMU guest agent.
+//! The host side of the guest channel: the guest's publication (telemetry
+//! plus its unresolved request) in, the host status out.
+//!
+//! Two routes carry the same records. A guest that sends its publications
+//! over the control channel is answered there. Otherwise the publication is
+//! read, and the status written beside it, as files through the QEMU guest
+//! agent; Windows guests use this route until they move to the channel.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -49,6 +53,10 @@ pub struct GuestChannel<Q, T = SystemUnixClock> {
     clock: T,
     #[cfg(unix)]
     wake: Option<std::sync::Arc<crate::wake::WakePeer>>,
+    #[cfg(unix)]
+    control: Option<std::sync::Arc<crate::control_channel::ControlChannel>>,
+    /// The last publication read came over the control channel.
+    via_control: std::cell::Cell<bool>,
     last_status: std::cell::RefCell<Option<HostMemoryStatus>>,
     last_write: std::cell::Cell<Option<Instant>>,
 }
@@ -81,6 +89,26 @@ impl<Q, T> GuestChannel<Q, T> {
         self
     }
 
+    #[cfg(unix)]
+    pub fn with_control(
+        mut self,
+        control: std::sync::Arc<crate::control_channel::ControlChannel>,
+    ) -> Self {
+        self.control = Some(control);
+        self
+    }
+
+    /// The newest publication sent over the control channel, if the channel
+    /// is connected and has carried one.
+    fn control_record(&self) -> Option<Vec<u8>> {
+        #[cfg(unix)]
+        if let Some(control) = &self.control {
+            control.connect();
+            return control.latest();
+        }
+        None
+    }
+
     pub fn with_clock(
         files: Q,
         publication_path: impl Into<String>,
@@ -100,6 +128,9 @@ impl<Q, T> GuestChannel<Q, T> {
             clock,
             #[cfg(unix)]
             wake: None,
+            #[cfg(unix)]
+            control: None,
+            via_control: std::cell::Cell::new(false),
             last_status: std::cell::RefCell::new(None),
             last_write: std::cell::Cell::new(None),
         }
@@ -108,6 +139,28 @@ impl<Q, T> GuestChannel<Q, T> {
 
 impl<Q: GuestFileReader + GuestFileWriter, T: UnixClock> GuestLink for GuestChannel<Q, T> {
     fn read(&self) -> Result<RawTelemetryEnvelope, String> {
+        // A guest on the channel is read there while its publications stay
+        // fresh; one that falls silent is looked for in the files again.
+        if let Some(mut record) = self.control_record() {
+            record.push(b'\n');
+            let channel = String::from_utf8(record)
+                .map_err(|error| format!("guest publication is not valid UTF-8: {error}"))
+                .and_then(|contents| {
+                    validate_contents(
+                        &contents,
+                        &self.vm_name,
+                        &self.service_name,
+                        duration_millis(self.max_age)?,
+                        duration_millis(self.future_tolerance)?,
+                        self.clock.now_unix_millis()?,
+                    )
+                });
+            if channel.is_ok() {
+                self.via_control.set(true);
+                return channel;
+            }
+        }
+        self.via_control.set(false);
         let bytes = self
             .files
             .read_file(&self.publication_path, MAX_RAW_TELEMETRY_FILE_BYTES)
@@ -124,10 +177,24 @@ impl<Q: GuestFileReader + GuestFileWriter, T: UnixClock> GuestLink for GuestChan
         )
     }
 
-    /// Writes only a semantic change, or a refresh before the guest would
-    /// consider the last status stale: every write is a guest-agent round
-    /// trip that can collide with the guest's own file access.
+    /// Over the control channel every status is sent: it costs nothing and
+    /// keeps the guest's view fresh. To the files, only a semantic change or
+    /// a refresh before the guest would consider the last status stale is
+    /// written: every write is a guest-agent round trip that can collide
+    /// with the guest's own file access.
     fn publish_status(&self, status: &HostMemoryStatus) -> Result<(), String> {
+        let mut bytes = serde_json::to_vec(status)
+            .map_err(|error| format!("encode host memory status: {error}"))?;
+        bytes.push(b'\n');
+        if bytes.len() > MAX_HOST_STATUS_BYTES {
+            return Err("host memory status exceeds its byte limit".to_owned());
+        }
+        #[cfg(unix)]
+        if let Some(control) = self.control.as_ref().filter(|_| self.via_control.get()) {
+            control.send(&bytes);
+            *self.last_status.borrow_mut() = Some(status.clone());
+            return Ok(());
+        }
         let changed = self.last_status.borrow().as_ref().is_none_or(|last| {
             last.requested_bytes != status.requested_bytes
                 || last.current_bytes != status.current_bytes
@@ -142,12 +209,6 @@ impl<Q: GuestFileReader + GuestFileWriter, T: UnixClock> GuestLink for GuestChan
             .is_none_or(|written| written.elapsed() >= self.max_age / 3);
         if !changed && !refresh_due {
             return Ok(());
-        }
-        let mut bytes = serde_json::to_vec(status)
-            .map_err(|error| format!("encode host memory status: {error}"))?;
-        bytes.push(b'\n');
-        if bytes.len() > MAX_HOST_STATUS_BYTES {
-            return Err("host memory status exceeds its byte limit".to_owned());
         }
         self.files
             .write_file(&host_status_path(&self.publication_path), &bytes)?;
@@ -368,6 +429,58 @@ mod tests {
         ] {
             assert!(qga(contents.into_bytes()).read().is_err(), "{name}");
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_guest_on_the_control_channel_is_answered_there_and_not_through_files() {
+        use std::io::{Read, Write};
+        let (ours, mut guest) = std::os::unix::net::UnixStream::pair().unwrap();
+        let control =
+            crate::control_channel::ControlChannel::over(ours, "guest".to_owned()).unwrap();
+        // The files hold an older publication than the channel.
+        let channel =
+            qga(line(&envelope("session-a", 990_000, 0)).into_bytes()).with_control(control);
+        assert_eq!(
+            channel.read().unwrap().sequence,
+            0,
+            "nothing on the channel yet: the files are read"
+        );
+        let latest = envelope("session-a", 995_000, 1);
+        guest.write_all(line(&latest).as_bytes()).unwrap();
+        assert_eq!(channel.read(), Ok(latest));
+        let status = HostMemoryStatus {
+            version: MEMORY_REQUEST_VERSION,
+            vm_name: "guest".to_owned(),
+            service_name: "VirtioMemService".to_owned(),
+            device_alias: "memory0".to_owned(),
+            observed_unix_millis: 1_000_000,
+            device_size_bytes: 8 << 30,
+            block_size_bytes: 2 << 20,
+            requested_bytes: 0,
+            current_bytes: 0,
+            result: None,
+            guest_settings: None,
+        };
+        channel.publish_status(&status).unwrap();
+        channel.publish_status(&status).unwrap();
+        let mut expected = serde_json::to_vec(&status).unwrap();
+        expected.push(b'\n');
+        let mut received = vec![0; expected.len() * 2];
+        guest.read_exact(&mut received).unwrap();
+        assert_eq!(
+            received,
+            [expected.clone(), expected].concat(),
+            "every status is sent"
+        );
+        assert!(channel.files.written.lock().unwrap().is_empty());
+        // A stale channel record falls back to the files.
+        guest
+            .write_all(line(&envelope("session-a", 100_000, 2)).as_bytes())
+            .unwrap();
+        assert_eq!(channel.read().unwrap().sequence, 0);
+        channel.publish_status(&status).unwrap();
+        assert_eq!(channel.files.written.lock().unwrap().len(), 1);
     }
 
     #[test]
