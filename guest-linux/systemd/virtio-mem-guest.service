@@ -1,6 +1,6 @@
 [Unit]
 Description=Virtio-mem guest memory requests
-Documentation=https://github.com/macg4dave/virtio_mem_windows_service
+Documentation=https://github.com/macg4dave/virtio-mem-pool
 # The host exchanges the control files through the guest agent.
 After=qemu-guest-agent.service
 ConditionVirtualization=kvm

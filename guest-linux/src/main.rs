@@ -5,12 +5,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use signal_hook::consts::signal::{SIGINT, SIGTERM};
-use virtio_mem_linux_service::config::{self, DEFAULT_CONFIG_PATH};
-use virtio_mem_linux_service::meminfo::ProcMeminfo;
-use virtio_mem_linux_service::pressure::ProcPressure;
-use virtio_mem_linux_service::requests::GuestRequests;
-use virtio_mem_linux_service::worker::{process_session_id, GuestWorker, SystemClock};
-use virtio_mem_linux_service::BUILD_ID;
+use virtio_mem_guest_linux::config::{self, DEFAULT_CONFIG_PATH};
+use virtio_mem_guest_linux::meminfo::ProcMeminfo;
+use virtio_mem_guest_linux::pressure::ProcPressure;
+use virtio_mem_guest_linux::requests::GuestRequests;
+use virtio_mem_guest_linux::worker::{process_session_id, GuestWorker, SystemClock};
+use virtio_mem_guest_linux::BUILD_ID;
 
 const HELP: &str = "Usage: virtio-mem-guest [run [--config PATH]|version|help]\n\
 Runs in the foreground until SIGTERM or SIGINT; systemd supervises it as\n\

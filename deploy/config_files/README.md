@@ -287,7 +287,7 @@ Windows, so existing files are unchanged. A Linux settings file holds only
 not yet in `host_list.toml`, so the installed controller does not manage it.
 
 The Linux guest runs `virtio-mem-guest` under systemd
-([unit](../../linux/systemd/virtio-mem-guest.service)) with the same policy,
+([unit](../../guest-linux/systemd/virtio-mem-guest.service)) with the same policy,
 request protocol and wire format as the Windows service. Its identity and
 files are built in:
 
@@ -305,7 +305,7 @@ control files through it.
 
 ```bash
 cargo xtask linux config deploy/config_files/debian13_settings.toml > config.json
-cargo build --release --locked -p virtio-mem-linux-service
+cargo build --release --locked -p virtio-mem-guest-linux
 # In the guest:
 install -D -m 0755 virtio-mem-guest /usr/local/libexec/virtio-mem-guest
 install -D -m 0644 config.json /etc/virtio-mem-guest/config.json

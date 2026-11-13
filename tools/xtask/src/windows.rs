@@ -560,7 +560,7 @@ fn build(config: &Config, repo: &Path) -> Result<(), String> {
         config,
         repo,
         &format!(
-            "set \"VIRTIO_MEM_BUILD_ID={}\" ^&^& set \"RUSTC={}\" ^&^& set \"RUSTDOC={}\" ^&^& \"{}\" build -p virtio-mem-service --release --locked",
+            "set \"VIRTIO_MEM_BUILD_ID={}\" ^&^& set \"RUSTC={}\" ^&^& set \"RUSTDOC={}\" ^&^& \"{}\" build -p virtio-mem-guest-windows --release --locked",
             identity.build_id, tools.rustc, tools.rustdoc, tools.cargo
         ),
     )?;
@@ -573,7 +573,7 @@ fn test(config: &Config, repo: &Path) -> Result<(), String> {
         config,
         repo,
         &format!(
-            "set \"RUSTC={}\" ^&^& set \"RUSTDOC={}\" ^&^& \"{}\" test -p virtio-mem-service --all-features --locked",
+            "set \"RUSTC={}\" ^&^& set \"RUSTDOC={}\" ^&^& \"{}\" test -p virtio-mem-guest-windows --all-features --locked",
             tools.rustc, tools.rustdoc, tools.cargo
         ),
     )?;
@@ -586,7 +586,7 @@ fn lint(config: &Config, repo: &Path) -> Result<(), String> {
         config,
         repo,
         &format!(
-            "\"{}\" fmt --all -- --check ^&^& set \"RUSTC={}\" ^&^& set \"RUSTDOC={}\" ^&^& \"{}\" clippy -p virtio-mem-service --all-targets --all-features --locked -- -D warnings",
+            "\"{}\" fmt --all -- --check ^&^& set \"RUSTC={}\" ^&^& set \"RUSTDOC={}\" ^&^& \"{}\" clippy -p virtio-mem-guest-windows --all-targets --all-features --locked -- -D warnings",
             tools.cargo_fmt, tools.rustc, tools.rustdoc, tools.cargo_clippy
         ),
     )?;

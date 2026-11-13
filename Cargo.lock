@@ -931,6 +931,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "virtio-mem-guest-linux"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "signal-hook",
+ "toml",
+ "virtio-mem-core",
+]
+
+[[package]]
+name = "virtio-mem-guest-windows"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+ "virtio-mem-core",
+ "winapi",
+]
+
+[[package]]
 name = "virtio-mem-host"
 version = "0.1.0"
 dependencies = [
@@ -942,27 +963,6 @@ dependencies = [
  "signal-hook",
  "thiserror",
  "virtio-mem-core",
-]
-
-[[package]]
-name = "virtio-mem-linux-service"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "signal-hook",
- "toml",
- "virtio-mem-core",
-]
-
-[[package]]
-name = "virtio-mem-service"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror",
- "virtio-mem-core",
- "winapi",
 ]
 
 [[package]]

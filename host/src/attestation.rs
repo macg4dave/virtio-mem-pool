@@ -29,7 +29,11 @@ pub struct CompatibilityReview {
     pub balloon_resize_inactive: bool,
     pub memory_slot_budget: u32,
     pub vfio_mapping_budget: u32,
-    pub windows_driver_version: String,
+    /// The guest's virtio-mem driver as reviewed: the `viomem` driver
+    /// version on Windows, the kernel release on Linux. Reviews written
+    /// before Linux guests name it `windows_driver_version`.
+    #[serde(alias = "windows_driver_version")]
+    pub guest_driver_version: String,
 }
 
 impl CompatibilityReview {
@@ -54,8 +58,8 @@ impl CompatibilityReview {
         if self.vfio_mapping_budget == 0 {
             return Err("compatibility review vfio_mapping_budget must be positive".to_owned());
         }
-        if self.windows_driver_version.trim().is_empty() {
-            return Err("compatibility review windows_driver_version must be non-empty".to_owned());
+        if self.guest_driver_version.trim().is_empty() {
+            return Err("compatibility review guest_driver_version must be non-empty".to_owned());
         }
         Ok(())
     }
@@ -692,8 +696,25 @@ mod tests {
             balloon_resize_inactive: true,
             memory_slot_budget: 32,
             vfio_mapping_budget: 8,
-            windows_driver_version: "100.101.104.20800".to_owned(),
+            guest_driver_version: "100.101.104.20800".to_owned(),
         }
+    }
+
+    #[test]
+    fn a_review_written_for_windows_only_is_still_read() {
+        let current = serde_json::to_value(review()).unwrap();
+        assert!(current.get("windows_driver_version").is_none());
+        let mut earlier = current.clone();
+        let fields = earlier.as_object_mut().unwrap();
+        let version = fields.remove("guest_driver_version").unwrap();
+        fields.insert("windows_driver_version".to_owned(), version);
+        assert_eq!(
+            serde_json::from_value::<CompatibilityReview>(earlier).unwrap(),
+            review()
+        );
+        let mut both = current;
+        both["windows_driver_version"] = serde_json::json!("1");
+        assert!(serde_json::from_value::<CompatibilityReview>(both).is_err());
     }
 
     fn live() -> LiveCompatibilityEvidence {

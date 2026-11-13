@@ -1,7 +1,7 @@
 # Rust
-/windows/target/
-/windows/.cargo/
-/windows/obj/
+/guest-windows/target/
+/guest-windows/.cargo/
+/guest-windows/obj/
 /target/
 **/*.rs.bk
 
