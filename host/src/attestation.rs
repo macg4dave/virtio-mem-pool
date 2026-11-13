@@ -594,6 +594,8 @@ fn scrub_runtime_identity(xml: &str) -> String {
         channel_offset = start + block.len() + "</channel>".len();
     }
     scrubbed = scrub_pty_paths(&scrubbed);
+    scrubbed = scrub_generated_interface_names(&scrubbed);
+    scrubbed = scrub_channel_directory_ids(&scrubbed);
     let mut offset = 0;
     while let Some(start) = scrubbed[offset..].find("<seclabel") {
         let start = offset + start;
@@ -666,6 +668,57 @@ fn scrub_pty_paths(xml: &str) -> String {
             }
             scrubbed.replace_range(start..end, &block);
             offset = start + block.len() + close.len();
+        }
+    }
+    scrubbed
+}
+
+/// Libvirt names an interface's host device `vnetN`, `macvtapN` or `macvlanN`
+/// when the configuration gives none, choosing N afresh on each start. Those
+/// prefixes are reserved for generated names, so a configured name is kept.
+fn scrub_generated_interface_names(xml: &str) -> String {
+    let mut scrubbed = xml.to_owned();
+    for quote in ['\'', '"'] {
+        let attribute = format!("<target dev={quote}");
+        let mut offset = 0;
+        while let Some(found) = scrubbed[offset..].find(&attribute) {
+            let value = offset + found + attribute.len();
+            let Some(length) = scrubbed[value..].find(quote) else {
+                break;
+            };
+            let name = &scrubbed[value..value + length];
+            let generated = ["vnet", "macvtap", "macvlan"].iter().any(|prefix| {
+                name.strip_prefix(prefix)
+                    .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+            });
+            if generated {
+                scrubbed.replace_range(value..value + length, "<generated>");
+                offset = value + "<generated>".len();
+            } else {
+                offset = value + length;
+            }
+        }
+    }
+    scrubbed
+}
+
+/// Libvirt puts the sockets of channels with no configured path in a
+/// directory named after the runtime domain id
+/// (`/run/libvirt/qemu/channel/21-vm/`), which changes on each start.
+fn scrub_channel_directory_ids(xml: &str) -> String {
+    const PREFIX: &str = "/run/libvirt/qemu/channel/";
+    let mut scrubbed = xml.to_owned();
+    let mut offset = 0;
+    while let Some(found) = scrubbed[offset..].find(PREFIX) {
+        let id = offset + found + PREFIX.len();
+        let digits = scrubbed[id..]
+            .find(|character: char| !character.is_ascii_digit())
+            .unwrap_or(scrubbed.len() - id);
+        if digits > 0 && scrubbed[id + digits..].starts_with('-') {
+            scrubbed.replace_range(id..id + digits, "#");
+            offset = id + 1;
+        } else {
+            offset = id;
         }
     }
     scrubbed
@@ -1044,6 +1097,39 @@ mod tests {
         assert_ne!(
             scrub_runtime_identity(&started(7)),
             scrub_runtime_identity(&started(7).replace("port='0'", "port='1'"))
+        );
+    }
+
+    #[test]
+    fn generated_interface_and_channel_names_do_not_change_domain_fingerprint() {
+        let started = |id: u32, tap: &str| {
+            format!(
+                "<domain id='{id}'><devices><interface type='bridge'><mac address='52:54:00:a6:60:01'/><source bridge='br0'/><target dev='{tap}'/></interface><channel type='unix'><source mode='bind' path='/run/libvirt/qemu/channel/{id}-vm/org.virtio-mem.control.0'/><target type='virtio' name='org.virtio-mem.control.0'/></channel></devices></domain>"
+            )
+        };
+        assert_eq!(
+            scrub_runtime_identity(&started(20, "vnet7")),
+            scrub_runtime_identity(&started(21, "vnet232"))
+        );
+        assert_eq!(
+            scrub_runtime_identity(&started(20, "macvtap0")),
+            scrub_runtime_identity(&started(21, "macvtap3"))
+        );
+        // A configured device name, the VM name in the channel path and the
+        // channel's own name stay fingerprint inputs.
+        for changed in [
+            started(20, "vnet7").replace("vnet7", "tap-safe"),
+            started(20, "vnet7").replace("-vm/", "-other/"),
+            started(20, "vnet7").replace("control.0'/>", "control.1'/>"),
+        ] {
+            assert_ne!(
+                scrub_runtime_identity(&started(20, "vnet7")),
+                scrub_runtime_identity(&changed)
+            );
+        }
+        assert_ne!(
+            scrub_runtime_identity(&started(20, "mytap1")),
+            scrub_runtime_identity(&started(20, "mytap2"))
         );
     }
 
