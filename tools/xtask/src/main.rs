@@ -177,7 +177,7 @@ fn execute(arguments: &[String]) -> Result<(), String> {
         Some("windows") => windows::run(windows::parse(&arguments[1..])?, &repo),
         Some("qualification") => qualification::execute(&arguments[1..], &repo),
         Some("watch") => watch::run(&watch::parse(&arguments[1..])?, &repo),
-        Some("metrics") => metrics::run(&metrics::parse(&arguments[1..])?, &repo),
+        Some("metrics") => metrics::execute(&arguments[1..], &repo),
         Some(command) => Err(format!("unknown command: {command}\n\n{HELP}")),
     }
 }

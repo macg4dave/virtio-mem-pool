@@ -37,9 +37,25 @@ guest panels, a memory chart (host available, guest available, device
 current and requested), request results and latencies, problem and incident
 counters, and the controller's events alongside lifecycle events. A red
 `N INCIDENTS` badge in the header means a crash or restart was recorded.
-The controller row shows its pid, memory and CPU, or how it exited. `--plain`, or output that is not a terminal, prints
-one line per sample instead. It records until `q`/Ctrl+C or
-`--duration-seconds`.
+The controller row shows its pid, memory and CPU, or how it exited.
+`--plain`, or output that is not a terminal, prints one line per sample
+instead. It records until `q`/Ctrl+C or `--duration-seconds`.
+
+### Recording every VM
+
+```bash
+cargo xtask metrics --config CONFIG --vm all [--duration-seconds N]
+```
+
+Starts one plain recorder per VM, each in `DIR/<vm>/` with its own
+samples, events and incidents, and writes `DIR/pool.csv`: one row per
+interval with every VM's requested and current device size, the pool's
+charge (`max(requested, current)` per VM, as the controller counts it),
+free pool bytes and host `MemAvailable`. It prints one line per row, for
+example `host avail 16.2G | pool 4.1G/15.0G free 10.9G | safe_vm 0.3G |
+safe_vm_1 0.4G->1.2G` (an arrow is a resize under way). Ctrl+C or SIGTERM
+stops every recorder cleanly. The default directory is
+`.artifacts/metrics/pool-<UTC time>/`.
 
 | Key | Action |
 |---|---|

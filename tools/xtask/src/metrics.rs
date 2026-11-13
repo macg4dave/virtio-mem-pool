@@ -17,6 +17,7 @@
 
 mod diagnostics;
 mod health;
+mod pool;
 mod pressure;
 mod ui;
 
@@ -54,6 +55,10 @@ pub const HELP: &str = "Metrics options (read-only stress-test recorder):
                                 and per-VM settings. Optional diagnostic
                                 telemetry paths are not needed or read.
   --vm NAME                     The [[vm]] to record; required with several.
+                                `--vm all` records every VM: one recorder
+                                per VM in DIR/<vm>/, plus DIR/pool.csv with
+                                every device, the pool and host memory per
+                                interval (plain output only).
   --instance NAME               Controller unit virtio-mem-host@NAME.service;
                                 default the one installed controller unit,
                                 else the VM name.
@@ -90,6 +95,14 @@ pub struct Command {
     plain: bool,
     host_floor_bytes: u64,
     telemetry_max_age: Duration,
+}
+
+/// `metrics` with its arguments: one VM, or every VM with `--vm all`.
+pub fn execute(args: &[String], repo: &Path) -> Result<(), String> {
+    if pool::requested(args) {
+        return pool::run(args, repo);
+    }
+    run(&parse(args)?, repo)
 }
 
 pub fn parse(args: &[String]) -> Result<Command, String> {
