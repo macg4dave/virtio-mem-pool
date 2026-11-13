@@ -269,22 +269,28 @@ pub fn assess(probe: &Probe) -> Readiness {
                 .to_owned(),
         );
     }
-    if probe.pressure_readable && probe.pressure_trigger == "none" {
-        warnings.push(
-            "no pressure trigger could be registered: urgent growth waits for the next poll"
-                .to_owned(),
-        );
-    }
+    // A missing pressure trigger is reported where it is registered
+    // (`ProcPressure::open`), once the host's settings have arrived: at start
+    // it is still `pending`.
     match auto_online.as_str() {
         "offline" => warnings.push(
             "auto_online_blocks is offline: hot-plugged memory stays unused unless something \
              else onlines it"
                 .to_owned(),
         ),
-        "online" | "online_kernel" if online_policy != "auto-movable" => warnings.push(format!(
+        "online" if online_policy != "auto-movable" => warnings.push(format!(
             "hot-plugged memory is onlined to kernel zones (auto_online_blocks={auto_online}, \
              online_policy={online_policy}): the kernel guarantees removal only from the \
              movable zone. If removals come back partial, boot with \
+             memory_hotplug.online_policy=auto-movable"
+        )),
+        // online_kernel always picks a kernel zone; the online policy applies
+        // only to plain "online" (zone_for_pfn_range in mm/memory_hotplug.c).
+        "online_kernel" => warnings.push(format!(
+            "hot-plugged memory is onlined to kernel zones (auto_online_blocks=online_kernel, \
+             online_policy={online_policy}): the kernel guarantees removal only from the \
+             movable zone, and online_kernel ignores the online policy. If removals come \
+             back partial, boot with memhp_default_state=online and \
              memory_hotplug.online_policy=auto-movable"
         )),
         _ => {}
@@ -451,13 +457,15 @@ mod tests {
             },
             "never returns",
         );
-        warned(
-            Probe {
-                pressure_trigger: "none",
+        // The trigger is registered after start; neither state warns here.
+        for trigger in ["pending", "none"] {
+            assert!(assess(&Probe {
+                pressure_trigger: trigger,
                 ..ready()
-            },
-            "next poll",
-        );
+            })
+            .warnings
+            .is_empty());
+        }
         warned(
             Probe {
                 auto_online: Some("offline".to_owned()),
@@ -473,14 +481,16 @@ mod tests {
                 },
                 "kernel zones",
             );
-            // The auto-movable policy places hot-plugged memory itself.
-            let auto = Probe {
-                auto_online: Some(kernel.to_owned()),
-                online_policy: Some("auto-movable".to_owned()),
-                ..ready()
-            };
-            assert!(assess(&auto).warnings.is_empty());
         }
+        // The auto-movable policy places plain "online" memory itself, but
+        // online_kernel ignores the policy.
+        let auto = |auto_online: &str| Probe {
+            auto_online: Some(auto_online.to_owned()),
+            online_policy: Some("auto-movable".to_owned()),
+            ..ready()
+        };
+        assert!(assess(&auto("online")).warnings.is_empty());
+        warned(auto("online_kernel"), "ignores the online policy");
     }
 
     #[test]

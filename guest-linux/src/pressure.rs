@@ -38,12 +38,15 @@ const TRIGGERS: [(&str, &str); 2] = [
     ("some 200000 2000000", "200ms/2s"),
 ];
 
-/// The trigger this process registered, for the readiness report.
+/// The trigger this process registered, or `none`, for the readiness report.
+/// The first registration attempt decides it.
 static TRIGGER: OnceLock<&'static str> = OnceLock::new();
 
-/// `100ms/1s`, `200ms/2s`, or `none` when growth relies on polling.
+/// `100ms/1s`, `200ms/2s`, `none` when growth relies on polling, or
+/// `pending` before the first attempt: the trigger is registered only once
+/// the host has published this VM's settings.
 pub fn trigger_description() -> &'static str {
-    TRIGGER.get().copied().unwrap_or("none")
+    TRIGGER.get().copied().unwrap_or("pending")
 }
 
 pub use virtio_mem_guest::worker::PressureSource;
@@ -64,6 +67,12 @@ impl ProcPressure {
             let _ = TRIGGER.set(description);
             Some(file)
         });
+        if trigger.is_none() && TRIGGER.set("none").is_ok() {
+            eprintln!(
+                "warning: no pressure trigger could be registered: urgent growth waits for \
+                 the next poll"
+            );
+        }
         Self {
             trigger,
             pending: false,
@@ -247,6 +256,8 @@ mod tests {
         let mut pressure = ProcPressure::default();
         assert!(!pressure.wait(Duration::from_millis(1)));
         assert_eq!(pressure.event(Duration::ZERO), None);
-        assert_eq!(trigger_description(), "none");
+        // Before the first registration attempt the trigger is pending, not
+        // missing: nothing has been asked of the kernel yet.
+        assert_eq!(trigger_description(), "pending");
     }
 }
