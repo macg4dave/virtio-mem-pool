@@ -67,12 +67,14 @@ These apply to every task and to review.
 
 Small changes, each from [prior art](prior-art.md#ideas-to-adopt).
 
-- [ ] **P1** Settle timeout from the Linux retry schedule (idea 1). The
-  Linux driver retries a busy removal at +50 s, +150 s, +350 s, then every
-  300 s. Give Linux guests a stalled-removal settle time that covers the
-  retries we choose to wait for, separate from the Windows value, and
-  record a run where a removal completes on a late retry. Closes the old
-  T2.8 item "stalled-removal delay".
+- [ ] **P1** Settle timeout from the Linux retry schedule (idea 1).
+  Implemented 2026-11-13: a Linux removal settles after 380 s without
+  movement (the driver's third retry at +350 s plus a 30 s margin,
+  `GuestOs::removal_settle_seconds`); Windows keeps
+  `convergence_timeout_seconds`. Remaining: record a run on `debian13`
+  where a removal completes on a late retry, and confirm or replace the
+  provisional 30 s margin from it. Closes the old T2.8 item
+  "stalled-removal delay".
 - [ ] **P2** Movable-ratio check in the Linux readiness report (idea 2).
   Read `auto_movable_ratio` and `auto_movable_numa_aware`; warn when the
   device's maximum exceeds ratio × boot memory under `auto-movable`. Add

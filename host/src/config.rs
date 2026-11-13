@@ -25,6 +25,9 @@ pub struct HostConfig {
     pub poll_interval: Duration,
     pub command_timeout: Duration,
     pub convergence_timeout: Duration,
+    /// How long a removal may stop moving before it is settled at what the
+    /// guest returned; from the guest OS (`GuestOs::removal_settle_seconds`).
+    pub removal_settle: Duration,
     pub virsh_binary: String,
     pub libvirt_uri: String,
     pub raw_telemetry_path: String,
@@ -135,6 +138,10 @@ impl HostConfig {
             poll_interval: Duration::from_secs(globals.poll_interval_seconds),
             command_timeout: Duration::from_secs(globals.command_timeout_seconds),
             convergence_timeout: Duration::from_secs(globals.convergence_timeout_seconds),
+            removal_settle: Duration::from_secs(
+                vm.guest_os
+                    .removal_settle_seconds(globals.convergence_timeout_seconds),
+            ),
             // From PATH, as the attestation's evidence was collected.
             virsh_binary: "virsh".to_owned(),
             libvirt_uri: globals.libvirt_uri.clone(),
@@ -209,6 +216,18 @@ mod tests {
         assert_eq!(
             config.raw_telemetry_service_name,
             GuestOs::Linux.service_name()
+        );
+        // A stalled Linux removal waits for the driver's retries, not the
+        // global convergence timeout that Windows uses.
+        assert_eq!(
+            config.removal_settle,
+            Duration::from_secs(GuestOs::Linux.removal_settle_seconds(0))
+        );
+        assert_ne!(config.removal_settle, config.convergence_timeout);
+        let windows = HostSettings::load(&directory.join("host_list.toml")).expect("fixture");
+        assert_eq!(
+            windows.vms[0].removal_settle,
+            windows.vms[0].convergence_timeout
         );
     }
 }
