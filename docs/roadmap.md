@@ -19,8 +19,9 @@ virtio-mem. Windows guests are resized with Hyper-V Dynamic Memory.
 | Area | State |
 |---|---|
 | Core policy, request protocol, wire format | Working, platform-neutral, well tested |
-| Host controller (RHEL 10.2, libvirt 11.10, QEMU 10.1) | Working; manages `debian13` |
+| Host controller (RHEL 10.2, libvirt 11.10, QEMU 10.1) | Working; instance `main` manages `debian13` and `safe_vm` (15 GiB pool) |
 | Linux guest service | Working under the real controller; PSI triggers, cache floor, readiness report, control channel |
+| Real-world guest | `safe_vm` (Debian 13, ClamAV scanner, 512 MiB boot, up to 15.5 GiB) since 2026-11-13: on the control channel with no guest agent; spikes to 1.25 GiB and 4.4 GiB grown and returned without OOM. Capture on pc101: `.artifacts/metrics/safe_vm-live-20261113/` |
 | Windows guest service | Built on the shared guest crate; **not deployed**. Its virtio-mem path is paused (B1) |
 | `viomem` workarounds and driver patch | **Paused** and moved to [archive/viomem](../archive/viomem/) on 2026-11-13 |
 | Windows on Dynamic Memory | Not started. pc101's QEMU lacks the devices (B2) |
@@ -71,8 +72,9 @@ Small changes, each from [prior art](prior-art.md#ideas-to-adopt).
   Implemented 2026-11-13: a Linux removal settles after 380 s without
   movement (the driver's third retry at +350 s plus a 30 s margin,
   `GuestOs::removal_settle_seconds`); Windows keeps
-  `convergence_timeout_seconds`. Remaining: record a run on `debian13`
-  where a removal completes on a late retry, and confirm or replace the
+  `convergence_timeout_seconds`; live on `safe_vm` (its removals so far all
+  completed at once). Remaining: record a run where a removal completes on
+  a late retry, and confirm or replace the
   provisional 30 s margin from it. Closes the old T2.8 item
   "stalled-removal delay".
 - [ ] **P3** Derived VFIO budget and block-size guidance (idea 3). For a
@@ -196,10 +198,18 @@ starting it.
 - [ ] **C2** (T2.8) Replace the remaining provisional Linux numbers:
   pressure level, failed-poll limit, the cache floor's refault threshold,
   quiet period and settling time. The stalled-removal delay is P1.
+  Evidence so far (`safe_vm`, 2026-11-13): after a 4 GiB spike the
+  removals evicted cache in use, refaults reached 57 MB/s, the floor
+  grew the guest by its step (294 MiB) and returned 266 MiB 30 s later,
+  once the refaults stopped. One corrective swing per large removal;
+  review the 6-hour capture before changing the step or the clip.
 - [ ] **C3** (T2.11) Decide what else must survive a fill faster than
   growth, and record a run.
-- [ ] **C4** (T3.2, T3.3) Recorded run on `debian13` with the control
-  port, no guest-agent file access and host-published settings.
+- [ ] **C4** (T3.2, T3.3) Recorded run with the control port, no
+  guest-agent file access and host-published settings. Under way on
+  `safe_vm` since 2026-11-13 (it has no guest agent at all); close it once
+  the 6-hour capture is reviewed. The first attempt found the unit's
+  `PrivateDevices=` blocking `OpenFile=` (fixed in `fb71c68`).
 - [ ] **C5** (T3.4) Written host/guest version compatibility table and
   transport skew rule.
 - [ ] **C6** (T4.1–T4.5) Packaging and administration: Debian guest

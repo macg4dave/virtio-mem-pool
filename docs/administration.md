@@ -260,6 +260,17 @@ settings it warns if `max_ram` is above that limit. With
 `auto_movable_numa_aware=Y` (the default) the ratio also applies to each
 NUMA node, so a guest with several nodes may reach its limit earlier.
 
+Growth follows use, so a guest grows as a program touches memory, not
+when it asks for it. Under the default heuristic overcommit
+(`vm.overcommit_memory=0`) the kernel refuses a single allocation larger
+than the guest's RAM and swap at that moment, before the guest can ask for
+more: on a guest at 790 MiB, one 4 GiB `mmap` failed, while the same
+4 GiB taken 512 MiB at a time grew the guest to 4.4 GiB in 21 seconds.
+Programs that allocate as they go (ClamAV loading its signatures, for
+example) are unaffected. For a workload that reserves a large block up
+front, give the guest more boot RAM or a higher `min_ram`, or set
+`vm.overcommit_memory=1` in the guest.
+
 How Linux memory is read:
 
 - Total and available are `MemTotal` and `MemAvailable`.
