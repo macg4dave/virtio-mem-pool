@@ -2,7 +2,8 @@
 # to a site location (for example /etc/virtio-mem-host on the host, or an
 # untracked site/ folder in a checkout) and edit the copy.
 #
-# Higher priority receives free pool RAM first; ties use entry order.
+# Higher priority receives free pool RAM first; equal priorities are served
+# first come, first served (the earlier request), then in entry order.
 # `alias` is the virtio-mem device's alias in the libvirt domain XML.
 # Each vm_name loads <vm_name>_settings.toml from this directory.
 # Optional telemetry_path names a diagnostic file on the Linux host; omit it

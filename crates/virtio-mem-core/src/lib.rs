@@ -37,7 +37,7 @@ pub use memory_request::{
     RequestAdmission, RequestIdentity, MAX_HOST_STATUS_BYTES, MAX_REQUEST_LIFETIME_MILLIS,
     MEMORY_REQUEST_VERSION, MEMORY_WAKE_CHANNEL_NAME,
 };
-pub use pool::{allocate_pool, PoolAllocation, PoolError, PoolMember};
+pub use pool::{allocate_pool, service_order, PoolAllocation, PoolError, PoolMember};
 pub use stream::{
     RecordReader, RecordWriter, MAX_STREAM_RECORD_BYTES, MEMORY_CONTROL_CHANNEL_NAME,
 };

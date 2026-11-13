@@ -11,9 +11,10 @@ use std::time::{Duration, Instant};
 
 use thiserror::Error;
 use virtio_mem_core::{
-    allocate_pool, bounded_reason, CommandDirection, CommandOwnership, HostMemoryStatus,
-    MemoryOperation, MemoryOutcome, MemoryRequest, MemoryResourceNotificationState, MemoryResult,
-    PoolMember, RequestAdmission, VirtioMemState, MEMORY_REQUEST_VERSION, MIN_BLOCK_SIZE_BYTES,
+    allocate_pool, bounded_reason, service_order, CommandDirection, CommandOwnership,
+    HostMemoryStatus, MemoryOperation, MemoryOutcome, MemoryRequest,
+    MemoryResourceNotificationState, MemoryResult, PoolMember, RequestAdmission, VirtioMemState,
+    MEMORY_REQUEST_VERSION, MIN_BLOCK_SIZE_BYTES,
 };
 
 use crate::checkpoint::{
@@ -280,12 +281,11 @@ where
             return Ok(Step::Wait);
         }
         let ceilings = self.allocate(&observed)?;
+        // The same order the pool used: priority, then first come, first
+        // served, then configuration order.
         let mut order = (0..self.vms.len()).collect::<Vec<_>>();
-        order.sort_by(|left, right| {
-            self.vms[*right]
-                .config
-                .priority
-                .cmp(&self.vms[*left].config.priority)
+        order.sort_by_key(|index| {
+            service_order(&self.vms[*index].pool_member(&observed[*index], u64::MAX))
         });
         let mut host = HostBudget {
             committed: self.vms.iter().fold(0_u64, |total, vm| {
@@ -533,6 +533,10 @@ where
         };
         PoolMember {
             priority: self.config.priority,
+            arrival_unix_millis: match observed {
+                Observed::Ready(ready) => ready.request.issued_unix_millis,
+                Observed::Held { .. } | Observed::Stop(_) => u64::MAX,
+            },
             charged_bytes,
             desired_bytes: charged_bytes.saturating_add(wanted),
             block_bytes,
@@ -1645,6 +1649,29 @@ mod tests {
         assert_eq!(empty.actual_bytes, 0);
         drop(runtime);
         assert!(low.journal().journal.result.is_some(), "journalled");
+    }
+
+    #[test]
+    fn equal_priorities_are_granted_first_come_first_served() {
+        let listed_first = Fixture::new("fcfs-first", 100, 4 * GIB);
+        let asked_first = Fixture::new("fcfs-second", 100, 4 * GIB);
+        // The VM listed second asked a millisecond earlier.
+        listed_first
+            .guest
+            .send(Some(request(2, MemoryOperation::Add, 2 * GIB)));
+        asked_first
+            .guest
+            .send(Some(request(1, MemoryOperation::Add, 2 * GIB)));
+        let mut runtime = runtime(
+            vec![listed_first.controller(None), asked_first.controller(None)],
+            64 * GIB,
+            Some(10 * GIB),
+        );
+        round(&mut runtime);
+        assert_eq!(*asked_first.targets.borrow(), [6 * GIB]);
+        assert!(listed_first.targets.borrow().is_empty());
+        let empty = listed_first.guest.last_result().expect("pool-empty result");
+        assert_eq!(empty.outcome, MemoryOutcome::PoolEmpty);
     }
 
     #[test]

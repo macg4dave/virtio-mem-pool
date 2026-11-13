@@ -14,6 +14,10 @@ use thiserror::Error;
 pub struct PoolMember {
     /// Larger is served first when free bytes run out.
     pub priority: u32,
+    /// When the member's request was issued (guest clock, Unix ms): among
+    /// equal priorities the earlier request is served first. `u64::MAX` for a
+    /// member with no request.
+    pub arrival_unix_millis: u64,
     /// Bytes the member holds now: `max(requested, current)`.
     pub charged_bytes: u64,
     /// The member's own desired size; growth beyond its charge needs pool bytes.
@@ -39,8 +43,9 @@ pub enum PoolError {
     Overflow,
 }
 
-/// Hands this round's free bytes out, highest priority first; configuration
-/// order breaks ties. Results are in the same order as `members`.
+/// Hands this round's free bytes out, highest priority first, then first
+/// come, first served; configuration order breaks any remaining tie. Results
+/// are in the same order as `members`.
 pub fn allocate_pool(
     pool_bytes: u64,
     members: &[PoolMember],
@@ -60,7 +65,7 @@ pub fn allocate_pool(
     let mut free = pool_bytes.saturating_sub(charged_total);
 
     let mut order = (0..members.len()).collect::<Vec<_>>();
-    order.sort_by(|left, right| members[*right].priority.cmp(&members[*left].priority));
+    order.sort_by_key(|index| service_order(&members[*index]));
 
     let mut allocations = vec![
         PoolAllocation {
@@ -82,6 +87,15 @@ pub fn allocate_pool(
     Ok(allocations)
 }
 
+/// The key members are served in, smallest first: highest priority, then
+/// earliest request. The sort is stable, so configuration order breaks ties.
+pub fn service_order(member: &PoolMember) -> (std::cmp::Reverse<u32>, u64) {
+    (
+        std::cmp::Reverse(member.priority),
+        member.arrival_unix_millis,
+    )
+}
+
 fn align_down(value: u64, alignment: u64) -> u64 {
     value - value % alignment
 }
@@ -96,6 +110,7 @@ mod tests {
     fn member(priority: u32, charged: u64, desired: u64) -> PoolMember {
         PoolMember {
             priority,
+            arrival_unix_millis: u64::MAX,
             charged_bytes: charged,
             desired_bytes: desired,
             block_bytes: 2 * MIB,
@@ -128,6 +143,32 @@ mod tests {
         assert_eq!(allocations[1].ceiling_bytes, 6 * GIB);
         assert_eq!(allocations[0].ceiling_bytes, 4 * GIB);
         assert_eq!(allocations[0].unmet_bytes, 2 * GIB);
+    }
+
+    #[test]
+    fn equal_priorities_are_served_first_come_first_served() {
+        // 2 GiB free; both want 2 GiB more at the same priority. The later
+        // request is listed first but the earlier one is served.
+        let early = PoolMember {
+            arrival_unix_millis: 1_000,
+            ..member(100, 4 * GIB, 6 * GIB)
+        };
+        let late = PoolMember {
+            arrival_unix_millis: 1_001,
+            ..member(100, 4 * GIB, 6 * GIB)
+        };
+        let allocations = allocate_pool(10 * GIB, &[late, early]).expect("allocation");
+        assert_eq!(ceilings(&allocations), [4 * GIB, 6 * GIB]);
+        // Priority still comes before arrival.
+        let urgent = PoolMember {
+            priority: 200,
+            ..late
+        };
+        let allocations = allocate_pool(10 * GIB, &[early, urgent]).expect("allocation");
+        assert_eq!(ceilings(&allocations), [4 * GIB, 6 * GIB]);
+        // With equal arrival, configuration order decides.
+        let allocations = allocate_pool(10 * GIB, &[early, early]).expect("allocation");
+        assert_eq!(ceilings(&allocations), [6 * GIB, 4 * GIB]);
     }
 
     #[test]
