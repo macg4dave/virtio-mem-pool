@@ -204,9 +204,12 @@ VM's settings needs only a controller install, never a guest change.
    ```
 
    The attestation binds the review to hashes of the live domain XML, QEMU's
-   arguments and versions, and the device options. Every resize collects
-   them again and refuses on any difference, so attest again after any
-   change to the VM's definition. `deploy/scripts/restart-vm-attest.sh`
+   arguments and versions, and the device options. Every resize checks them
+   again and refuses on any difference, so attest again after any change
+   to the VM's definition. The domain XML is read for every resize; what
+   cannot change while QEMU runs (its arguments, QEMU and libvirt versions,
+   device options) is collected again when the domain restarts and at
+   least every five minutes. `deploy/scripts/restart-vm-attest.sh`
    cold-restarts a VM (so a saved definition takes effect), attests it and
    installs the controller in one step.
 

@@ -4,8 +4,11 @@
 //! polkit to authorize each one. At a 1 s poll that was several polkit checks
 //! a second; polkitd exhausted its file descriptors and then refused every
 //! check, which stopped the controller (27 October). This session connects
-//! once and serves `dumpxml` and `qemu-agent-command` over that connection.
-//! Rare commands (resize, suspend/resume, version, QMP) stay on `virsh`.
+//! once and serves `dumpxml`, `qemu-agent-command`, `qemu-monitor-command`
+//! and live `update-memory-device` over that connection: with several VMs
+//! growing at once, a `virsh` process (and polkit check) per resize cost
+//! about 230 ms each, one after another. Rare commands (suspend/resume,
+//! version, `domxml-to-native`) stay on `virsh`.
 //!
 //! libvirt is loaded at runtime with `dlopen`: the host has the runtime
 //! library but not its development headers or unversioned link symlink.
@@ -20,6 +23,8 @@ use crate::virsh::VirshError;
 
 /// `VIR_DOMAIN_QEMU_AGENT_COMMAND_DEFAULT`, which virsh also uses.
 const AGENT_TIMEOUT_DEFAULT: c_int = -1;
+/// `VIR_DOMAIN_AFFECT_LIVE`, as `virsh update-memory-device --live`.
+const AFFECT_LIVE: c_uint = 1;
 
 type Ptr = *mut c_void;
 
@@ -28,6 +33,8 @@ type HandleCall = unsafe extern "C" fn(Ptr) -> c_int;
 type LookupByName = unsafe extern "C" fn(Ptr, *const c_char) -> Ptr;
 type GetXmlDesc = unsafe extern "C" fn(Ptr, c_uint) -> *mut c_char;
 type AgentCommand = unsafe extern "C" fn(Ptr, *const c_char, c_int, c_uint) -> *mut c_char;
+type MonitorCommand = unsafe extern "C" fn(Ptr, *const c_char, *mut *mut c_char, c_uint) -> c_int;
+type UpdateDeviceFlags = unsafe extern "C" fn(Ptr, *const c_char, c_uint) -> c_int;
 type LastErrorMessage = unsafe extern "C" fn() -> *const c_char;
 type ResetLastError = unsafe extern "C" fn();
 
@@ -39,6 +46,8 @@ struct Api {
     domain_free: HandleCall,
     get_xml_desc: GetXmlDesc,
     agent_command: AgentCommand,
+    monitor_command: MonitorCommand,
+    update_device_flags: UpdateDeviceFlags,
     last_error_message: LastErrorMessage,
     reset_last_error: ResetLastError,
 }
@@ -71,6 +80,14 @@ impl Api {
                 agent_command: transmute::<Ptr, AgentCommand>(symbol(
                     qemu,
                     c"virDomainQemuAgentCommand",
+                )?),
+                monitor_command: transmute::<Ptr, MonitorCommand>(symbol(
+                    qemu,
+                    c"virDomainQemuMonitorCommand",
+                )?),
+                update_device_flags: transmute::<Ptr, UpdateDeviceFlags>(symbol(
+                    libvirt,
+                    c"virDomainUpdateDeviceFlags",
                 )?),
                 last_error_message: transmute::<Ptr, LastErrorMessage>(symbol(
                     libvirt,
@@ -144,8 +161,22 @@ fn take_string(value: *mut c_char) -> String {
 }
 
 enum Request {
-    DumpXml { vm: String },
-    Agent { vm: String, command: String },
+    DumpXml {
+        vm: String,
+    },
+    Agent {
+        vm: String,
+        command: String,
+    },
+    Monitor {
+        vm: String,
+        command: String,
+    },
+    /// A live device update; `xml` is the device's complete element.
+    UpdateDevice {
+        vm: String,
+        xml: String,
+    },
 }
 
 type Job = (Request, Sender<Result<String, String>>);
@@ -202,7 +233,10 @@ impl Worker {
         unsafe { (self.api.reset_last_error)() };
         let connection = self.connect()?;
         let vm = match request {
-            Request::DumpXml { vm } | Request::Agent { vm, .. } => vm,
+            Request::DumpXml { vm }
+            | Request::Agent { vm, .. }
+            | Request::Monitor { vm, .. }
+            | Request::UpdateDevice { vm, .. } => vm,
         };
         let name = CString::new(vm.as_str()).map_err(|_| "VM name contains NUL".to_owned())?;
         // SAFETY: connection is live and name is NUL-terminated.
@@ -213,26 +247,86 @@ impl Worker {
                 self.api.last_error()
             ));
         }
-        let output = match request {
+        let result = match request {
             // SAFETY: domain is live; flags 0 matches `virsh dumpxml`.
-            Request::DumpXml { .. } => unsafe { (self.api.get_xml_desc)(domain, 0) },
+            Request::DumpXml { .. } => self.owned(unsafe { (self.api.get_xml_desc)(domain, 0) }),
             Request::Agent { command, .. } => match CString::new(command.as_str()) {
                 // SAFETY: domain is live and command is NUL-terminated.
-                Ok(command) => unsafe {
+                Ok(command) => self.owned(unsafe {
                     (self.api.agent_command)(domain, command.as_ptr(), AGENT_TIMEOUT_DEFAULT, 0)
-                },
-                Err(_) => std::ptr::null_mut(),
+                }),
+                Err(_) => Err("agent command contains NUL".to_owned()),
             },
-        };
-        let result = if output.is_null() {
-            Err(self.api.last_error())
-        } else {
-            Ok(take_string(output))
+            Request::Monitor { command, .. } => match CString::new(command.as_str()) {
+                Ok(command) => {
+                    let mut reply: *mut c_char = std::ptr::null_mut();
+                    // SAFETY: domain is live, command is NUL-terminated and
+                    // reply receives a malloc'd string on success; flags 0 is
+                    // VIR_DOMAIN_QEMU_MONITOR_COMMAND_DEFAULT, as virsh uses.
+                    let status = unsafe {
+                        (self.api.monitor_command)(domain, command.as_ptr(), &mut reply, 0)
+                    };
+                    if status == 0 {
+                        self.owned(reply)
+                    } else {
+                        Err(self.api.last_error())
+                    }
+                }
+                Err(_) => Err("monitor command contains NUL".to_owned()),
+            },
+            Request::UpdateDevice { xml, .. } => match CString::new(xml.as_str()) {
+                // SAFETY: domain is live and xml is NUL-terminated.
+                Ok(xml) => match unsafe {
+                    (self.api.update_device_flags)(domain, xml.as_ptr(), AFFECT_LIVE)
+                } {
+                    0 => Ok(String::new()),
+                    _ => Err(self.api.last_error()),
+                },
+                Err(_) => Err("device XML contains NUL".to_owned()),
+            },
         };
         // SAFETY: domain was returned by lookup and is freed exactly once.
         unsafe { (self.api.domain_free)(domain) };
         result
     }
+
+    /// A libvirt-allocated result, or this thread's error when it is null.
+    fn owned(&self, output: *mut c_char) -> Result<String, String> {
+        if output.is_null() {
+            Err(self.api.last_error())
+        } else {
+            Ok(take_string(output))
+        }
+    }
+}
+
+/// The `<memory model='virtio-mem'>` element with `alias` from live domain
+/// XML, with its `<requested>` set to `requested_kib`: the device XML
+/// `virsh update-memory-device` builds. `None` unless exactly one such
+/// device and one KiB `<requested>` in it are found.
+fn virtio_mem_update_xml(domain_xml: &str, alias: &str, requested_kib: u64) -> Option<String> {
+    const START: &str = "<memory model='virtio-mem'";
+    const END: &str = "</memory>";
+    const OPEN: &str = "<requested unit='KiB'>";
+    const CLOSE: &str = "</requested>";
+    let alias_tag = format!("<alias name='{alias}'/>");
+    let mut found = domain_xml.match_indices(START).filter_map(|(start, _)| {
+        let end = start + domain_xml[start..].find(END)? + END.len();
+        let element = &domain_xml[start..end];
+        element.contains(&alias_tag).then_some(element)
+    });
+    let element = found.next()?;
+    if found.next().is_some() || element.matches(OPEN).count() != 1 {
+        return None;
+    }
+    let value_start = element.find(OPEN)? + OPEN.len();
+    let value_end = value_start + element[value_start..].find(CLOSE)?;
+    element[value_start..value_end].parse::<u64>().ok()?;
+    Some(format!(
+        "{}{requested_kib}{}",
+        &element[..value_start],
+        &element[value_end..]
+    ))
 }
 
 /// A shared, lazily connected libvirt session. A call that exceeds the
@@ -272,6 +366,27 @@ impl LibvirtSession {
                 vm: vm.clone(),
                 command: command.clone(),
             },
+            [operation, vm, command] if operation == "qemu-monitor-command" => Request::Monitor {
+                vm: vm.clone(),
+                command: command.clone(),
+            },
+            [operation, vm, alias_flag, alias, size_flag, kib, live]
+                if operation == "update-memory-device"
+                    && alias_flag == "--alias"
+                    && size_flag == "--requested-size"
+                    && live == "--live" =>
+            {
+                // Build the device XML from live state as virsh does. Anything
+                // short of a complete element leaves the command to virsh, so
+                // nothing is attempted here that virsh would not attempt.
+                let requested_kib = kib.parse().ok()?;
+                let domain_xml = self.call(Request::DumpXml { vm: vm.clone() }).ok()?;
+                let xml = virtio_mem_update_xml(&domain_xml, alias, requested_kib)?;
+                Request::UpdateDevice {
+                    vm: vm.clone(),
+                    xml,
+                }
+            }
             _ => return None,
         };
         Some(self.call(request))
@@ -345,15 +460,80 @@ mod tests {
         let session = LibvirtSession::new("test:///default", Duration::from_secs(5));
         for other in [
             arguments(&["update-memory-device", "guest", "--alias", "a"]),
+            arguments(&[
+                "update-memory-device",
+                "guest",
+                "--alias",
+                "a",
+                "--requested-size",
+                "1024",
+                "--config",
+            ]),
             arguments(&["suspend", "guest"]),
             arguments(&["resume", "guest"]),
             arguments(&["version"]),
             arguments(&["domuuid", "guest"]),
-            arguments(&["qemu-monitor-command", "guest", "{}"]),
+            arguments(&["domxml-to-native", "qemu-argv", "--domain", "guest"]),
             arguments(&["dumpxml", "guest", "--inactive"]),
         ] {
             assert!(session.run(&other).is_none(), "{other:?}");
         }
+    }
+
+    const DEVICE: &str = "    <memory model='virtio-mem'>
+      <target>
+        <size unit='KiB'>15728640</size>
+        <node>0</node>
+        <block unit='KiB'>2048</block>
+        <requested unit='KiB'>284672</requested>
+        <current unit='KiB'>284672</current>
+        <address base='0x100000000'/>
+      </target>
+      <alias name='ua-virtiomem0'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x07' function='0x0'/>
+    </memory>
+";
+
+    fn live_xml(devices: &str) -> String {
+        format!(
+            "<domain type='kvm' id='7'>
+  <devices>
+    <memory model='dimm'>
+      <target><size unit='KiB'>1048576</size></target>
+      <alias name='dimm0'/>
+    </memory>
+{devices}  </devices>
+</domain>"
+        )
+    }
+
+    #[test]
+    fn a_resize_sends_the_devices_live_element_with_only_requested_changed() {
+        let xml =
+            virtio_mem_update_xml(&live_xml(DEVICE), "ua-virtiomem0", 1_048_576).expect("element");
+        assert!(xml.starts_with("<memory model='virtio-mem'>"), "{xml}");
+        assert!(xml.ends_with("</memory>"), "{xml}");
+        assert!(
+            xml.contains("<requested unit='KiB'>1048576</requested>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<current unit='KiB'>284672</current>"),
+            "{xml}"
+        );
+        assert!(!xml.contains("dimm"), "{xml}");
+        // No such device, two of them, or no KiB requested: left to virsh.
+        assert_eq!(virtio_mem_update_xml(&live_xml(DEVICE), "other", 1), None);
+        let twice = live_xml(&format!("{DEVICE}{DEVICE}"));
+        assert_eq!(virtio_mem_update_xml(&twice, "ua-virtiomem0", 1), None);
+        let bytes = DEVICE.replace(
+            "<requested unit='KiB'>284672",
+            "<requested unit='bytes'>291504128",
+        );
+        assert_eq!(
+            virtio_mem_update_xml(&live_xml(&bytes), "ua-virtiomem0", 1),
+            None
+        );
     }
 
     /// libvirt's built-in test driver: no daemon, polkit or VM required.

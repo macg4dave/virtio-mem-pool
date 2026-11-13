@@ -1,6 +1,8 @@
+use std::cell::RefCell;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -264,10 +266,30 @@ impl CompatibilityAttestation {
     }
 }
 
+/// How long evidence fixed for one QEMU process is reused before it is
+/// collected again. The QEMU arguments, QEMU version and device properties
+/// cannot change while that process runs; the libvirt version changes only
+/// with an upgrade. The domain XML is read and checked on every collection.
+const PROCESS_EVIDENCE_MAX_AGE: Duration = Duration::from_secs(300);
+
+/// Evidence that is fixed while one QEMU process runs.
+#[derive(Debug, Clone)]
+struct ProcessEvidence {
+    qemu_argv_sha256: String,
+    libvirt_version_sha256: String,
+    qemu_version: Value,
+    dynamic_memslots: bool,
+    unplugged_inaccessible: bool,
+}
+
 pub struct VirshCompatibilityEvidenceSource<C> {
     command: C,
     vm_name: String,
     alias: String,
+    /// The process evidence last collected, with the runtime domain id it
+    /// belongs to and when. Collecting it takes five `virsh` commands; a
+    /// resize is checked against it many times a minute.
+    process: RefCell<Option<(String, Instant, ProcessEvidence)>>,
 }
 
 impl<C> VirshCompatibilityEvidenceSource<C> {
@@ -276,8 +298,18 @@ impl<C> VirshCompatibilityEvidenceSource<C> {
             command,
             vm_name: vm_name.into(),
             alias: alias.into(),
+            process: RefCell::new(None),
         }
     }
+}
+
+/// The runtime `id` of a running domain (`<domain type='kvm' id='7'>`), which
+/// libvirt assigns afresh each time the domain starts.
+fn runtime_domain_id(domain_xml: &str) -> Option<&str> {
+    let start = domain_xml.find("<domain ")?;
+    let tag = &domain_xml[start..start + domain_xml[start..].find('>')?];
+    let value = &tag[tag.find(" id='")? + " id='".len()..];
+    Some(&value[..value.find('\'')?])
 }
 
 impl<C: VirshCommand> VirshCompatibilityEvidenceSource<C> {
@@ -286,30 +318,52 @@ impl<C: VirshCommand> VirshCompatibilityEvidenceSource<C> {
         let domain_xml = self.run("live domain XML", &["dumpxml", &self.vm_name])?;
         parse_virtio_mem_xml_for_alias(&domain_xml, &self.alias)
             .map_err(|error| format!("validate live domain XML for attestation: {error}"))?;
-        let qemu_argv = self.run(
-            "live QEMU argv",
-            &["domxml-to-native", "qemu-argv", "--domain", &self.vm_name],
-        )?;
-        let libvirt_version = self.run("libvirt version", &["version"])?;
-        let qemu_version = self.qmp("query-version", None)?;
-        let dynamic_memslots = self.qom_bool("dynamic-memslots")?;
-        let unplugged_inaccessible = self.qom_bool("unplugged-inaccessible")?;
+        let process = self.process_evidence(runtime_domain_id(&domain_xml))?;
         Ok(LiveCompatibilityEvidence {
             vm_name: self.vm_name.clone(),
             device_alias: self.alias.clone(),
             domain_xml_sha256: sha256_hex(
                 scrub_runtime_identity(&scrub_allocation_state(&domain_xml)).as_bytes(),
             ),
+            qemu_argv_sha256: process.qemu_argv_sha256,
+            libvirt_version_sha256: process.libvirt_version_sha256,
+            qemu_version: process.qemu_version,
+            dynamic_memslots: process.dynamic_memslots,
+            unplugged_inaccessible: process.unplugged_inaccessible,
+        })
+    }
+
+    /// The process evidence for the domain running as `domain_id`: reused
+    /// while that id is unchanged and younger than
+    /// `PROCESS_EVIDENCE_MAX_AGE`, otherwise collected again. Without an id
+    /// it is always collected.
+    fn process_evidence(&self, domain_id: Option<&str>) -> Result<ProcessEvidence, String> {
+        if let (Some(id), Some((cached_id, collected, evidence))) =
+            (domain_id, self.process.borrow().as_ref())
+        {
+            if cached_id == id && collected.elapsed() < PROCESS_EVIDENCE_MAX_AGE {
+                return Ok(evidence.clone());
+            }
+        }
+        let qemu_argv = self.run(
+            "live QEMU argv",
+            &["domxml-to-native", "qemu-argv", "--domain", &self.vm_name],
+        )?;
+        let libvirt_version = self.run("libvirt version", &["version"])?;
+        let evidence = ProcessEvidence {
             qemu_argv_sha256: sha256_hex(
                 scrub_descriptor_numbers(&scrub_qemu_argv(&qemu_argv))
                     .trim()
                     .as_bytes(),
             ),
             libvirt_version_sha256: sha256_hex(libvirt_version.trim().as_bytes()),
-            qemu_version,
-            dynamic_memslots,
-            unplugged_inaccessible,
-        })
+            qemu_version: self.qmp("query-version", None)?,
+            dynamic_memslots: self.qom_bool("dynamic-memslots")?,
+            unplugged_inaccessible: self.qom_bool("unplugged-inaccessible")?,
+        };
+        *self.process.borrow_mut() =
+            domain_id.map(|id| (id.to_owned(), Instant::now(), evidence.clone()));
+        Ok(evidence)
     }
 
     fn run(&self, description: &str, arguments: &[&str]) -> Result<String, String> {
@@ -677,7 +731,6 @@ fn scrub_descriptor_numbers(arguments: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
     use std::collections::VecDeque;
 
     use super::*;
@@ -948,5 +1001,43 @@ mod tests {
         let evidence = source.collect().expect("complete evidence");
         assert!(evidence.dynamic_memslots && evidence.unplugged_inaccessible);
         assert_eq!(evidence.domain_xml_sha256.len(), 64);
+    }
+
+    #[test]
+    fn process_evidence_is_reused_until_the_domain_restarts() {
+        let xml = |id: u32, requested: u32| {
+            format!("<domain type='kvm' id='{id}'><memory model='virtio-mem' dynamic-memslots='on' unplugged-inaccessible='on'><target><size unit='GiB'>8</size><block unit='MiB'>2</block><requested unit='GiB'>{requested}</requested><current unit='GiB'>{requested}</current></target><alias name='memory0'/></memory></domain>")
+        };
+        let process = |argv: &str| {
+            [
+                argv.to_owned(),
+                "Compiled against library: libvirt 11.0.0".to_owned(),
+                r#"{"return":{"qemu":{"major":9,"minor":2,"micro":0},"package":"qemu-9.2"}}"#
+                    .to_owned(),
+                r#"{"return":true}"#.to_owned(),
+                r#"{"return":true}"#.to_owned(),
+            ]
+        };
+        // Same QEMU process: only the XML is read again. A restart (new id)
+        // collects everything again. The fixture runs out if more is asked.
+        let mut responses = vec![xml(7, 1)];
+        responses.extend(process("qemu-system -machine q35"));
+        responses.push(xml(7, 2));
+        responses.push(xml(8, 1));
+        responses.extend(process("qemu-system -machine q35 -m 2G"));
+        let source =
+            VirshCompatibilityEvidenceSource::new(FakeVirsh::new(responses), "guest", "memory0");
+        let first = source.collect().expect("first");
+        let same = source.collect().expect("same process");
+        assert_eq!(first.qemu_argv_sha256, same.qemu_argv_sha256);
+        let restarted = source.collect().expect("restarted");
+        assert_ne!(first.qemu_argv_sha256, restarted.qemu_argv_sha256);
+        assert!(
+            source.collect().is_err(),
+            "fixture exhausted: nothing extra was run"
+        );
+
+        assert_eq!(runtime_domain_id("<domain type='kvm' id='12'>"), Some("12"));
+        assert_eq!(runtime_domain_id("<domain type='kvm'>"), None);
     }
 }
