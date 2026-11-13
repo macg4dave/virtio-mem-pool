@@ -27,7 +27,9 @@ instance=$2 template=$3 name=$4 destination=$5
 scripts_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 repo=$(cd -- "$scripts_dir/../.." && pwd)
 virsh=(virsh -c qemu:///system)
-ssh_guest=(ssh -o BatchMode=yes -o ConnectTimeout=10 -- "$destination")
+# A copy made moments ago has a host key nobody has seen: trust it on first
+# use, as anyone logging in to a new VM does, and check it from then on.
+ssh_guest=(ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -- "$destination")
 
 [[ $name =~ ^[a-z0-9][a-z0-9_-]*$ ]] || { echo "invalid VM name: $name" >&2; exit 1; }
 for file in host_list.toml "${template}_settings.toml" "$template.review.json"; do
