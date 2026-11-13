@@ -71,77 +71,9 @@ impl<C: VirshCommand, E: CompatibilitySource> ResizeSink for VirshResizeSink<C, 
             .map_err(ResizeSinkError::Rejected)?;
         self.apply_unless_stopped(prepared, stop)
     }
-
-    fn widen_usable_region_guarded(
-        &self,
-        expected: VirtioMemState,
-        stop: &AtomicBool,
-    ) -> Result<(), ResizeSinkError> {
-        let converged = |state: &VirtioMemState| {
-            if *state != expected || state.requested_bytes != state.current_bytes {
-                return Err("live device changed since the widening decision".to_owned());
-            }
-            Ok(())
-        };
-        // The largest valid target; QEMU adds its extent above it.
-        let ceiling = expected.maximum_target_bytes();
-        let widen = self
-            .prepare(ceiling, converged)
-            .map_err(ResizeSinkError::Rejected)?;
-        let restore = self
-            .prepare(expected.requested_bytes, converged)
-            .map_err(ResizeSinkError::Rejected)?;
-        if stop.load(Ordering::Acquire) {
-            return Err(ResizeSinkError::Rejected("shutdown requested".to_owned()));
-        }
-        let domain = |operation: &str| {
-            self.command
-                .run(&[operation.to_owned(), self.vm_name.clone()])
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        };
-        domain("suspend").map_err(ResizeSinkError::Rejected)?;
-        // The guest cannot act on the device while paused. Never resume with
-        // the whole device possibly requested: the driver would plug all of
-        // it. A failed widening command may still have applied, so the
-        // restore always runs.
-        let widened = self.apply_prepared(widen);
-        let restored = self
-            .apply_prepared(restore)
-            .or_else(|_| self.apply_prepared(self.prepare_restore(expected)?));
-        if let Err(error) = restored {
-            return Err(ResizeSinkError::CommandUnknown(format!(
-                "{WIDEN_UNRESTORED}: {error}"
-            )));
-        }
-        match (widened, domain("resume")) {
-            (Ok(()), Ok(())) => Ok(()),
-            (_, Err(error)) => Err(ResizeSinkError::CommandUnknown(format!(
-                "domain could not be resumed after widening: {error}"
-            ))),
-            (Err(error), Ok(())) => Err(ResizeSinkError::CommandUnknown(format!(
-                "widening the usable region failed after pausing: {error}"
-            ))),
-        }
-    }
 }
 
-/// Prefix of a widening failure that left the whole device requested; the
-/// domain is deliberately left paused for operator recovery.
-const WIDEN_UNRESTORED: &str = "requested size was not restored after widening; domain left paused";
-
 impl<C: VirshCommand, E: CompatibilitySource> VirshResizeSink<C, E> {
-    /// The restoring command for a widened device, built without the live
-    /// precondition (the device then requests its whole size).
-    fn prepare_restore(&self, expected: VirtioMemState) -> Result<PreparedResize, String> {
-        self.prepare(expected.requested_bytes, |state| {
-            if state.current_bytes != expected.current_bytes {
-                return Err("device allocation changed while paused".to_owned());
-            }
-            Ok(())
-        })
-    }
-
     fn apply_prepared(&self, prepared: PreparedResize) -> Result<(), String> {
         self.command
             .run(&prepared)
@@ -261,92 +193,8 @@ mod tests {
         }
     }
 
-    /// Records calls and fails every `update-memory-device` from the given
-    /// (zero-based) one onwards.
-    struct ScriptedFake {
-        calls: Rc<RefCell<Vec<Vec<String>>>>,
-        fail_updates_from: usize,
-    }
-
-    impl VirshCommand for ScriptedFake {
-        fn run(&self, arguments: &[String]) -> Result<String, VirshError> {
-            let updates = self
-                .calls
-                .borrow()
-                .iter()
-                .filter(|call| call[0] == "update-memory-device")
-                .count();
-            self.calls.borrow_mut().push(arguments.to_vec());
-            match arguments[0].as_str() {
-                "dumpxml" => Ok(CONVERGED_XML.to_owned()),
-                "update-memory-device" if updates >= self.fail_updates_from => {
-                    Err(VirshError::Timeout(std::time::Duration::from_secs(10)))
-                }
-                _ => Ok(String::new()),
-            }
-        }
-    }
-
-    fn widen_with(fail_updates_from: usize) -> (Result<(), ResizeSinkError>, Vec<String>) {
-        let calls = Rc::new(RefCell::new(Vec::new()));
-        let sink = VirshResizeSink::new(
-            ScriptedFake {
-                calls: Rc::clone(&calls),
-                fail_updates_from,
-            },
-            "guest",
-            "memory0",
-            FixedCompatibilitySource::new(VirtioMemCompatibility::confirmed()),
-        );
-        let result = sink.widen_usable_region_guarded(converged(), &AtomicBool::new(false));
-        let actions = calls
-            .borrow()
-            .iter()
-            .filter(|call| call[0] != "dumpxml")
-            .map(|call| match call[0].as_str() {
-                "update-memory-device" => format!("update {}", call[5]),
-                operation => operation.to_owned(),
-            })
-            .collect();
-        (result, actions)
-    }
-
-    #[test]
-    fn widening_pauses_requests_the_ceiling_restores_and_resumes() {
-        let (result, actions) = widen_with(usize::MAX);
-        result.expect("widening succeeds");
-        // An 8 GiB device: the 8 GiB ceiling, then the converged 4 GiB again.
-        assert_eq!(
-            actions,
-            ["suspend", "update 8388608", "update 4194304", "resume"]
-        );
-    }
-
-    #[test]
-    fn widening_never_resumes_with_the_ceiling_requested() {
-        let (result, actions) = widen_with(1);
-        assert!(
-            matches!(&result, Err(ResizeSinkError::CommandUnknown(message)) if message.contains("left paused")),
-            "{result:?}"
-        );
-        assert_eq!(
-            actions,
-            [
-                "suspend",
-                "update 8388608",
-                "update 4194304",
-                "update 4194304"
-            ]
-        );
-
-        // A failed widening command may still have applied: restore before
-        // resuming, and stay paused when the restore fails too.
-        let (result, actions) = widen_with(0);
-        assert!(
-            matches!(&result, Err(ResizeSinkError::CommandUnknown(message)) if message.contains("left paused"))
-        );
-        assert!(!actions.contains(&"resume".to_owned()), "{actions:?}");
-    }
+    // PAUSED (viomem): the usable-region widening tests are archived in
+    // archive/viomem/host-workaround/tests.rs until the driver bug is repaired.
 
     #[test]
     fn refreshes_state_before_sending_one_validated_resize() {

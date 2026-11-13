@@ -232,6 +232,9 @@ impl VmSettings {
 
     /// This VM's guest policy. The Windows `viomem` driver removes memory
     /// in bounded steps; a Linux guest may return its whole surplus at once.
+    /// PAUSED (viomem): the Windows step stays until Hyper-V Dynamic Memory
+    /// replaces viomem (docs/roadmap.md, milestone W), whose own limit is
+    /// about 2.2 GiB per removal.
     pub fn guest_policy(&self, globals: &GlobalSettings) -> GuestMemoryPolicy {
         let removal_step = match self.guest_os {
             GuestOs::Windows => self.free_ram + self.free_ram / 2,

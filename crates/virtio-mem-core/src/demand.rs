@@ -84,7 +84,8 @@ pub enum MemoryResourceNotificationState {
 pub struct GuestDiagnostics {
     pub build_id: String,
     /// Windows: the on-disk viomem.sys version, not a claim about a loaded
-    /// driver image. Linux: the running kernel release, which carries the
+    /// driver image (PAUSED with the viomem path until its driver bug is
+    /// repaired). Linux: the running kernel release, which carries the
     /// in-tree driver.
     pub driver_file_version: Result<String, String>,
     pub boot_uptime_millis: Option<u64>,

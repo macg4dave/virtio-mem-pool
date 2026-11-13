@@ -1215,6 +1215,7 @@ const NOTABLE_EVENTS: [&str; 5] = [
     "actuation_latched",
     "ownership_conflict",
     "live_state_unavailable",
+    // PAUSED (viomem): no longer emitted; kept so older journals still show it.
     "usable_region_widened",
     "vm_stopped",
 ];

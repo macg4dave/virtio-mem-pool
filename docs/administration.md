@@ -268,11 +268,14 @@ access to the control channel's device instance
 running. Without the port the service uses the control files through the
 guest agent.
 
-The Windows `viomem` driver has a removal defect. Until a fixed driver is
-deployed the controller applies two workarounds to Windows guests only:
-it widens the usable region and extends a stalled shrink step by step. A
-shrink that reaches its minimum and stops moving for the convergence
-timeout settles at what the guest kept.
+**Windows on virtio-mem is paused.** The Windows `viomem` driver has a
+removal defect, and all work on it is on pause until the driver bug is
+repaired. The controller's two Windows-only workarounds (widening the
+usable region and extending a stalled shrink) are archived in
+[archive/viomem](../archive/viomem/) and no longer run: a Windows removal
+that stops moving for the convergence timeout settles at what the guest
+kept, as on Linux. Windows guests are moving to Hyper-V Dynamic Memory;
+see [the roadmap](roadmap.md), milestone W.
 
 ## Observing
 

@@ -1,5 +1,10 @@
 # Full-region viomem removal experiment
 
+> **PAUSED.** This work is on pause until the upstream `viomem` removal bug
+> is repaired. Windows guests are moving to Hyper-V Dynamic Memory
+> instead; see [the roadmap](../../../docs/roadmap.md), milestone W. Kept for
+> reference and for resuming.
+
 `full-region-removal.patch` changes the upstream Windows kernel driver, not
 this repository's Rust service. It applies to
 `virtio-win/kvm-guest-drivers-windows` commit
@@ -29,9 +34,9 @@ From this service repository, using a fresh upstream checkout:
 ```bash
 git clone https://github.com/virtio-win/kvm-guest-drivers-windows.git .artifacts/viomem-driver/source
 git -C .artifacts/viomem-driver/source checkout f7c8beb249df12f52ba4b9dba95f1edb515c7aeb
-git -C .artifacts/viomem-driver/source apply --check "$PWD/patches/viomem/full-region-removal.patch"
-git -C .artifacts/viomem-driver/source apply "$PWD/patches/viomem/full-region-removal.patch"
-python3 patches/viomem/test-removal.py .artifacts/viomem-driver/source/viomem/sys/viomem.c
+git -C .artifacts/viomem-driver/source apply --check "$PWD/archive/viomem/driver-patch/full-region-removal.patch"
+git -C .artifacts/viomem-driver/source apply "$PWD/archive/viomem/driver-patch/full-region-removal.patch"
+python3 archive/viomem/driver-patch/test-removal.py .artifacts/viomem-driver/source/viomem/sys/viomem.c
 ```
 
 The runner extracts the actual upstream removal function and compiles it with

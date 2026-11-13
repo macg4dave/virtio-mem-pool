@@ -1,4 +1,9 @@
 //! Optional file metadata, sampled once when the worker starts.
+//!
+//! PAUSED (viomem): the `viomem.sys` version only matters for the virtio-mem
+//! path, which is on pause until the viomem driver bug is repaired. Under
+//! Hyper-V Dynamic Memory (docs/roadmap.md, milestone W) this reports the
+//! Dynamic Memory driver instead.
 #[cfg(windows)]
 pub(crate) fn driver_version() -> Result<String, String> {
     use winapi::um::sysinfoapi::GetSystemDirectoryW;

@@ -95,7 +95,7 @@ host boot ID, and readable initial checkpoint/attestation. Missing permissions
 and metadata are recorded as errors rather than requiring elevation. The first
 readable guest publication adds its build identity, initial request and
 driver version: the on-disk `viomem.sys` version on Windows (not proof of
-the loaded driver), the kernel release on Linux. A final status distinguishes a finished run from a recording
+the loaded driver; paused with the viomem path), the kernel release on Linux. A final status distinguishes a finished run from a recording
 interrupted before its manifest could be finalised.
 
 Guest publication snapshots retain every published field when the request,

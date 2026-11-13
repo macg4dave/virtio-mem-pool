@@ -10,7 +10,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use thiserror::Error;
-use virtio_mem_core::settings::GuestOs;
 use virtio_mem_core::{
     allocate_pool, bounded_reason, CommandDirection, CommandOwnership, HostMemoryStatus,
     MemoryOperation, MemoryOutcome, MemoryRequest, MemoryResourceNotificationState, MemoryResult,
@@ -56,16 +55,8 @@ pub trait ResizeSink {
         stop: &AtomicBool,
     ) -> Result<(), ResizeSinkError>;
 
-    /// With the domain paused, request the whole device and then the
-    /// converged `expected` allocation again, so QEMU's usable region (which
-    /// only grows until a reset) covers the device while nothing is plugged.
-    /// `Rejected` means nothing changed; `CommandUnknown` means the request or
-    /// the domain may not be restored and the domain may remain paused.
-    fn widen_usable_region_guarded(
-        &self,
-        expected: VirtioMemState,
-        stop: &AtomicBool,
-    ) -> Result<(), ResizeSinkError>;
+    // PAUSED (viomem): `widen_usable_region_guarded` is archived in
+    // archive/viomem/host-workaround/ until the viomem driver bug is repaired.
 }
 
 #[derive(Debug, Error)]
@@ -128,15 +119,6 @@ pub struct VmController<G, S, R> {
     pending_since: Option<Instant>,
     /// The owned resize's last observed allocation and when it last moved.
     pending_progress: Option<(u64, Instant)>,
-    /// VIOMEM WORKAROUND: the last shrink extension's operation, allocation
-    /// and step in blocks.
-    extension: Option<(String, u64, u64)>,
-    /// A growth settled without plugging anything: widen QEMU's usable
-    /// region on the next converged poll.
-    widen_due: bool,
-    /// Widening was tried since the device last had nothing plugged (a VM
-    /// reset shrinks the usable region again); it is not repeated.
-    widened: bool,
     operation_counter: u64,
     last_charge: Option<(u64, u64)>,
     outstanding_growth: Option<u64>,
@@ -174,9 +156,6 @@ impl<G, S, R> VmController<G, S, R> {
             control,
             pending_since: None,
             pending_progress: None,
-            extension: None,
-            widen_due: false,
-            widened: false,
             operation_counter: 0,
             last_charge: None,
             outstanding_growth: None,
@@ -422,14 +401,6 @@ where
         self.pending_since = None;
         self.pending_progress = None;
         self.unowned_divergence_reported = false;
-        if state.current_bytes == 0 {
-            self.widened = false;
-        }
-        if self.widen_due {
-            if let Step::Stop(error) = self.widen_usable_region(state, stop)? {
-                return Ok(Observed::Stop(error));
-            }
-        }
         let (request, base_ram) = match self.guest.read() {
             Ok(envelope) => {
                 self.guest_unavailable_reported = false;
@@ -598,12 +569,6 @@ where
                 if let Some(result) =
                     movement_result(&self.control.journal, &intent, live, now, reason)
                 {
-                    // The Windows driver plugs only above its highest plugged
-                    // block; QEMU rejects that once it passes the usable
-                    // region, which shrinks only on reset.
-                    self.widen_due |= intent.direction == CommandDirection::SettleGrow
-                        && result.actual_bytes == 0
-                        && !self.widened;
                     self.log(&format!(
                         "event=request_completed operation_id={} {} outcome={:?} actual_bytes={}",
                         intent.operation_id,
@@ -647,40 +612,24 @@ where
         // A grow or shrink holds its target until the guest reaches it: no
         // general stall settle or convergence timeout. Exceptions settle it at
         // its current allocation (`partial`), when commands are allowed:
-        // - a grow that has plugged nothing before the one-time widening:
-        //   QEMU rejects plugs past its usable region and the driver never
-        //   retries, so it settles and the widening lets the next plug land;
-        // - a shrink while Windows reports Low memory: the held shrink
+        // - a shrink while the guest reports Low memory: the held shrink
         //   occupies the guest's only request slot, so release it and let
         //   the guest ask for memory again;
-        // - a shrink stuck at its minimum target for the convergence timeout,
-        //   where the driver workaround cannot make another attempt.
-        // The widening and the shrink extension answer Windows driver
-        // behaviour. The Linux driver retries plugs and removals by itself, so
-        // a Linux grow is held and a Linux shrink that has not moved for the
-        // convergence timeout settles at what the guest returned.
+        // - a shrink that has not moved for the convergence timeout: the
+        //   guest driver retries by itself, so settle at what it returned.
+        // PAUSED (viomem): the Windows-only widening and shrink extension are
+        // archived in archive/viomem/host-workaround/ until the viomem driver
+        // bug is repaired; every guest now takes the paths above.
         let can_settle = !self.control.latched() && !self.config.observe_only;
-        let windows = self.config.guest_os == GuestOs::Windows;
         let settle = match direction {
-            CommandDirection::Grow => {
-                can_settle
-                    && windows
-                    && !self.widened
-                    && self
-                        .control
-                        .intent
-                        .as_ref()
-                        .is_some_and(|intent| intent.prior_current_bytes == state.current_bytes)
-                    && self.command_stalled(state)
-            }
+            CommandDirection::Grow => false,
             CommandDirection::Shrink if can_settle => {
-                let guest = self.guest.read().ok();
-                if guest.as_ref().is_some_and(|envelope| {
+                if self.guest.read().ok().is_some_and(|envelope| {
                     envelope.native_pressure == Some(MemoryResourceNotificationState::Low)
                 }) {
                     self.log("event=held_shrink_released reason=guest_low_memory");
                     true
-                } else if !windows {
+                } else {
                     let stalled = self.command_stalled(state)
                         && self.pending_progress.is_some_and(|(_, since)| {
                             since.elapsed() >= self.config.convergence_timeout
@@ -689,18 +638,6 @@ where
                         self.log("event=held_shrink_released reason=removal_stalled");
                     }
                     stalled
-                } else {
-                    // VIOMEM WORKAROUND (see `extend_shrink`).
-                    let base_ram = guest.and_then(|envelope| {
-                        envelope
-                            .memory
-                            .physical_total_bytes
-                            .checked_sub(state.current_bytes)
-                    });
-                    if let Some(base_ram) = base_ram.filter(|_| self.command_stalled(state)) {
-                        return self.extend_shrink(state, base_ram, stop);
-                    }
-                    false
                 }
             }
             CommandDirection::Shrink => false,
@@ -719,139 +656,11 @@ where
         }
     }
 
-    // =====================================================================
-    // VIOMEM WORKAROUND START: widen a stalled removal one block at a time
-    //
-    // Unpatched viomem driver bug: each removal only tries a window that
-    // starts at the lowest plugged block and is `plugged - requested` long,
-    // once per device notification. Memory at the bottom of that window that
-    // Windows cannot evacuate stops the removal for good. Observed live on
-    // the Windows test VM: each request one block (8 MiB then) lower frees
-    // exactly the block it adds to the window, and the gap below `current` stays the same;
-    // re-sending a target already tried (bouncing up and back) frees nothing.
-    // So each time a held shrink stops moving, request less, and settle as
-    // soon as `current` reaches the guest's goal: the admitted request's
-    // bytes below the allocation it started from, never below `min_ram`.
-    // The step starts at one block and doubles, up to
-    // `MAX_EXTENSION_BYTES`, while each step is released in full; a short
-    // release drops it back to one block. It never steps past the goal.
-    //
-    // TO REMOVE once a patched viomem is deployed: delete this block and
-    // the marked branch in `observe_pending`.
-    // =====================================================================
-
-    /// Largest single extension, whatever the device block size.
-    const MAX_EXTENSION_BYTES: u64 = 256 * 1024 * 1024;
-
-    fn extend_shrink(
-        &mut self,
-        state: VirtioMemState,
-        base_ram: u64,
-        stop: &AtomicBool,
-    ) -> Result<Step, HostRuntimeError> {
-        let block = state.block_size_bytes;
-        let floor = self
-            .config
-            .min_ram
-            .saturating_sub(base_ram)
-            .div_ceil(block)
-            .saturating_mul(block);
-        let Some(prior_current) = self
-            .control
-            .intent
-            .as_ref()
-            .map(|intent| intent.prior_current_bytes)
-        else {
-            return Ok(Step::Wait);
-        };
-        let asked = self
-            .control
-            .journal
-            .request
-            .as_ref()
-            .filter(|request| request.operation == MemoryOperation::Remove)
-            .map_or(0, |request| request.bytes);
-        let goal = prior_current
-            .saturating_sub(asked - asked % block)
-            .max(floor);
-        let operation_id = self
-            .control
-            .intent
-            .as_ref()
-            .map(|intent| intent.operation_id.clone())
-            .unwrap_or_default();
-        if state.current_bytes <= goal {
-            self.log(&format!(
-                "event=shrink_extension_done goal_bytes={goal} current_bytes={}",
-                state.current_bytes
-            ));
-            return self.settle_short(CommandDirection::Shrink, state, stop);
-        }
-        let step = match self.extension.take() {
-            Some((operation, from, step))
-                if operation == operation_id
-                    && from.saturating_sub(state.current_bytes) >= step * block =>
-            {
-                (step * 2).min((Self::MAX_EXTENSION_BYTES / block).max(1))
-            }
-            _ => 1,
-        };
-        let step_bytes = (step * block).min((state.current_bytes - goal).div_ceil(block) * block);
-        let Some(target) = state
-            .requested_bytes
-            .checked_sub(step_bytes)
-            .map(|target| target.max(floor))
-            .filter(|target| *target < state.requested_bytes)
-        else {
-            // At the floor the driver workaround cannot widen its scan any
-            // further. Release a genuinely stalled request so it cannot
-            // occupy the guest's only request slot indefinitely.
-            if self
-                .pending_progress
-                .is_some_and(|(_, since)| since.elapsed() >= self.config.convergence_timeout)
-            {
-                self.log("event=held_shrink_released reason=minimum_target_stalled");
-                return self.settle_short(CommandDirection::Shrink, state, stop);
-            }
-            self.log_pending_health(CommandDirection::Shrink, state, Some(floor));
-            return Ok(Step::Wait);
-        };
-        if stop.load(Ordering::Acquire) {
-            return Ok(Step::Wait);
-        }
-        let Some(intent) = self.control.intent.as_mut() else {
-            return Ok(Step::Wait);
-        };
-        // The new target is durable before the command, like any other.
-        intent.target_bytes = target;
-        self.save()?;
-        self.pending_progress = None;
-        self.extension = Some((operation_id, state.current_bytes, step_bytes / block));
-        let command = self
-            .resize_sink
-            .retarget_pending_guarded(state, target, stop);
-        self.log(&format!(
-            "event=shrink_extended target_bytes={target} step_bytes={step_bytes} current_bytes={} goal_bytes={goal} floor_bytes={floor} command_result={command:?}",
-            state.current_bytes
-        ));
-        match command {
-            Ok(()) => {}
-            // Nothing ran: keep the previous target.
-            Err(ResizeSinkError::Rejected(_)) => {
-                if let Some(intent) = self.control.intent.as_mut() {
-                    intent.target_bytes = state.requested_bytes;
-                }
-                self.save()?;
-            }
-            Err(error @ ResizeSinkError::CommandUnknown(_)) => {
-                self.latch(&format!("extending a shrink failed: {error}"))?;
-            }
-        }
-        Ok(Step::Wait)
-    }
-
-    // VIOMEM WORKAROUND END
-    // =====================================================================
+    // PAUSED (viomem): the Windows shrink extension that worked around the
+    // virtio-win viomem removal bug is archived in
+    // archive/viomem/host-workaround/ and is on pause until the driver bug is
+    // repaired. Windows guests are moving to Hyper-V Dynamic Memory instead
+    // (docs/roadmap.md, milestone W).
 
     /// Request the resize's current allocation, which completes it. The
     /// settlement gets its own deadline; failing it latches.
@@ -1210,35 +1019,6 @@ where
         ))
     }
 
-    /// Widen QEMU's usable region once so the guest's next plug can land
-    /// above its highest plugged block. The domain is paused for the two
-    /// commands; a request left at the whole device latches and stops.
-    fn widen_usable_region(
-        &mut self,
-        state: VirtioMemState,
-        stop: &AtomicBool,
-    ) -> Result<Step, HostRuntimeError> {
-        self.widen_due = false;
-        if self.control.latched() || self.config.observe_only || stop.load(Ordering::Acquire) {
-            return Ok(Step::Wait);
-        }
-        self.widened = true;
-        let started = Instant::now();
-        let command = self.resize_sink.widen_usable_region_guarded(state, stop);
-        self.log(&format!(
-            "event=usable_region_widened requested_bytes={} paused_millis={} command_result={command:?}",
-            state.requested_bytes,
-            started.elapsed().as_millis()
-        ));
-        match command {
-            Ok(()) | Err(ResizeSinkError::Rejected(_)) => Ok(Step::Wait),
-            Err(error @ ResizeSinkError::CommandUnknown(_)) => {
-                self.latch(&format!("widening the usable region failed: {error}"))?;
-                Ok(Step::Stop(HostRuntimeError::Resize(error.to_string())))
-            }
-        }
-    }
-
     /// Whether the owned resize has not moved for one poll, bounded by the
     /// convergence timeout.
     fn command_stalled(&mut self, state: VirtioMemState) -> bool {
@@ -1402,6 +1182,7 @@ mod tests {
     use virtio_mem_core::{MemoryTelemetrySnapshot, RawTelemetryEnvelope, RequestIdentity};
 
     use super::*;
+    use virtio_mem_core::settings::GuestOs;
 
     const MIB: u64 = 1024 * 1024;
     const GIB: u64 = 1024 * MIB;
@@ -1412,9 +1193,6 @@ mod tests {
         stall_at: Option<u64>,
         /// A growth stops plugging memory at this allocation.
         grow_stall_at: Option<u64>,
-        /// A retarget of a stalled shrink to a new low frees the blocks it
-        /// adds to viomem's window; re-sending a tried target frees nothing.
-        release_per_notification: bool,
     }
 
     /// A device that converges toward `requested` whenever it is read.
@@ -1432,7 +1210,6 @@ mod tests {
                 },
                 stall_at: None,
                 grow_stall_at: None,
-                release_per_notification: false,
             })))
         }
 
@@ -1501,28 +1278,11 @@ mod tests {
             _stop: &AtomicBool,
         ) -> Result<(), ResizeSinkError> {
             let mut device = self.device.0.borrow_mut();
-            if device.release_per_notification && target < device.live.requested_bytes {
-                let added = device.live.requested_bytes - target;
-                device.stall_at = device.stall_at.map(|stall| stall.saturating_sub(added));
-            }
             device.live.requested_bytes = target;
             self.targets.borrow_mut().push(target);
             Ok(())
         }
-
-        /// Records `WIDENED` and lets later growth plug again.
-        fn widen_usable_region_guarded(
-            &self,
-            _expected: VirtioMemState,
-            _stop: &AtomicBool,
-        ) -> Result<(), ResizeSinkError> {
-            self.device.0.borrow_mut().grow_stall_at = None;
-            self.targets.borrow_mut().push(WIDENED);
-            Ok(())
-        }
     }
-
-    const WIDENED: u64 = u64::MAX;
 
     #[derive(Default)]
     struct GuestState {
@@ -1653,7 +1413,7 @@ mod tests {
             libvirt_uri: "qemu:///system".to_owned(),
             raw_telemetry_path: "telemetry.json".to_owned(),
             raw_telemetry_service_name: "VirtioMemService".to_owned(),
-            guest_os: virtio_mem_core::settings::GuestOs::Windows,
+            guest_os: GuestOs::Windows,
             raw_telemetry_max_age: Duration::from_secs(60),
             raw_telemetry_future_tolerance: Duration::from_secs(5),
             host_min_headroom_bytes: 4 * GIB,
@@ -2039,44 +1799,6 @@ mod tests {
         assert!(!fixture.journal().latched());
     }
 
-    // VIOMEM WORKAROUND test: delete with the workaround.
-    #[test]
-    fn a_stalled_removal_widens_in_growing_steps_and_stops_at_the_goal() {
-        let mut fixture = Fixture::new("extend-shrink", 100, 8 * GIB);
-        fixture.config.poll_interval = Duration::from_millis(2);
-        {
-            let mut device = fixture.device.0.borrow_mut();
-            device.stall_at = Some(7 * GIB + 12 * MIB);
-            device.release_per_notification = true;
-        }
-        fixture
-            .guest
-            .send(Some(request(1, MemoryOperation::Remove, GIB)));
-        let mut runtime = runtime(vec![fixture.controller(None)], 64 * GIB, None);
-        for _ in 0..12 {
-            round(&mut runtime);
-            thread::sleep(Duration::from_millis(5));
-        }
-        // 7 GiB, then extensions of 2, 4 and (doubling to 8, capped at the
-        // 6 MiB left) 6 MiB, each released in full; at the goal the shrink
-        // settles at what the guest kept, not further down.
-        assert_eq!(
-            *fixture.targets.borrow(),
-            [
-                7 * GIB,
-                7 * GIB - 2 * MIB,
-                7 * GIB - 6 * MIB,
-                7 * GIB - 12 * MIB,
-                7 * GIB
-            ]
-        );
-        let result = fixture.guest.last_result().expect("result");
-        assert_eq!(result.outcome, MemoryOutcome::Completed);
-        assert_eq!(result.actual_bytes, GIB);
-        drop(runtime);
-        assert!(!fixture.journal().latched());
-    }
-
     #[test]
     fn a_held_removal_is_released_when_windows_reports_low_memory() {
         let fixture = Fixture::new("low-release", 100, 8 * GIB);
@@ -2103,9 +1825,17 @@ mod tests {
     }
 
     #[test]
-    fn a_linux_removal_is_never_extended_and_settles_once_it_stops_moving() {
-        let mut fixture = Fixture::new("linux-shrink", 100, 8 * GIB);
-        fixture.config.guest_os = GuestOs::Linux;
+    fn a_removal_is_never_extended_and_settles_once_it_stops_moving() {
+        for guest_os in [GuestOs::Linux, GuestOs::Windows] {
+            removal_settles_once_it_stops_moving(guest_os);
+        }
+    }
+
+    // PAUSED (viomem): Windows used to extend a stalled shrink; with the
+    // workaround archived it settles like Linux.
+    fn removal_settles_once_it_stops_moving(guest_os: GuestOs) {
+        let mut fixture = Fixture::new(&format!("shrink-{guest_os:?}"), 100, 8 * GIB);
+        fixture.config.guest_os = guest_os;
         fixture.config.poll_interval = Duration::from_millis(2);
         fixture.config.convergence_timeout = Duration::from_millis(300);
         fixture.device.0.borrow_mut().stall_at = Some(7 * GIB + 512 * MIB);
@@ -2118,8 +1848,7 @@ mod tests {
             round(&mut runtime);
             thread::sleep(Duration::from_millis(5));
         }
-        // Stalled for several polls: the Windows driver workaround would have
-        // lowered the target by now.
+        // Stalled for several polls: the target is held, not lowered.
         assert_eq!(*fixture.targets.borrow(), [7 * GIB]);
         assert!(fixture.guest.last_result().is_none());
 
@@ -2151,45 +1880,6 @@ mod tests {
         // No settle and no widening: only the original target was set.
         assert_eq!(*fixture.targets.borrow(), [5 * GIB]);
         assert!(fixture.guest.last_result().is_none());
-        drop(runtime);
-        assert!(!fixture.journal().latched());
-    }
-
-    #[test]
-    fn a_growth_the_guest_never_plugs_settles_widens_once_and_grows_again() {
-        let mut fixture = Fixture::new("grow-stall", 100, 4 * GIB);
-        fixture.config.poll_interval = Duration::from_millis(2);
-        // The guest driver's plug is rejected: nothing is ever plugged.
-        fixture.device.0.borrow_mut().grow_stall_at = Some(4 * GIB);
-        fixture
-            .guest
-            .send(Some(request(1, MemoryOperation::Add, GIB)));
-        let mut runtime = runtime(vec![fixture.controller(None)], 64 * GIB, None);
-        round(&mut runtime);
-        round(&mut runtime);
-        assert_eq!(*fixture.targets.borrow(), [5 * GIB]);
-        thread::sleep(Duration::from_millis(10));
-        round(&mut runtime);
-        round(&mut runtime);
-        // The poll that resolves the settle widens the usable region once.
-        assert_eq!(*fixture.targets.borrow(), [5 * GIB, 4 * GIB, WIDENED]);
-        let result = fixture.guest.last_result().expect("result");
-        assert_eq!(result.outcome, MemoryOutcome::Partial);
-        assert_eq!(result.actual_bytes, 0);
-
-        // The guest's renewed request then plugs; widening is not repeated.
-        fixture
-            .guest
-            .send(Some(request(2, MemoryOperation::Add, GIB)));
-        round(&mut runtime);
-        round(&mut runtime);
-        round(&mut runtime);
-        assert_eq!(
-            *fixture.targets.borrow(),
-            [5 * GIB, 4 * GIB, WIDENED, 5 * GIB]
-        );
-        let result = fixture.guest.last_result().expect("result");
-        assert_eq!(result.outcome, MemoryOutcome::Completed);
         drop(runtime);
         assert!(!fixture.journal().latched());
     }

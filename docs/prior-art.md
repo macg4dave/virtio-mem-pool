@@ -42,7 +42,7 @@ survey, and some projects license file by file.
 | [QEMU `hv-balloon.c`](https://gitlab.com/qemu-project/qemu/-/blob/master/hw/hyperv/hv-balloon.c) | Hyper-V Dynamic Memory device for Windows guests | GPL-2.0-or-later | Yes |
 | [QEMU `virtio-mem.c`](https://gitlab.com/qemu-project/qemu/-/blob/master/hw/virtio/virtio-mem.c) | The virtio-mem device | GPL-2.0-only | Ideas only |
 | [Linux `hv_balloon.c`](https://github.com/torvalds/linux/blob/master/drivers/hv/hv_balloon.c) | Linux guest side of Hyper-V Dynamic Memory | GPL-2.0-only | Ideas only |
-| [virtio-win/kvm-guest-drivers-windows](https://github.com/virtio-win/kvm-guest-drivers-windows) (`viomem`) | The Windows virtio-mem driver | BSD-3-Clause | Yes. [patches/viomem](../patches/viomem/) modifies it and keeps its license |
+| [virtio-win/kvm-guest-drivers-windows](https://github.com/virtio-win/kvm-guest-drivers-windows) (`viomem`) | The Windows virtio-mem driver | BSD-3-Clause | Yes. [archive/viomem](../archive/viomem/) modifies it and keeps its license |
 | [libvirt](https://gitlab.com/libvirt/libvirt) | VM management; virtio-mem `<memory>` model and size-change event | LGPL-2.1-or-later | Yes |
 | [systemd-oomd](https://github.com/systemd/systemd/tree/main/src/oom) | PSI-driven OOM handling | LGPL-2.1-or-later | Yes |
 | [Proxmox `qemu-server`](https://git.proxmox.com/?p=qemu-server.git) | Proxmox VE; one virtio-mem device per NUMA node | AGPL-3.0 | Yes; the copied part stays AGPL-3.0 |
@@ -79,8 +79,8 @@ The survey confirms these choices; nothing to change.
 
 ## Ideas to adopt
 
-Ordered by value. Each is a proposal for the roadmap, not yet work in
-progress. Numbers quoted from other projects are theirs; ours need our
+Ordered by value. Each is scheduled in [the roadmap](roadmap.md)
+(milestones P, W, H, N and L). Numbers quoted from other projects are theirs; ours need our
 own evidence.
 
 ### 1. Match the settle timeout to the Linux retry schedule
@@ -156,7 +156,7 @@ worth an experiment. Points from the QEMU source:
   straight after boot. Hyper-V does the same.
 - Windows returns at most 585728 pages (about 2.2 GiB) per hot-remove
   response and ignores larger requests. Compare our 4 GiB removal cap in
-  [patches/viomem](../patches/viomem/).
+  [archive/viomem](../archive/viomem/).
 - Hot-add is done in 2 GiB chunks with 128 MiB memslot alignment.
 
 Libvirt does not model `hv-balloon`; it would need QEMU command-line

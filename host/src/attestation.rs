@@ -36,7 +36,8 @@ pub struct CompatibilityReview {
     pub memory_slot_budget: u32,
     pub vfio_mapping_budget: u32,
     /// The guest's virtio-mem driver as reviewed: the `viomem` driver
-    /// version on Windows, the kernel release on Linux. Reviews written
+    /// version on Windows (that path is PAUSED until the viomem driver bug is
+    /// repaired), the kernel release on Linux. Reviews written
     /// before Linux guests name it `windows_driver_version`.
     #[serde(alias = "windows_driver_version")]
     pub guest_driver_version: String,

@@ -362,6 +362,7 @@ const EVENT_COLOURS: [(&str, u8); 13] = [
     ("refuse", RED),
     ("Uncertain", RED),
     ("error", RED),
+    // PAUSED (viomem): no longer emitted; kept for older journals.
     ("usable_region_widened", MAGENTA),
     ("outcome=Partial", YELLOW),
     ("settled_short", YELLOW),
