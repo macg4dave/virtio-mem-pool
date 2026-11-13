@@ -61,6 +61,22 @@ stopped. `--interval-seconds N` sets the refresh period (default 1),
 `--events N` the number of events (default 8) and `--once` prints one
 plain snapshot. Ctrl+C leaves the last view on the screen as plain text.
 
+From a Windows workstation, open it over SSH:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\windows\Watch-Pool.ps1 [-NewWindow] [-Update]
+```
+
+`Watch-Pool.ps1` connects with `ssh -t`, builds xtask in a checkout of
+this repository on the KVM host as the SSH user, then runs it through
+`sudo` so it can read `/etc/virtio-mem-host/` and the controller's
+journal. The host and checkout are site values: pass `-HostName` and
+`-Checkout`, set `VIRTIO_MEM_POOL_HOST` and `VIRTIO_MEM_POOL_CHECKOUT`,
+or copy [deploy/examples/pool.env.example](../deploy/examples/pool.env.example)
+to `site/pool.env`. `-NewWindow` opens a separate 140-column window,
+`-Update` fast-forwards the host's checkout before building, and
+`-IntervalSeconds` and `-Events` are passed through.
+
 ## Recording a run
 
 ```bash
