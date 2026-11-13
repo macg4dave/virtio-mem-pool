@@ -246,12 +246,15 @@ boot RAM however large the guest grows.
 
 Sizing under `auto-movable`: the kernel puts hot-plugged memory in the
 movable zone only up to `auto_movable_ratio` percent (default 301) of the
-boot RAM in kernel zones; beyond that it goes to kernel zones and may
-never come back. Hot-plugged memory that lands in kernel zones does not
-raise the limit. At the default, a guest can hot-plug about three times
-its boot RAM removably, so keep `max_ram` within about four times boot
-RAM: for example 8 GiB boot supports `max_ram` up to about 32 GiB. The
-service publishes `auto_movable_ratio`, `auto_movable_numa_aware` and
+boot RAM in kernel zones. Past that, new memory is split: about one
+part in four (at the default ratio) goes to kernel zones, where removal is
+not guaranteed, because kernel-zone memory of the same device raises its
+movable allowance. On a live guest with 512 MiB boot, a 4 GiB spike put
+640 MiB in `Normal`; that time it was all returned, because the pages
+were freed user memory. At the default, a guest can hot-plug about three
+times its boot RAM entirely movable, so keep `max_ram` within about four
+times boot RAM where removal must be reliable: for example 8 GiB boot
+supports `max_ram` up to about 32 GiB. The service publishes `auto_movable_ratio`, `auto_movable_numa_aware` and
 `boot_ram_bytes` (from `/sys/firmware/memmap`), and when it receives its
 settings it warns if `max_ram` is above that limit. With
 `auto_movable_numa_aware=Y` (the default) the ratio also applies to each
