@@ -143,6 +143,15 @@ impl<Q, T> GuestChannel<Q, T> {
 
     /// The newest publication sent over the control channel, if the channel
     /// is connected and has carried one.
+    /// A control channel is attached and its guest end is open.
+    fn channel_connected(&self) -> bool {
+        #[cfg(unix)]
+        if let Some(control) = &self.control {
+            return control.connected();
+        }
+        false
+    }
+
     fn control_record(&self) -> Option<Vec<u8>> {
         #[cfg(unix)]
         if let Some(control) = &self.control {
@@ -207,10 +216,19 @@ impl<Q: GuestFileReader, T: UnixClock> GuestChannel<Q, T> {
             }
         }
         self.via_control.set(false);
+        let waiting_on_channel = self.channel_connected();
         let bytes = self
             .files
             .read_file(&self.publication_path, MAX_RAW_TELEMETRY_FILE_BYTES)
-            .map_err(|error| format!("guest publication unavailable: {error}"))?;
+            .map_err(|error| {
+                if waiting_on_channel {
+                    format!(
+                        "no current guest publication on the control channel, and the control                          files are unavailable: {error}"
+                    )
+                } else {
+                    format!("guest publication unavailable: {error}")
+                }
+            })?;
         let contents = String::from_utf8(bytes)
             .map_err(|error| format!("guest publication is not valid UTF-8: {error}"))?;
         validate_contents(
@@ -246,9 +264,12 @@ impl<Q: GuestFileReader + GuestFileWriter, T: UnixClock> GuestLink for GuestChan
             return Err("host memory status exceeds its byte limit".to_owned());
         }
         #[cfg(unix)]
+        let mut sent_on_channel = false;
+        #[cfg(unix)]
         if let Some(control) = &self.control {
             if control.connected() {
                 control.send(&bytes);
+                sent_on_channel = true;
             }
             if self.via_control.get() {
                 *self.last_status.borrow_mut() = Some(status.clone());
@@ -270,8 +291,18 @@ impl<Q: GuestFileReader + GuestFileWriter, T: UnixClock> GuestLink for GuestChan
         if !changed && !refresh_due {
             return Ok(());
         }
-        self.files
-            .write_file(&host_status_path(&self.publication_path), &bytes)?;
+        let written = self
+            .files
+            .write_file(&host_status_path(&self.publication_path), &bytes);
+        #[cfg(unix)]
+        let written = written.map_err(|error| {
+            if sent_on_channel {
+                format!("sent on the control channel; control files not written: {error}")
+            } else {
+                error
+            }
+        });
+        written?;
         self.last_write.set(Some(Instant::now()));
         if changed {
             #[cfg(unix)]
@@ -543,6 +574,30 @@ mod tests {
         ] {
             assert!(qga(contents.into_bytes()).read().is_err(), "{name}");
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_channel_guest_not_yet_heard_from_is_reported_as_such() {
+        let (ours, _guest) = std::os::unix::net::UnixStream::pair().unwrap();
+        let control =
+            crate::control_channel::ControlChannel::over(ours, "guest".to_owned()).unwrap();
+        // The files cannot be read either (here: over their bound; on a live
+        // guest without an agent, the agent is missing).
+        let unreadable = vec![b'x'; MAX_RAW_TELEMETRY_FILE_BYTES + 1];
+        let error = qga(unreadable.clone())
+            .with_control(control)
+            .read()
+            .unwrap_err();
+        assert!(
+            error.starts_with("no current guest publication on the control channel"),
+            "{error}"
+        );
+        let error = qga(unreadable).read().unwrap_err();
+        assert!(
+            error.starts_with("guest publication unavailable"),
+            "{error}"
+        );
     }
 
     #[cfg(unix)]
