@@ -100,9 +100,11 @@ and 30 s more, and that window also covers at least one retry after any
 later movement. It is built in, from the driver's schedule.
 
 Each VM occupies `max(requested, current)` bytes of the pool. Growth uses
-only free pool capacity, highest priority first; the controller never takes
-memory from one VM to give to another. Admission also keeps 256 MiB above
-`host_min_headroom_bytes` for changes between planning and resizing.
+only free pool capacity, highest priority first; among equal priorities the
+request the guest issued first is served first, then entry order. The
+controller never takes memory from one VM to give to another. Admission
+also keeps 256 MiB above `host_min_headroom_bytes` for changes between
+planning and resizing.
 
 ### `host_list.toml`
 
