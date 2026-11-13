@@ -337,7 +337,7 @@ fn validate_identity(value: &str) -> Result<(), String> {
 }
 
 #[cfg(unix)]
-fn effective_uid() -> u32 {
+pub(crate) fn effective_uid() -> u32 {
     unsafe extern "C" {
         fn geteuid() -> u32;
     }
@@ -346,7 +346,7 @@ fn effective_uid() -> u32 {
 }
 
 #[cfg(not(unix))]
-fn effective_uid() -> u32 {
+pub(crate) fn effective_uid() -> u32 {
     u32::MAX
 }
 

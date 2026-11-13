@@ -313,11 +313,15 @@ struct PoolEvent {
 }
 
 /// The pool events, or why the journal gave none: an unprivileged user
-/// outside `systemd-journal` gets no lines at all, not an error.
+/// outside `systemd-journal` gets no lines at all, not an error. Only event
+/// lines are asked for, so a burst of other controller output (libvirt's
+/// own error lines) cannot push every event out of the window.
 fn read_events(command: &Command, repo: &Path) -> Result<Vec<PoolEvent>, String> {
     let arguments: Vec<OsString> = [
         "-u",
         &command.unit,
+        "--grep",
+        " event=",
         "-n",
         "600",
         "--no-pager",
@@ -331,6 +335,13 @@ fn read_events(command: &Command, repo: &Path) -> Result<Vec<PoolEvent>, String>
     match process::bounded_text("journalctl", &arguments, repo, COMMAND_TIMEOUT) {
         Ok(journal) if journal.lines().any(|line| line.contains(" event=")) => {
             Ok(parse_events(&journal, command.events))
+        }
+        Ok(_) if crate::controller_status::effective_uid() == 0 => Ok(Vec::new()),
+        // journalctl exits 1 when --grep matches nothing.
+        Err(error)
+            if crate::controller_status::effective_uid() == 0 && error.contains("status 1") =>
+        {
+            Ok(Vec::new())
         }
         Ok(_) => Err(UNREADABLE.to_owned()),
         Err(error) if error.contains("permission") => Err(UNREADABLE.to_owned()),
