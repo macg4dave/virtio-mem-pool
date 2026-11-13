@@ -111,7 +111,8 @@ memory in kernel zones (also per NUMA node unless
 The readiness report checks the policy but not the ratio. It can compare
 the device's maximum with ratio × boot memory and warn, and the
 administration guide can say how large a device a given boot size
-supports (about three times boot RAM at the default).
+supports (about three times boot RAM at the default). Adopted in P2:
+the guest compares `max_ram` with boot memory × (1 + ratio).
 
 ### 3. Derive the VFIO mapping budget and block size
 

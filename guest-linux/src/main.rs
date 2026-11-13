@@ -93,6 +93,12 @@ fn run(control_path: &str, channel_path: Option<&str>) -> Result<(), String> {
         environment: readiness::environment,
     };
     serve(&platform, transport, &stop, |settings| {
+        // max_ram comes from the host, so this check waits for its settings.
+        if let Some(warning) =
+            readiness::movable_ratio_warning(&readiness::Probe::read(), settings.max_ram)
+        {
+            eprintln!("warning: {warning}");
+        }
         Ok(Sources {
             memory: ProcMeminfo::with_cache_floor(settings.policy.grow_step_bytes),
             pressure: ProcPressure::open(),
