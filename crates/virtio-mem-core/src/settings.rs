@@ -50,7 +50,54 @@ impl GuestOs {
             Self::Linux => LINUX_CONTROL_PATH,
         }
     }
+
+    /// How long a removal may stop moving before the host settles it at what
+    /// the guest returned.
+    ///
+    /// Linux: the guest driver retries a busy removal on its own schedule
+    /// (see `linux_removal_retry_after_seconds`), so the host waits for
+    /// `LINUX_REMOVAL_RETRIES_AWAITED` retries from a fresh stall plus
+    /// `LINUX_REMOVAL_SETTLE_MARGIN_SECONDS`. The driver's wait never
+    /// exceeds its 300 s maximum, so the same window also covers at least one
+    /// retry after any later movement. Windows uses the global
+    /// `convergence_timeout_seconds`.
+    pub fn removal_settle_seconds(self, convergence_timeout_seconds: u64) -> u64 {
+        match self {
+            Self::Windows => convergence_timeout_seconds,
+            Self::Linux => {
+                linux_removal_retry_after_seconds(LINUX_REMOVAL_RETRIES_AWAITED)
+                    + LINUX_REMOVAL_SETTLE_MARGIN_SECONDS
+            }
+        }
+    }
 }
+
+/// The Linux driver's first busy-removal retry, `VIRTIO_MEM_RETRY_TIMER_MIN_MS`
+/// in `drivers/virtio/virtio_mem.c`.
+const LINUX_REMOVAL_RETRY_MIN_SECONDS: u64 = 50;
+/// The longest wait between Linux retries, `VIRTIO_MEM_RETRY_TIMER_MAX_MS`.
+const LINUX_REMOVAL_RETRY_MAX_SECONDS: u64 = 300;
+/// Busy-removal retries a Linux guest gets before its removal is settled.
+const LINUX_REMOVAL_RETRIES_AWAITED: u32 = 3;
+/// Allowance for the awaited retry's own offlining work and the next host
+/// poll (at most 10 s) to show its movement. Provisional until the recorded
+/// late-retry run (roadmap P1).
+const LINUX_REMOVAL_SETTLE_MARGIN_SECONDS: u64 = 30;
+
+/// Seconds from a Linux removal's first busy failure to its `retries`-th
+/// retry. The driver's wait starts at 50 s and doubles after each retry up to
+/// 300 s; only a run that completes the whole request resets it, so partial
+/// progress does not: retries come at +50, +150, +350, +650 s and so on.
+fn linux_removal_retry_after_seconds(retries: u32) -> u64 {
+    let mut wait = LINUX_REMOVAL_RETRY_MIN_SECONDS;
+    let mut elapsed = 0;
+    for _ in 0..retries {
+        elapsed += wait;
+        wait = (wait * 2).min(LINUX_REMOVAL_RETRY_MAX_SECONDS);
+    }
+    elapsed
+}
+
 pub const GLOBAL_FILE: &str = "global-settings.toml";
 pub const HOST_LIST_FILE: &str = "host_list.toml";
 const GIB: u64 = 1 << 30;
@@ -434,6 +481,20 @@ pub fn load_configuration(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn linux_removals_settle_after_the_drivers_third_busy_retry() {
+        let retries: Vec<_> = (1..=5).map(linux_removal_retry_after_seconds).collect();
+        assert_eq!(retries, [50, 150, 350, 650, 950]);
+        let linux = GuestOs::Linux.removal_settle_seconds(300);
+        assert!(linux > linux_removal_retry_after_seconds(3));
+        assert!(linux < linux_removal_retry_after_seconds(4));
+        // After movement at any retry the next one is at most 300 s away.
+        assert!(linux > LINUX_REMOVAL_RETRY_MAX_SECONDS);
+        // Linux ignores the global value; Windows keeps it.
+        assert_eq!(GuestOs::Linux.removal_settle_seconds(60), linux);
+        assert_eq!(GuestOs::Windows.removal_settle_seconds(60), 60);
+    }
 
     fn vm(name: &str) -> VmSettings {
         VmSettings {

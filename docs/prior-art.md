@@ -87,16 +87,17 @@ own evidence.
 
 Source: Linux `virtio_mem.c`. When a removal finds memory busy, the
 driver retries after 50 s, then doubles the wait each time up to 300 s
-(`VIRTIO_MEM_RETRY_TIMER_MIN_MS`, `_MAX_MS`); any progress resets it to
-50 s. After a stall the retries come at +50 s, +150 s, +350 s, then every
-300 s.
+(`VIRTIO_MEM_RETRY_TIMER_MIN_MS`, `_MAX_MS`). Only a run that completes
+the whole request resets it to 50 s; partial progress does not. After a
+stall the retries come at +50 s, +150 s, +350 s, then every 300 s.
 
 `convergence_timeout_seconds` defaults to 300 s without movement, so a
 Linux removal is settled after only two retries, just before the third.
 This is the evidence the roadmap's "settle delay" item asks for: a Linux
 value should cover the retries the controller is willing to wait for
 (for example just over 350 s for three), and be a Linux default, not the
-Windows one.
+Windows one. Adopted in P1: Linux removals settle after 380 s without
+movement.
 
 ### 2. Check the movable ratio on Linux guests
 

@@ -615,8 +615,9 @@ where
         // - a shrink while the guest reports Low memory: the held shrink
         //   occupies the guest's only request slot, so release it and let
         //   the guest ask for memory again;
-        // - a shrink that has not moved for the convergence timeout: the
-        //   guest driver retries by itself, so settle at what it returned.
+        // - a shrink that has not moved for the removal settle time: the
+        //   guest driver retries by itself, so settle at what it returned
+        //   once the retries it was given have passed.
         // PAUSED (viomem): the Windows-only widening and shrink extension are
         // archived in archive/viomem/host-workaround/ until the viomem driver
         // bug is repaired; every guest now takes the paths above.
@@ -632,7 +633,7 @@ where
                 } else {
                     let stalled = self.command_stalled(state)
                         && self.pending_progress.is_some_and(|(_, since)| {
-                            since.elapsed() >= self.config.convergence_timeout
+                            since.elapsed() >= self.config.removal_settle
                         });
                     if stalled {
                         self.log("event=held_shrink_released reason=removal_stalled");
@@ -1119,7 +1120,11 @@ where
         let idle = self
             .pending_progress
             .map_or(0, |(_, since)| since.elapsed().as_millis());
-        let timeout = self.config.convergence_timeout.as_millis();
+        let timeout = match direction {
+            CommandDirection::Shrink => self.config.removal_settle,
+            _ => self.config.convergence_timeout,
+        }
+        .as_millis();
         let identity = self
             .control
             .journal
@@ -1409,6 +1414,7 @@ mod tests {
             poll_interval: Duration::from_millis(1),
             command_timeout: Duration::from_secs(10),
             convergence_timeout: Duration::from_secs(300),
+            removal_settle: Duration::from_secs(300),
             virsh_binary: "virsh".to_owned(),
             libvirt_uri: "qemu:///system".to_owned(),
             raw_telemetry_path: "telemetry.json".to_owned(),
@@ -1766,7 +1772,7 @@ mod tests {
     #[test]
     fn a_removal_stalled_at_the_floor_settles_without_losing_its_result() {
         let mut fixture = Fixture::new("floor-shrink", 100, 8 * GIB);
-        fixture.config.convergence_timeout = Duration::from_millis(20);
+        fixture.config.removal_settle = Duration::from_millis(20);
         fixture.guest.track(&fixture.device);
         fixture.config.min_ram = 7 * GIB;
         fixture.device.0.borrow_mut().stall_at = Some(7 * GIB + 512 * MIB);
@@ -1837,7 +1843,7 @@ mod tests {
         let mut fixture = Fixture::new(&format!("shrink-{guest_os:?}"), 100, 8 * GIB);
         fixture.config.guest_os = guest_os;
         fixture.config.poll_interval = Duration::from_millis(2);
-        fixture.config.convergence_timeout = Duration::from_millis(300);
+        fixture.config.removal_settle = Duration::from_millis(300);
         fixture.device.0.borrow_mut().stall_at = Some(7 * GIB + 512 * MIB);
         fixture.guest.signal(MemoryResourceNotificationState::High);
         fixture

@@ -89,8 +89,15 @@ and fractional sizes such as `"8.5GB"` are accepted.
 | `observe_only` | `false` | Evaluate and log requests, but refuse each one before resizing |
 | `poll_interval_seconds` | `5` | Host poll and guest sample interval, 1–10. Freshness bounds are six polls |
 | `command_timeout_seconds` | `10` | Limit on each `virsh` command |
-| `convergence_timeout_seconds` | `300` | How long a resize may stop moving before it is settled at what the guest returned |
+| `convergence_timeout_seconds` | `300` | How long a Windows removal may stop moving before it is settled at what the guest returned, and the deadline for each settle command. Linux removals use their own built-in time (below) |
 | `libvirt_uri` | `qemu:///system` | The libvirt connection that owns the VMs |
+
+A Linux removal that stops moving is settled after 380 s without
+movement, not after `convergence_timeout_seconds`. The guest driver
+retries a busy removal itself, 50 s, 150 s and 350 s after it first fails
+and then every 300 s; the controller waits for the first three retries
+and 30 s more, and that window also covers at least one retry after any
+later movement. It is built in, from the driver's schedule.
 
 Each VM occupies `max(requested, current)` bytes of the pool. Growth uses
 only free pool capacity, highest priority first; the controller never takes
@@ -274,7 +281,7 @@ repaired. The controller's two Windows-only workarounds (widening the
 usable region and extending a stalled shrink) are archived in
 [archive/viomem](../archive/viomem/) and no longer run: a Windows removal
 that stops moving for the convergence timeout settles at what the guest
-kept, as on Linux. Windows guests are moving to Hyper-V Dynamic Memory;
+kept. Windows guests are moving to Hyper-V Dynamic Memory;
 see [the roadmap](roadmap.md), milestone W.
 
 ## Observing

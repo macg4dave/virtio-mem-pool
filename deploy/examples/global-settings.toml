@@ -32,7 +32,9 @@ observe_only = false
 poll_interval_seconds = 1
 # Maximum duration of each external host command (for example, virsh).
 command_timeout_seconds = 10
-# Maximum wait for requested device RAM to converge to the observed amount.
+# How long a Windows removal may stop moving before it settles at what the
+# guest returned, and the deadline for each settle command. Linux removals
+# settle on a built-in time that covers the guest driver's retries.
 convergence_timeout_seconds = 300
 # The libvirt connection that owns the managed VMs.
 libvirt_uri = "qemu:///system"
