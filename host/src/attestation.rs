@@ -593,6 +593,7 @@ fn scrub_runtime_identity(xml: &str) -> String {
         scrubbed.replace_range(start..end, &block);
         channel_offset = start + block.len() + "</channel>".len();
     }
+    scrubbed = scrub_pty_paths(&scrubbed);
     let mut offset = 0;
     while let Some(start) = scrubbed[offset..].find("<seclabel") {
         let start = offset + start;
@@ -620,6 +621,51 @@ fn scrub_runtime_identity(xml: &str) -> String {
             offset = start + block.len();
         } else {
             offset = end;
+        }
+    }
+    scrubbed
+}
+
+/// Libvirt allocates a new pseudo-terminal (`/dev/pts/N`) for every
+/// `type='pty'` serial, console, parallel or channel device each time the
+/// domain starts, and reports it as `tty=` and `<source path=>`. Only the
+/// allocated path is blanked; the device, its type and its target stay
+/// fingerprint inputs.
+fn scrub_pty_paths(xml: &str) -> String {
+    let mut scrubbed = xml.to_owned();
+    for element in ["serial", "console", "parallel", "channel"] {
+        let open = format!("<{element} ");
+        let close = format!("</{element}>");
+        let mut offset = 0;
+        while let Some(found) = scrubbed[offset..].find(&open) {
+            let start = offset + found;
+            let Some(length) = scrubbed[start..].find(&close) else {
+                break;
+            };
+            let end = start + length;
+            let tag_end = scrubbed[start..end].find('>').map_or(end, |i| start + i);
+            let tag = &scrubbed[start..tag_end];
+            if !(tag.contains("type='pty'") || tag.contains("type=\"pty\"")) {
+                offset = end + close.len();
+                continue;
+            }
+            let mut block = scrubbed[start..end].to_owned();
+            for quote in ['\'', '"'] {
+                for attribute in ["tty", "path"] {
+                    let prefix = format!(" {attribute}={quote}/dev/pts/");
+                    let mut at = 0;
+                    while let Some(found) = block[at..].find(&prefix) {
+                        let value = at + found + prefix.len() - "/dev/pts/".len();
+                        let Some(value_end) = block[value..].find(quote) else {
+                            break;
+                        };
+                        block.replace_range(value..value + value_end, "<pty>");
+                        at = value + "<pty>".len();
+                    }
+                }
+            }
+            scrubbed.replace_range(start..end, &block);
+            offset = start + block.len() + close.len();
         }
     }
     scrubbed
@@ -975,6 +1021,29 @@ mod tests {
         // A device id elsewhere is not the domain id.
         assert!(
             scrub_runtime_identity("<domain id='1'><memory id='m'/></domain>").contains("id='m'")
+        );
+    }
+
+    #[test]
+    fn pty_allocation_does_not_change_domain_fingerprint() {
+        let started = |pts: u32| {
+            format!(
+                "<domain id='1'><devices><serial type='pty'><source path='/dev/pts/{pts}'/><target type='isa-serial' port='0'><model name='isa-serial'/></target><alias name='serial0'/></serial><console type='pty' tty='/dev/pts/{pts}'><source path='/dev/pts/{pts}'/><target type='serial' port='0'/><alias name='serial0'/></console><serial type='file'><source path='/var/log/s{pts}.log'/></serial></devices></domain>"
+            )
+        };
+        let pty_only = |xml: String| xml.replace("/var/log/s8.log", "/var/log/s7.log");
+        assert_eq!(
+            scrub_runtime_identity(&started(7)),
+            scrub_runtime_identity(&pty_only(started(8)))
+        );
+        // A file-backed serial path is configuration, as is the target.
+        assert_ne!(
+            scrub_runtime_identity(&started(7)),
+            scrub_runtime_identity(&started(8))
+        );
+        assert_ne!(
+            scrub_runtime_identity(&started(7)),
+            scrub_runtime_identity(&started(7).replace("port='0'", "port='1'"))
         );
     }
 
