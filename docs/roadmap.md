@@ -75,10 +75,6 @@ Small changes, each from [prior art](prior-art.md#ideas-to-adopt).
   where a removal completes on a late retry, and confirm or replace the
   provisional 30 s margin from it. Closes the old T2.8 item
   "stalled-removal delay".
-- [ ] **P2** Movable-ratio check in the Linux readiness report (idea 2).
-  Read `auto_movable_ratio` and `auto_movable_numa_aware`; warn when the
-  device's maximum exceeds ratio × boot memory under `auto-movable`. Add
-  "about three times boot RAM" sizing guidance to the administration guide.
 - [ ] **P3** Derived VFIO budget and block-size guidance (idea 3). For a
   VM with an assigned device, read `dma_entry_limit` and refuse a device
   whose block count exceeds its share; document a block size that keeps a
@@ -181,7 +177,7 @@ virtio-mem, qualified together.
   device of a VM, split a target into block-aligned shares, and move a
   share one device cannot remove to the others. Attestation and
   checkpoint learn about several devices.
-- [ ] **N2** P2's ratio check per node when `auto_movable_numa_aware` is on.
+- [ ] **N2** The movable-ratio check (done in P2, `readiness::movable_ratio_warning`) per node when `auto_movable_numa_aware` is on.
 
 ## Milestone L — Linux removal preparation
 

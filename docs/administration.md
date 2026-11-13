@@ -244,6 +244,19 @@ guest with `memory_hotplug.online_policy=auto-movable`. Avoid
 `memhp_default_state=online_movable`: it confines the kernel's own memory to
 boot RAM however large the guest grows.
 
+Sizing under `auto-movable`: the kernel puts hot-plugged memory in the
+movable zone only up to `auto_movable_ratio` percent (default 301) of the
+boot RAM in kernel zones; beyond that it goes to kernel zones and may
+never come back. Hot-plugged memory that lands in kernel zones does not
+raise the limit. At the default, a guest can hot-plug about three times
+its boot RAM removably, so keep `max_ram` within about four times boot
+RAM: for example 8 GiB boot supports `max_ram` up to about 32 GiB. The
+service publishes `auto_movable_ratio`, `auto_movable_numa_aware` and
+`boot_ram_bytes` (from `/sys/firmware/memmap`), and when it receives its
+settings it warns if `max_ram` is above that limit. With
+`auto_movable_numa_aware=Y` (the default) the ratio also applies to each
+NUMA node, so a guest with several nodes may reach its limit earlier.
+
 How Linux memory is read:
 
 - Total and available are `MemTotal` and `MemAvailable`.
