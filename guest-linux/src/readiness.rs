@@ -196,10 +196,14 @@ fn node_count(zoneinfo: &str) -> usize {
 /// the movable zone. `mm/memory_hotplug.c` (`auto_movable_can_online_movable`)
 /// onlines hot-plugged memory movable only while all movable memory, CMA
 /// included, stays within `auto_movable_ratio` percent of the kernel-zone
-/// memory present at boot, less CMA; beyond that it goes to kernel zones,
-/// from which it may never come back. Boot RAM is taken from the firmware
-/// map; boot memory placed in the movable zone (`movablecore=`) is not
-/// counted. Unknown facts give no warning.
+/// memory present at boot, less CMA. Beyond that a block goes to a kernel
+/// zone, where removal is not guaranteed. Kernel-zone memory of the same
+/// device raises its movable allowance by the ratio, so past the limit new
+/// memory is split: one part in `1 + ratio / 100` goes to kernel zones
+/// (measured on a live guest, 2026-11-13: 640 MiB of 4 GiB at ratio 301 and
+/// 512 MiB boot). Boot RAM is taken from the firmware map; boot memory
+/// placed in the movable zone (`movablecore=`) is not counted. Unknown facts
+/// give no warning.
 pub fn movable_ratio_warning(probe: &Probe, max_ram: u64) -> Option<String> {
     if probe.online_policy.as_deref() != Some("auto-movable")
         || probe.auto_online.as_deref() != Some("online")
@@ -224,13 +228,27 @@ pub fn movable_ratio_warning(probe: &Probe, max_ram: u64) -> Option<String> {
     } else {
         ""
     };
+    let kernel_at_max =
+        u64::try_from(u128::from(max_ram - reachable) * 100 / (100 + u128::from(ratio))).ok()?;
     Some(format!(
         "max_ram={max_ram} is more than auto-movable can keep removable: boot RAM is \
          {boot} bytes and auto_movable_ratio={ratio} allows {movable_limit} bytes of \
          hot-plugged memory in the movable zone, so above {reachable} bytes of guest RAM \
-         it goes to kernel zones and may never be removed{per_node}. Raise boot memory, \
-         lower max_ram or raise memory_hotplug.auto_movable_ratio"
+         about one byte in {} of further memory goes to kernel zones, where removal is \
+         not guaranteed: up to {kernel_at_max} bytes at max_ram{per_node}. Raise boot \
+         memory, lower max_ram or raise memory_hotplug.auto_movable_ratio",
+        format_ratio_share(ratio)
     ))
+}
+
+/// `1 + ratio / 100`, the share of memory past the limit that goes to kernel
+/// zones, as "4" for 300 or "4.01" for 301.
+fn format_ratio_share(ratio: u64) -> String {
+    let hundredths = 100 + ratio;
+    match hundredths % 100 {
+        0 => (hundredths / 100).to_string(),
+        rest => format!("{}.{rest:02}", hundredths / 100),
+    }
 }
 
 pub fn assess(probe: &Probe) -> Readiness {
@@ -530,8 +548,15 @@ mod tests {
         let reachable = 2 * GIB + 2 * GIB * 301 / 100;
         assert_eq!(movable_ratio_warning(&probe, reachable), None);
         let warning = movable_ratio_warning(&probe, reachable + 1).expect("warning");
-        assert!(warning.contains("may never be removed"), "{warning}");
+        assert!(warning.contains("removal is not guaranteed"), "{warning}");
         assert!(!warning.contains("NUMA"), "one node: {warning}");
+        // Past the limit memory is split 1 : 3.01, so 401 MiB more puts
+        // 100 MiB in kernel zones.
+        let warning = movable_ratio_warning(&probe, reachable + 401 * (1 << 20)).expect("warning");
+        assert!(warning.contains("one byte in 4.01 "), "{warning}");
+        assert!(warning.contains("up to 104857600 bytes"), "{warning}");
+        assert_eq!(format_ratio_share(300), "4");
+        assert_eq!(format_ratio_share(5), "1.05");
 
         // CMA is movable memory taken out of the kernel's share.
         let cma = 256 << 20;
