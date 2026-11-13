@@ -52,11 +52,12 @@ if ! $apply; then
   exit 0
 fi
 
-# cloud-init reboots once when it finishes: wait until it reports done on a
+# cloud-init reboots once when it finishes: wait until it reports done (or
+# disabled, for a guest that turns it off after provisioning) on a
 # boot that then stays up.
 echo "waiting for $destination to finish provisioning..."
 for _ in $(seq 120); do
-  boot=$("${ssh_guest[@]}" 'cloud-init status 2>/dev/null | grep -q "status: done" && cat /proc/sys/kernel/random/boot_id' 2>/dev/null || true)
+  boot=$("${ssh_guest[@]}" 'cloud-init status 2>/dev/null | grep -Eq "status: (done|disabled)" && cat /proc/sys/kernel/random/boot_id' 2>/dev/null || true)
   if [[ -n $boot ]]; then
     sleep 20
     [[ $("${ssh_guest[@]}" 'cat /proc/sys/kernel/random/boot_id' 2>/dev/null || true) == "$boot" ]] && break
