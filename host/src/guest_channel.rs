@@ -15,6 +15,15 @@ use virtio_mem_core::{
 
 use crate::qga::{GuestFileReader, GuestFileWriter};
 
+/// Where the controller keeps each guest's latest validated publication, so
+/// observation tools on the host can read it without the guest agent. It is
+/// the unit's runtime directory: the copies go when the controller stops.
+pub const PUBLICATION_COPY_DIRECTORY: &str = "/run/virtio-mem-host";
+
+pub fn publication_copy_path(vm_name: &str) -> PathBuf {
+    Path::new(PUBLICATION_COPY_DIRECTORY).join(format!("{vm_name}.publication.json"))
+}
+
 pub const MAX_RAW_TELEMETRY_RECORD_BYTES: usize = 64 * 1024;
 pub const MAX_RAW_TELEMETRY_FILE_BYTES: usize = 1024 * 1024;
 
@@ -59,6 +68,9 @@ pub struct GuestChannel<Q, T = SystemUnixClock> {
     via_control: std::cell::Cell<bool>,
     last_status: std::cell::RefCell<Option<HostMemoryStatus>>,
     last_write: std::cell::Cell<Option<Instant>>,
+    /// Where to keep the latest validated publication for host tools.
+    copy: Option<PathBuf>,
+    copy_failed: std::cell::Cell<bool>,
 }
 
 impl<Q> GuestChannel<Q, SystemUnixClock> {
@@ -98,6 +110,37 @@ impl<Q, T> GuestChannel<Q, T> {
         self
     }
 
+    /// Keep each validated publication at `path` for observation tools.
+    pub fn with_publication_copy(mut self, path: PathBuf) -> Self {
+        self.copy = Some(path);
+        self
+    }
+
+    /// Best effort: tools fall back to the guest agent without the copy, so
+    /// a failure is reported once and never stops memory control.
+    fn keep_copy(&self, envelope: &RawTelemetryEnvelope) {
+        let Some(path) = &self.copy else {
+            return;
+        };
+        let written = serde_json::to_vec(envelope)
+            .map_err(|error| error.to_string())
+            .and_then(|mut bytes| {
+                bytes.push(b'\n');
+                write_shared(path, &bytes)
+            });
+        match written {
+            Ok(()) => self.copy_failed.set(false),
+            Err(error) => {
+                if !self.copy_failed.replace(true) {
+                    eprintln!(
+                        "virtio-mem-host: vm={} event=publication_copy_failed reason={error}",
+                        self.vm_name
+                    );
+                }
+            }
+        }
+    }
+
     /// The newest publication sent over the control channel, if the channel
     /// is connected and has carried one.
     fn control_record(&self) -> Option<Vec<u8>> {
@@ -133,12 +176,15 @@ impl<Q, T> GuestChannel<Q, T> {
             via_control: std::cell::Cell::new(false),
             last_status: std::cell::RefCell::new(None),
             last_write: std::cell::Cell::new(None),
+            copy: None,
+            copy_failed: std::cell::Cell::new(false),
         }
     }
 }
 
-impl<Q: GuestFileReader + GuestFileWriter, T: UnixClock> GuestLink for GuestChannel<Q, T> {
-    fn read(&self) -> Result<RawTelemetryEnvelope, String> {
+impl<Q: GuestFileReader, T: UnixClock> GuestChannel<Q, T> {
+    /// The latest valid publication, from the control channel or the files.
+    fn read_route(&self) -> Result<RawTelemetryEnvelope, String> {
         // A guest on the channel is read there while its publications stay
         // fresh; one that falls silent is looked for in the files again.
         if let Some(mut record) = self.control_record() {
@@ -175,6 +221,14 @@ impl<Q: GuestFileReader + GuestFileWriter, T: UnixClock> GuestLink for GuestChan
             duration_millis(self.future_tolerance)?,
             self.clock.now_unix_millis()?,
         )
+    }
+}
+
+impl<Q: GuestFileReader + GuestFileWriter, T: UnixClock> GuestLink for GuestChannel<Q, T> {
+    fn read(&self) -> Result<RawTelemetryEnvelope, String> {
+        let envelope = self.read_route()?;
+        self.keep_copy(&envelope);
+        Ok(envelope)
     }
 
     /// Over the control channel every status is sent: it costs nothing and
@@ -221,6 +275,60 @@ impl<Q: GuestFileReader + GuestFileWriter, T: UnixClock> GuestLink for GuestChan
             *self.last_status.borrow_mut() = Some(status.clone());
         }
         Ok(())
+    }
+}
+
+/// Replace a host-local file that other local users may read, by rename.
+fn write_shared(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let temporary = PathBuf::from(format!("{}.tmp-{}", path.display(), std::process::id()));
+    let written = std::fs::write(&temporary, bytes).and_then(|()| {
+        // The unit's umask makes new files private; publications are not.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o644))?;
+        }
+        std::fs::rename(&temporary, path)
+    });
+    written.map_err(|error| {
+        // Best effort: the error below is the failure reported.
+        let _ = std::fs::remove_file(&temporary);
+        format!("write {}: {error}", path.display())
+    })
+}
+
+/// A reader for host tools: the controller's copy of the guest's latest
+/// publication while the controller runs, otherwise the guest's own file
+/// through the guest agent. A guest on the control channel writes no file,
+/// so without the controller only the copy can show it.
+pub struct PublicationCopyFirst<R> {
+    copy: PathBuf,
+    guest: R,
+}
+
+impl<R> PublicationCopyFirst<R> {
+    pub fn new(vm_name: &str, guest: R) -> Self {
+        Self::at(publication_copy_path(vm_name), guest)
+    }
+
+    pub fn at(copy: PathBuf, guest: R) -> Self {
+        Self { copy, guest }
+    }
+}
+
+impl<R: GuestFileReader> GuestFileReader for PublicationCopyFirst<R> {
+    fn read_file(&self, path: &str, maximum_bytes: usize) -> Result<Vec<u8>, String> {
+        match std::fs::read(&self.copy) {
+            Ok(bytes) if bytes.len() <= maximum_bytes => Ok(bytes),
+            Ok(_) => Err(format!(
+                "{} exceeds {maximum_bytes} bytes",
+                self.copy.display()
+            )),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                self.guest.read_file(path, maximum_bytes)
+            }
+            Err(error) => Err(format!("read {}: {error}", self.copy.display())),
+        }
     }
 }
 
@@ -481,6 +589,37 @@ mod tests {
         assert_eq!(channel.read().unwrap().sequence, 0);
         channel.publish_status(&status).unwrap();
         assert_eq!(channel.files.written.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn each_valid_publication_is_kept_for_host_tools_who_prefer_it() {
+        let directory =
+            std::env::temp_dir().join(format!("virtio-mem-copy-test-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let copy = directory.join("guest.publication.json");
+        let published = envelope("s", 995_000, 1);
+        let channel = qga(line(&published).into_bytes()).with_publication_copy(copy.clone());
+        assert_eq!(channel.read().unwrap(), published);
+        let kept: RawTelemetryEnvelope =
+            serde_json::from_slice(&std::fs::read(&copy).unwrap()).unwrap();
+        assert_eq!(kept, published);
+
+        let guest = FakeGuestFiles {
+            publication: b"from the guest".to_vec(),
+            ..FakeGuestFiles::default()
+        };
+        let reader = PublicationCopyFirst::at(copy.clone(), guest);
+        assert_eq!(
+            reader.read_file("/guest/path", 64 * 1024).unwrap(),
+            std::fs::read(&copy).unwrap()
+        );
+        assert!(reader.read_file("/guest/path", 1).is_err());
+        std::fs::remove_dir_all(&directory).unwrap();
+        // Without the controller's copy, the guest's file is read.
+        assert_eq!(
+            reader.read_file("/guest/path", 64 * 1024).unwrap(),
+            b"from the guest"
+        );
     }
 
     #[test]

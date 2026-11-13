@@ -70,6 +70,8 @@ pub struct GlobalSettings {
     pub poll_interval_seconds: u64,
     pub command_timeout_seconds: u64,
     pub convergence_timeout_seconds: u64,
+    /// The libvirt connection the controller manages its VMs through.
+    pub libvirt_uri: String,
 }
 
 impl Default for GlobalSettings {
@@ -81,6 +83,7 @@ impl Default for GlobalSettings {
             poll_interval_seconds: 5,
             command_timeout_seconds: 10,
             convergence_timeout_seconds: 300,
+            libvirt_uri: "qemu:///system".to_owned(),
         }
     }
 }
@@ -105,6 +108,12 @@ impl GlobalSettings {
             if seconds == 0 || seconds > 86_400 {
                 return Err(format!("{name} must be 1..=86400"));
             }
+        }
+        if self.libvirt_uri.trim().is_empty()
+            || self.libvirt_uri.chars().any(char::is_whitespace)
+            || !self.libvirt_uri.contains(":/")
+        {
+            return Err("libvirt_uri must be a libvirt connection URI".to_owned());
         }
         Ok(())
     }
@@ -365,7 +374,7 @@ pub fn read_toml<T: DeserializeOwned>(path: &Path) -> Result<T, String> {
     if text.len() > 1024 * 1024 {
         return Err(format!("{} exceeds 1 MiB", path.display()));
     }
-    toml::from_str(&text).map_err(|error| format!("parse {}: {error}; migrate old manifests/host configs to global-settings.toml, host_list.toml and <vm_name>_settings.toml", path.display()))
+    toml::from_str(&text).map_err(|error| format!("parse {}: {error}", path.display()))
 }
 
 pub fn load_globals(directory: &Path) -> Result<GlobalSettings, String> {
@@ -581,6 +590,16 @@ mod tests {
             ..GlobalSettings::default()
         };
         assert!(invalid.validate().is_err());
+        let remote: GlobalSettings =
+            toml::from_str("libvirt_uri='qemu+ssh://kvm.example/system'").unwrap();
+        assert_eq!(remote.validate(), Ok(()));
+        for uri in ["", "qemu system", "system"] {
+            let invalid = GlobalSettings {
+                libvirt_uri: uri.to_owned(),
+                ..GlobalSettings::default()
+            };
+            assert!(invalid.validate().is_err(), "{uri}");
+        }
     }
 
     #[test]

@@ -2,17 +2,19 @@
 # Cold-restart one VM so its persistent definition (for example a new
 # virtio-mem block size) takes effect, attest the new live geometry, and
 # install the host controller with that attestation.
-# Usage: restart-vm-attest.sh INSTANCE VM ALIAS REVIEW
-# INSTANCE names the systemd controller; REVIEW is the VM's reviewed
-# compatibility review (e.g. .artifacts/install/win11_gpu.review.json).
+# Usage: restart-vm-attest.sh CONFIG_DIR INSTANCE VM ALIAS REVIEW
+# CONFIG_DIR is the site configuration passed to install-host.sh; INSTANCE
+# names the systemd controller; REVIEW is the VM's reviewed
+# compatibility review (e.g. .artifacts/install/VM.review.json).
 set -euo pipefail
-config_dir=$(cd -- "$(dirname -- "$0")" && pwd)
-cd "$config_dir/../.."
-if (( $# != 4 )); then
-  echo 'usage: restart-vm-attest.sh INSTANCE VM ALIAS REVIEW' >&2
+if (( $# != 5 )); then
+  echo 'usage: restart-vm-attest.sh CONFIG_DIR INSTANCE VM ALIAS REVIEW' >&2
   exit 1
 fi
-instance=$1 vm=$2 alias=$3 review=$4
+config_dir=$(cd -- "$1" && pwd)
+instance=$2 vm=$3 alias=$4 review=$(cd -- "$(dirname -- "$5")" && pwd)/$(basename -- "$5")
+scripts_dir=$(cd -- "$(dirname -- "$0")" && pwd)
+cd "$scripts_dir/../.."
 if [[ ! -f $review ]]; then
   echo "review file not found: $review" >&2
   exit 1
@@ -42,7 +44,7 @@ fi
 "${virsh[@]}" start "$vm"
 "${virsh[@]}" dumpxml "$vm" | grep -E '<block|<requested|<current'
 
-# Attest only once Windows is up: wait for the guest agent.
+# Attest only once the guest is up: wait for the guest agent.
 echo "waiting for the $vm guest agent..."
 for _ in $(seq 300); do
   "${virsh[@]}" qemu-agent-command "$vm" '{"execute":"guest-ping"}' >/dev/null 2>&1 && break
@@ -56,4 +58,4 @@ fi
 cargo xtask attestation "$vm" "$alias" "$review" \
   --output "$attestation" --command-timeout-seconds 60
 echo "attestation: $attestation"
-"$config_dir/install-host.sh" "$instance" "$vm=$attestation"
+"$scripts_dir/install-host.sh" "$config_dir" "$instance" "$vm=$(pwd)/$attestation"

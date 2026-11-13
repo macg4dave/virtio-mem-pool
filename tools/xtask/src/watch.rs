@@ -23,6 +23,7 @@ use virtio_mem_core::{
     VirtioMemState,
 };
 use virtio_mem_host::config::HostConfig;
+use virtio_mem_host::guest_channel::PublicationCopyFirst;
 use virtio_mem_host::host_memory::meminfo_bytes;
 use virtio_mem_host::qga::{GuestFileReader, VirshGuestFiles};
 use virtio_mem_host::virsh::{Virsh, VirshCommand};
@@ -142,7 +143,10 @@ pub fn run(command: &Command, repo: &Path) -> Result<(), String> {
             .map_err(|error| format!("install signal handler: {error}"))?;
     }
     let virsh = Virsh::persistent_with_connection("virsh", COMMAND_TIMEOUT, &command.connect);
-    let guest_files = VirshGuestFiles::new(virsh.clone(), &command.vm);
+    let guest_files = PublicationCopyFirst::new(
+        &command.vm,
+        VirshGuestFiles::new(virsh.clone(), &command.vm),
+    );
     let mut stdout = std::io::stdout().lock();
     if interactive {
         // Alternate screen, hidden cursor; restored below on every exit.

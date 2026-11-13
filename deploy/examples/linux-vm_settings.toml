@@ -1,21 +1,21 @@
-# Total guest RAM limits, including all memory Linux can see. No boot/base
-# RAM setting is needed: the policy derives the device portion from live state.
-# Sizes are binary ("1GB" = 2^30 bytes). Use multiples of the live device
-# block size: 2 MiB for this VM. The block size is configured in libvirt XML.
-# The VM's live memory geometry must be capable of reaching these limits:
-# debian13 boots with 1 GiB of fixed RAM and a 4 GiB virtio-mem device.
+# Example settings for a Linux guest. The filename is exactly
+# <vm_name>_settings.toml and vm_name must match host_list.toml and the
+# libvirt domain name (lower-case ASCII letters, digits, - or _).
+#
+# Total guest RAM limits, including the VM's fixed boot RAM. Sizes are binary
+# ("1GB" = 2^30 bytes) and must be multiples of the live device block size,
+# which the libvirt XML sets. The VM's memory geometry must be able to reach
+# both limits.
 min_ram = "2GB"
-max_ram = "5GB"
+max_ram = "8GB"
 
-# Memory the guest keeps free above what it is using. It asks the host for
-# more when free memory falls below this and returns memory when it has more
-# than this spare. Use a multiple of eight device blocks (16 MiB here).
+# Memory the guest keeps free above what it is using. It asks for more when
+# free memory falls below this and returns memory when it has more than this
+# spare. Use a multiple of eight device blocks.
 free_ram = "512MB"
 
-# A Linux guest runs virtio-mem-guest under systemd. It has no install path,
-# service account or optional telemetry output to configure here.
+# The guest runs virtio-mem-guest under systemd and takes these settings from
+# the host; it has no configuration file of its own.
 guest_os = "linux"
 
-# This identity must match host_list.toml and the libvirt domain name. Filenames
-# are exactly <vm_name>_settings.toml; names use lower-case ASCII, digits, - or _.
-vm_name = "debian13"
+vm_name = "linux-vm"

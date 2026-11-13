@@ -18,7 +18,7 @@ use std::process::ExitCode;
 const HELP: &str = r#"Repository build and test tooling
 
 Usage:
-  cargo xtask gate <format|build|test|lint|local|all>
+  cargo xtask gate <format|build|test|lint|checks|local|all>
   cargo xtask doctor host
   cargo xtask controller-status INSTANCE [OPTIONS]
   cargo xtask attestation VM_NAME ALIAS REVIEW --output PATH [OPTIONS]
@@ -178,13 +178,14 @@ fn execute(arguments: &[String]) -> Result<(), String> {
 
 fn gate(arguments: &[String], repo: &Path) -> Result<(), String> {
     if arguments.len() != 1 {
-        return Err("gate requires format|build|test|lint|local|all".to_owned());
+        return Err("gate requires format|build|test|lint|checks|local|all".to_owned());
     }
     let step = match arguments[0].as_str() {
         "format" => local::Step::Format,
         "build" => local::Step::Build,
         "test" => local::Step::Test,
         "lint" => local::Step::Lint,
+        "checks" => local::Step::Checks,
         "local" => local::Step::Local,
         "all" => {
             local::run(local::Step::Local, repo)?;

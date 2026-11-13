@@ -1,9 +1,9 @@
-# Server-wide settings shared by every VM controlled on this host.
+# Example server-wide settings shared by every VM controlled on this host.
 # VM identities, devices and paths belong in their own files. Guest memory
-# policy uses built-in defaults, with total-RAM limits in each VM settings file.
+# policy follows each VM settings file (min_ram, max_ram, free_ram).
 # Loaded beside host_list.toml and each <vm_name>_settings.toml.
 # Omitted keys use built-in defaults; unknown or obsolete keys are rejected.
-# Deploy with install-host.sh INSTANCE VM=ATTESTATION ... using current evidence.
+# Install with deploy/scripts/install-host.sh CONFIG_DIR INSTANCE VM=ATTESTATION ...
 # Existing running controllers do not reload changes automatically.
 #
 # Memory sizes use binary units: "1GB" = 1024MB = 2^30 bytes.
@@ -14,7 +14,7 @@
 # Growth uses only free pool capacity, highest VM priority first; the host
 # never reclaims another VM's RAM to satisfy a request. Device targets may use
 # the full device capacity. Required when controlling multiple VMs.
-pool_bytes = "15GB"
+pool_bytes = "16GB"
 
 # Minimum MemAvailable to leave for the Linux host. Growth is reduced or
 # refused if it would cross this floor, even when pool capacity remains.
@@ -34,3 +34,5 @@ poll_interval_seconds = 1
 command_timeout_seconds = 10
 # Maximum wait for requested device RAM to converge to the observed amount.
 convergence_timeout_seconds = 300
+# The libvirt connection that owns the managed VMs.
+libvirt_uri = "qemu:///system"

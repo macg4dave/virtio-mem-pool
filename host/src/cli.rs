@@ -137,6 +137,7 @@ fn attested(config: &HostConfig, virsh: &Virsh) -> AttestedCompatibilitySource<V
         virsh.clone(),
         config.vm_name.clone(),
         config.alias.clone(),
+        config.guest_os,
         config.compatibility_attestation_path.clone(),
     )
 }

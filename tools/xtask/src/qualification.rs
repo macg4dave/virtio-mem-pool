@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use virtio_mem_core::{parse_virtio_mem_xml_for_alias, RawTelemetryEnvelope};
 use virtio_mem_host::config::HostConfig;
+use virtio_mem_host::guest_channel::PublicationCopyFirst;
 use virtio_mem_host::host_memory::meminfo_bytes;
 use virtio_mem_host::qga::{GuestFileReader, VirshGuestFiles};
 use virtio_mem_host::virsh::Virsh;
@@ -1710,13 +1711,16 @@ fn capture_privileged_sample(config: &Config, repo: &Path) -> Result<PrivilegedS
             r#"{"execute":"guest-ping"}"#,
         ],
     )?;
-    let reader = VirshGuestFiles::new(
-        Virsh::with_connection(
-            "virsh",
-            Duration::from_secs(config.command_timeout_seconds),
-            &config.connect_uri,
-        ),
+    let reader = PublicationCopyFirst::new(
         &config.vm_name,
+        VirshGuestFiles::new(
+            Virsh::with_connection(
+                "virsh",
+                Duration::from_secs(config.command_timeout_seconds),
+                &config.connect_uri,
+            ),
+            &config.vm_name,
+        ),
     );
     let bytes = reader.read_file(
         &config.telemetry_path,

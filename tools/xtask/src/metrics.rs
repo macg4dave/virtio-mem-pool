@@ -32,6 +32,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Map, Value};
 use virtio_mem_core::{MemoryResourceNotificationState, RawTelemetryEnvelope, VirtioMemState};
 use virtio_mem_host::config::HostConfig;
+use virtio_mem_host::guest_channel::PublicationCopyFirst;
 use virtio_mem_host::qga::{GuestFileReader, VirshGuestFiles};
 use virtio_mem_host::virsh::Virsh;
 
@@ -393,7 +394,10 @@ fn record(
     mut progress: impl FnMut(&Sample, usize, &[Value]),
 ) -> Result<(), String> {
     let virsh = Virsh::persistent_with_connection("virsh", COMMAND_TIMEOUT, &command.connect);
-    let guest_files = VirshGuestFiles::new(virsh.clone(), &command.vm);
+    let guest_files = PublicationCopyFirst::new(
+        &command.vm,
+        VirshGuestFiles::new(virsh.clone(), &command.vm),
+    );
     let started_millis = lock(live).started_millis;
     let mut journal = JournalFollower::start(&command.unit, started_millis, repo);
     if let Some(reason) = &journal.unreadable {

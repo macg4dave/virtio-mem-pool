@@ -11,18 +11,23 @@ Group=virtio-mem-host
 SupplementaryGroups=qemu
 # Provision non-interactive libvirt management authorization for this account
 # during installation. The daemon checks it before polling and never requests
-# a desktop password dialog or elevates itself.
-Environment=LIBVIRT_DEFAULT_URI=qemu:///system
+# a desktop password dialog or elevates itself. The libvirt connection is
+# libvirt_uri in global-settings.toml.
 Environment=HOME=/run/virtio-mem-host
 Environment=XDG_CACHE_HOME=/run/virtio-mem-host/.cache
+# A site with another layout overrides ExecStart in a drop-in
+# (systemctl edit virtio-mem-host@.service). Attestations sit beside the
+# host list; durable state goes in the StateDirectory below.
 ExecStart=/usr/local/libexec/virtio-mem-host --config /etc/virtio-mem-host/host_list.toml
 # Failure is fail-stop. Deployment monitoring decides when a reviewed restart
 # is appropriate; the unit does not create an automatic restart loop.
 Restart=no
 # Inherit the host manager's configured stop timeout rather than embedding a
 # test-derived deadline in the repository unit.
+# Readable by host tools: it holds each guest's latest publication
+# (<vm_name>.publication.json). UMask keeps everything else in it private.
 RuntimeDirectory=virtio-mem-host
-RuntimeDirectoryMode=0700
+RuntimeDirectoryMode=0755
 StateDirectory=virtio-mem-host/state
 StateDirectoryMode=0700
 NoNewPrivileges=true

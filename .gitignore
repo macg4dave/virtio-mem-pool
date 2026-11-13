@@ -38,3 +38,6 @@ logs/
 .artifacts/
 # Legacy local output may exist in older worktrees. Current tooling never writes here.
 .vscode-artifacts/
+
+# Site configuration (real VM names, hosts and paths); see deploy/examples/
+/site/

@@ -1,13 +1,15 @@
-.PHONY: help local-gate windows-gate win11-build win11-gate win11-status win11-deploy all-gates clean
+.PHONY: help local-gate windows-gate windows-build windows-native-gate windows-status windows-deploy all-gates clean
 
 help:
 	@echo "Repository validation delegates"
 	@echo "  make local-gate    - cargo xtask gate local"
 	@echo "  make windows-gate  - cargo xtask windows all"
-	@echo "  make win11-build   - sync, build and fetch the service from win11_gpu"
-	@echo "  make win11-gate    - full native Windows gate on win11_gpu"
-	@echo "  make win11-status  - compare the installed service with the fetched build"
-	@echo "  make win11-deploy  - install the fetched build using the Windows test preset"
+	@echo "  make windows-build       - sync, build and fetch the service from the Windows build VM"
+	@echo "  make windows-native-gate - full native Windows gate on the Windows build VM"
+	@echo "  make windows-status      - compare the installed service with the fetched build"
+	@echo "  make windows-deploy      - install the fetched build with the site's VM settings"
+	@echo "  The windows-* VM targets read WINDOWS_SITE (default site/windows-build.mk);"
+	@echo "  see deploy/examples/windows-build.mk.example."
 	@echo "  make all-gates     - cargo xtask gate all"
 	@echo "  make clean         - remove Cargo build output"
 
@@ -17,32 +19,36 @@ local-gate:
 windows-gate:
 	cargo xtask windows all
 
-# Load this machine-specific test preset only for its explicit targets.
-WIN11_TARGETS := win11-build win11-gate win11-status win11-deploy
-ifneq ($(filter $(WIN11_TARGETS),$(MAKECMDGOALS)),)
-include deploy/config_files/windows-build.mk
+# Load the site's Windows build settings only for the targets that need them.
+WINDOWS_SITE ?= site/windows-build.mk
+WINDOWS_TARGETS := windows-build windows-native-gate windows-status windows-deploy
+ifneq ($(filter $(WINDOWS_TARGETS),$(MAKECMDGOALS)),)
+ifeq ($(wildcard $(WINDOWS_SITE)),)
+$(error $(WINDOWS_SITE) not found: copy deploy/examples/windows-build.mk.example there, or set WINDOWS_SITE)
 endif
-$(WIN11_TARGETS): export VIRTIO_MEM_WINDOWS_SSH ?= $(WIN11_SSH)
-$(WIN11_TARGETS): export VIRTIO_MEM_WINDOWS_DIR ?= $(WIN11_DIR)
-$(WIN11_TARGETS): export VIRTIO_MEM_WINDOWS_ARTIFACTS ?= $(WIN11_ARTIFACTS)
-$(WIN11_TARGETS): export VIRTIO_MEM_WINDOWS_CONNECT_TIMEOUT_SECONDS ?= $(WIN11_CONNECT_TIMEOUT_SECONDS)
-$(WIN11_TARGETS): export VIRTIO_MEM_WINDOWS_OPERATION_TIMEOUT_SECONDS ?= $(WIN11_OPERATION_TIMEOUT_SECONDS)
+include $(WINDOWS_SITE)
+endif
+$(WINDOWS_TARGETS): export VIRTIO_MEM_WINDOWS_SSH ?= $(WINDOWS_SSH)
+$(WINDOWS_TARGETS): export VIRTIO_MEM_WINDOWS_DIR ?= $(WINDOWS_DIR)
+$(WINDOWS_TARGETS): export VIRTIO_MEM_WINDOWS_ARTIFACTS ?= $(WINDOWS_ARTIFACTS)
+$(WINDOWS_TARGETS): export VIRTIO_MEM_WINDOWS_CONNECT_TIMEOUT_SECONDS ?= $(WINDOWS_CONNECT_TIMEOUT_SECONDS)
+$(WINDOWS_TARGETS): export VIRTIO_MEM_WINDOWS_OPERATION_TIMEOUT_SECONDS ?= $(WINDOWS_OPERATION_TIMEOUT_SECONDS)
 
-win11-build:
+windows-build:
 	cargo xtask windows check
 	cargo xtask windows sync
 	cargo xtask windows build
 	cargo xtask windows fetch
 
-win11-gate:
+windows-native-gate:
 	cargo xtask windows all
 
-win11-status:
-	cargo xtask windows build-status $(WIN11_SERVICE) --output $(VIRTIO_MEM_WINDOWS_ARTIFACTS)/build-status.json
+windows-status:
+	cargo xtask windows build-status $(WINDOWS_SERVICE) --output $(VIRTIO_MEM_WINDOWS_ARTIFACTS)/build-status.json
 
-# Restarts VirtioMemService in the guest with the tracked RAM policy.
-win11-deploy:
-	cargo xtask windows deploy $(WIN11_MANIFEST) --output $(VIRTIO_MEM_WINDOWS_ARTIFACTS)/deploy.json --apply
+# Restarts the Windows service in the guest with the site's VM settings.
+windows-deploy:
+	cargo xtask windows deploy $(WINDOWS_MANIFEST) --output $(VIRTIO_MEM_WINDOWS_ARTIFACTS)/deploy.json --apply
 
 all-gates:
 	cargo xtask gate all

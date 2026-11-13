@@ -1,9 +1,18 @@
-# VMs managed together by this host controller. Higher priority receives free
-# pool RAM first; ties use entry order. Aliases must match libvirt domain XML.
+# Example: the VMs one host controller manages together. Copy this directory
+# to a site location (for example /etc/virtio-mem-host on the host, or an
+# untracked site/ folder in a checkout) and edit the copy.
+#
+# Higher priority receives free pool RAM first; ties use entry order.
+# `alias` is the virtio-mem device's alias in the libvirt domain XML.
 # Each vm_name loads <vm_name>_settings.toml from this directory.
-# Optional telemetry_path here names a diagnostic file on the Linux host;
-# omit it to disable host telemetry output. It never names a guest file.
+# Optional telemetry_path names a diagnostic file on the Linux host; omit it
+# to disable host telemetry output. It never names a guest file.
 [[vm]]
-vm_name = "win11_gpu"
+vm_name = "linux-vm"
 alias = "ua-virtiomem0"
 priority = 100
+
+[[vm]]
+vm_name = "windows-vm"
+alias = "ua-virtiomem0"
+priority = 50

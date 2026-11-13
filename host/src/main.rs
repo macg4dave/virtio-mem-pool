@@ -8,7 +8,7 @@ use virtio_mem_host::attestation::{read_attestation, AttestedCompatibilitySource
 use virtio_mem_host::cli::CliCommand;
 use virtio_mem_host::config::{HostConfig, HostSettings};
 use virtio_mem_host::control_channel::ControlChannel;
-use virtio_mem_host::guest_channel::GuestChannel;
+use virtio_mem_host::guest_channel::{publication_copy_path, GuestChannel};
 use virtio_mem_host::host_memory::ProcMeminfoSource;
 use virtio_mem_host::ownership::DeviceOwner;
 use virtio_mem_host::qga::VirshGuestFiles;
@@ -46,7 +46,11 @@ fn main() -> ExitCode {
     // Per-poll commands share one libvirt connection: one polkit check
     // instead of several a second.
     let first = &settings.vms[0];
-    let virsh = Virsh::persistent(first.virsh_binary.clone(), first.command_timeout);
+    let virsh = Virsh::persistent_with_connection(
+        first.virsh_binary.clone(),
+        first.command_timeout,
+        first.libvirt_uri.clone(),
+    );
     if let Err(error) = virsh.require_management_access() {
         eprintln!("virtio-mem-host authorization error: {error}");
         return ExitCode::FAILURE;
@@ -133,7 +137,8 @@ fn vm_controller(
             config.raw_telemetry_future_tolerance,
         )
         .with_wake(wake)
-        .with_control(control),
+        .with_control(control)
+        .with_publication_copy(publication_copy_path(&config.vm_name)),
         VirshXmlSource::new(virsh.clone(), config.vm_name.clone(), config.alias.clone()),
         VirshResizeSink::new(
             virsh.clone(),
@@ -142,9 +147,14 @@ fn vm_controller(
             // Evidence is hashed byte-for-byte, so collect it exactly as the
             // attestation was made: through `virsh`, not the shared session.
             AttestedCompatibilitySource::new(
-                Virsh::new(config.virsh_binary.clone(), config.command_timeout),
+                Virsh::with_connection(
+                    config.virsh_binary.clone(),
+                    config.command_timeout,
+                    config.libvirt_uri.clone(),
+                ),
                 config.vm_name.clone(),
                 config.alias.clone(),
+                config.guest_os,
                 config.compatibility_attestation_path.clone(),
             ),
         ),

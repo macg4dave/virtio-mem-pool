@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
-# Install the sibling host list/settings with explicit, current attestations.
-# Usage: install-host.sh INSTANCE VM=ATTESTATION [VM=ATTESTATION ...]
-# INSTANCE names the systemd controller; each VM needs its own reviewed evidence.
+# Build the host controller from this checkout and install it with a site's
+# configuration and explicit, current attestations.
+# Usage: install-host.sh CONFIG_DIR INSTANCE VM=ATTESTATION [VM=ATTESTATION ...]
+# CONFIG_DIR holds host_list.toml, global-settings.toml and each
+# <vm_name>_settings.toml (see deploy/examples). INSTANCE names the systemd
+# controller; each VM needs its own reviewed evidence.
 set -euo pipefail
-config_dir=$(cd -- "$(dirname -- "$0")" && pwd)
-cd "$config_dir/../.."
-if (( $# < 2 )); then
-  echo 'usage: install-host.sh INSTANCE VM=ATTESTATION [VM=ATTESTATION ...]' >&2
+if (( $# < 3 )); then
+  echo 'usage: install-host.sh CONFIG_DIR INSTANCE VM=ATTESTATION [VM=ATTESTATION ...]' >&2
   exit 1
 fi
-instance=$1
-shift
+config_dir=$(cd -- "$1" && pwd)
+instance=$2
+shift 2
+if [[ ! -f $config_dir/host_list.toml ]]; then
+  echo "no host_list.toml in $config_dir" >&2
+  exit 1
+fi
 if [[ ! $instance =~ ^[[:alnum:]][[:alnum:]_.-]*$ ]]; then
   echo 'invalid controller instance name' >&2
   exit 1
@@ -21,8 +27,9 @@ for binding in "$@"; do
     echo "expected VM=ATTESTATION with an existing file: $binding" >&2
     exit 1
   fi
-  attestations+=(--attestation "$binding")
+  attestations+=(--attestation "${binding%%=*}=$(cd -- "$(dirname -- "${binding#*=}")" && pwd)/$(basename -- "${binding#*=}")")
 done
+cd "$(dirname -- "$0")/../.."
 unit=virtio-mem-host@${instance}.service
 if pgrep -f 'target/release/virtio-mem-host' >/dev/null; then
   echo 'a foreground virtio-mem-host is running; stop it first' >&2

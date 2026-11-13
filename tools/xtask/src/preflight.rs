@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::Value;
+use virtio_mem_core::settings::GuestOs;
 use virtio_mem_core::{
     parse_virtio_mem_xml_for_alias, MemoryRequest, RawTelemetryEnvelope, VirtioMemState,
 };
@@ -173,6 +174,8 @@ pub fn run(command: &Command, repo: &Path) -> Result<(), String> {
         Virsh::with_connection("virsh", command.command_timeout, &command.connection),
         &command.vm,
         &command.alias,
+        // Preflight checks a Windows service install; Linux guests have none.
+        GuestOs::Windows,
         attestation,
     )
     .compatibility()?

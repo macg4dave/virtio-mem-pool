@@ -15,11 +15,9 @@ use any explicit operational authorisation already given in the conversation.
 ## Establish the project and current state
 
 1. Work from the repository containing this prompt, not the IDE terminal's
-   assumed directory. The established checkout is
-   `/home/dave/github/virtio_mem_windows_service`.
-2. Read `AGENTS.md`, `.github/prompts/rust.md`, `docs/roadmap.md`,
-   `docs/backlog.md` and the Windows validation, pressure-policy and qualification
-   sections of `docs/development.md`. Inspect `Makefile`,
+   assumed directory.
+2. Read `AGENTS.md`, `.github/prompts/rust.md`, `docs/roadmap.md` and the
+   Windows sections of `docs/development.md`. Inspect `Makefile`,
    `tools/xtask/src/windows.rs` and `cargo xtask help` for current syntax.
 3. Record `git rev-parse HEAD` and `git status --short`. Preserve existing edits.
    Builds synchronise the working tree, including uncommitted source: a commit
@@ -29,20 +27,19 @@ use any explicit operational authorisation already given in the conversation.
    as historical observations. Re-establish what matters for this run. Never
    claim an old artifact was produced by the current source.
 
-Established endpoints and paths (verify before relying on them):
+Endpoints and paths come from the site's Windows build file
+(`site/windows-build.mk`, untracked; see
+`deploy/examples/windows-build.mk.example`). Below, `$WINDOWS_SSH`,
+`$WINDOWS_DIR`, `$WINDOWS_ARTIFACTS` and `$VM` stand for its SSH alias,
+guest workspace, local output folder and the libvirt VM name. Verify them
+before relying on them. Fixed product values:
 
-| Item | Established value |
+| Item | Value |
 | --- | --- |
 | Libvirt connection | `qemu:///system` |
-| Windows VM | `win11_gpu` |
-| Windows DNS name | `ice101.lan` (previously `192.168.1.11`) |
-| Build SSH alias | `virtio-mem-windows`, Windows user `Dave` |
-| Remote build workspace | `C:\Users\Dave\github\virtio_mem_windows_service` |
 | Native target | `x86_64-pc-windows-msvc` |
-| Local output | `.artifacts/windows/win11_gpu/` |
 | Service configuration | `C:\ProgramData\VirtioMemService\config.json` |
-| Previous telemetry path | `C:\ProgramData\VirtioMemService\telemetry.json` |
-| Previously observed device alias | `ua-virtiomem0`; verify in live XML |
+| Control file | `C:\ProgramData\VirtioMemService\telemetry.json` |
 
 The SSH alias and libvirt VM name are different identifiers. Do not substitute
 one for the other. Read the installed configuration to discover the actual
@@ -53,12 +50,12 @@ service identity and telemetry path when live tests require them.
 Use bounded, noninteractive SSH with host-key checking:
 
 ```bash
-ssh -G virtio-mem-windows
+ssh -G "$WINDOWS_SSH"
 ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 \
-  virtio-mem-windows 'cmd /c ver'
-timeout 15s virsh -c qemu:///system domstate win11_gpu
-timeout 15s virsh -c qemu:///system domiflist win11_gpu
-timeout 15s virsh -c qemu:///system domifaddr win11_gpu --source agent
+  "$WINDOWS_SSH" 'cmd /c ver'
+timeout 15s virsh -c qemu:///system domstate "$VM"
+timeout 15s virsh -c qemu:///system domiflist "$VM"
+timeout 15s virsh -c qemu:///system domifaddr "$VM" --source agent
 ```
 
 Do not print private keys, tokens or passwords. Do not bypass host-key checking,
@@ -85,8 +82,7 @@ intended build-only directory, create it if absent:
 
 ```bash
 ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 \
-  virtio-mem-windows \
-  'if not exist "C:\Users\Dave\github\virtio_mem_windows_service" mkdir "C:\Users\Dave\github\virtio_mem_windows_service"'
+  "$WINDOWS_SSH" "if not exist \"$WINDOWS_DIR\" mkdir \"$WINDOWS_DIR\""
 ```
 
 Before sync, inspect an existing remote checkout for independent edits. Do not
@@ -101,29 +97,29 @@ workspace rather than indiscriminately deleting directories.
 From the repository root, prefer the existing presets:
 
 ```bash
-mkdir -p .artifacts/windows/win11_gpu
+mkdir -p "$WINDOWS_ARTIFACTS"
 set -o pipefail
-make win11-gate 2>&1 | tee .artifacts/windows/win11_gpu/native-gate.log
+make windows-native-gate 2>&1 | tee "$WINDOWS_ARTIFACTS/native-gate.log"
 ```
 
 Stop and inspect the actual failing command if the gate fails. `pipefail` is
 required so `tee` cannot hide failure. Read the log, not just the exit code.
-`make win11-gate` checks the toolchain, synchronises current source, builds
+`make windows-native-gate` checks the toolchain, synchronises current source, builds
 release binaries, runs native Windows tests, checks formatting and Clippy with
 warnings denied, then fetches and SHA-256 verifies the service and workload
 executables and records the build in `build.json` (see Build identity in
-Development). Run `make win11-status` to compare the installed service with
+Development). Run `make windows-status` to compare the installed service with
 that record before and after any deployment.
-`make win11-build` runs check/sync/build/fetch only; use it when tests are
+`make windows-build` runs check/sync/build/fetch only; use it when tests are
 explicitly out of scope, not as a substitute for a failed gate.
 
 The presets provide the required environment to their child commands. For
 individual `cargo xtask windows ...` commands, export it explicitly:
 
 ```bash
-export VIRTIO_MEM_WINDOWS_SSH=virtio-mem-windows
-export VIRTIO_MEM_WINDOWS_DIR='C:\Users\Dave\github\virtio_mem_windows_service'
-export VIRTIO_MEM_WINDOWS_ARTIFACTS=.artifacts/windows/win11_gpu
+export VIRTIO_MEM_WINDOWS_SSH="$WINDOWS_SSH"
+export VIRTIO_MEM_WINDOWS_DIR="$WINDOWS_DIR"
+export VIRTIO_MEM_WINDOWS_ARTIFACTS="$WINDOWS_ARTIFACTS"
 export VIRTIO_MEM_WINDOWS_CONNECT_TIMEOUT_SECONDS=10
 export VIRTIO_MEM_WINDOWS_OPERATION_TIMEOUT_SECONDS=1200
 ```
@@ -152,7 +148,7 @@ judge them by the named test result and overall gate, not that line alone.
 
 The gate fetches the service and workload executables from the same release
 build and verifies each SHA-256 against Windows. Identify any candidate or
-installed binary by its build ID and hash from `build.json` and `win11-status`,
+installed binary by its build ID and hash from `build.json` and `windows-status`,
 not by file timestamps.
 
 Compare the actual hashes; printing two hashes is not verification. Apply an
@@ -164,10 +160,10 @@ execution allocates guest RAM and belongs to a bounded authorised trial.
 
 Use read-only observations to diagnose the failing layer:
 
-- `virsh ... dumpxml win11_gpu`: live NICs, guest-agent channel, virtio-mem
+- `virsh ... dumpxml "$VM"`: live NICs, guest-agent channel, virtio-mem
   device alias, size, block size, requested/current allocation. Save XML under
   `.artifacts/` if needed; do not redefine the domain or edit its disks.
-- `virsh ... qemu-agent-command win11_gpu '{"execute":"guest-info"}'`
+- `virsh ... qemu-agent-command "$VM" '{"execute":"guest-info"}'`
   and `'{"execute":"guest-network-get-interfaces"}'`: agent reachability,
   supported commands and guest addresses. Use timeouts. Inspect support before
   assuming `guest-exec`, guest-file access or a memory-stat command exists.
@@ -246,7 +242,7 @@ Save logs, source revision plus dirty-tree/source hashes, toolchain/target,
 commands, native test totals, exit statuses, artifact hashes and final observed
 VM/service/device state when inspected. Keep evidence in `.artifacts/` and do
 not publish secrets. Update `docs/roadmap.md` with meaningful qualification
-results and `docs/backlog.md` only when acceptance criteria are actually met.
+results and `docs/roadmap.md` only when acceptance criteria are actually met.
 
 Report what built, which tests passed, artifact paths, what failed or remains
 unverified, and whether any live service/device effect occurred. Do not claim

@@ -1,18 +1,20 @@
-# Total guest RAM limits, including all memory Windows can see. No boot/base
-# RAM setting is needed: the policy derives the device portion from live state.
-# Sizes are binary ("1GB" = 2^30 bytes). Use multiples of the live device
-# block size: 64 MiB for this VM. The block size is configured in libvirt XML.
-# The VM's live memory geometry must be capable of reaching these limits.
-min_ram = "6GB"
-max_ram = "27GB"
+# Example settings for a Windows guest. The filename is exactly
+# <vm_name>_settings.toml and vm_name must match host_list.toml and the
+# libvirt domain name (lower-case ASCII letters, digits, - or _).
+#
+# Total guest RAM limits, including the VM's fixed boot RAM. Sizes are binary
+# ("1GB" = 2^30 bytes) and must be multiples of the live device block size,
+# which the libvirt XML sets. The VM's memory geometry must be able to reach
+# both limits.
+min_ram = "4GB"
+max_ram = "16GB"
 
-# Memory the guest keeps free above what it is using. It asks the host for
-# more when free memory falls below this and returns memory when it has more
-# than this spare. Use a multiple of eight device blocks (512 MiB here).
+# Memory the guest keeps free above what it is using. It asks for more when
+# free memory falls below this and returns memory when it has more than this
+# spare. Use a multiple of eight device blocks.
 free_ram = "2GB"
 
-# This identity must match host_list.toml and the libvirt domain name. Filenames
-# are exactly <vm_name>_settings.toml; names use lower-case ASCII, digits, - or _.
-vm_name = "win11_gpu"
+vm_name = "windows-vm"
+# Where the Windows service is installed, and the account it runs as.
 install_path = 'C:\Program Files\VirtioMemService\virtio-mem-service.exe'
 service_account = 'NT AUTHORITY\LocalService'

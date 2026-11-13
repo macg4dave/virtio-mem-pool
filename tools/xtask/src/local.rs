@@ -21,6 +21,9 @@ pub enum Step {
     Build,
     Test,
     Lint,
+    /// Format, build, test and lint: everything that needs no Git checkout,
+    /// so a copied source tree on a build host can run it.
+    Checks,
     Local,
 }
 
@@ -30,18 +33,54 @@ pub fn run(step: Step, repo: &Path) -> Result<(), String> {
         Step::Build => build(repo),
         Step::Test => test(repo),
         Step::Lint => lint(repo),
-        Step::Local => gate(repo),
+        Step::Checks => checks(repo),
+        Step::Local => {
+            checks(repo)?;
+            println!("==> whitespace validation");
+            process::run("git", &["diff", "--check"], repo)
+        }
     }
 }
 
-fn gate(repo: &Path) -> Result<(), String> {
+fn checks(repo: &Path) -> Result<(), String> {
     format(repo)?;
     build(repo)?;
     test(repo)?;
     lint(repo)?;
+    shell_syntax(repo)
+}
 
-    println!("==> whitespace validation");
-    process::run("git", &["diff", "--check"], repo)?;
+/// Every tracked shell script must at least parse.
+fn shell_syntax(repo: &Path) -> Result<(), String> {
+    println!("==> shell syntax");
+    let mut scripts = Vec::new();
+    for directory in ["deploy", "tools", "guest-linux"] {
+        collect_scripts(&repo.join(directory), &mut scripts)?;
+    }
+    scripts.sort();
+    for script in &scripts {
+        let path = script.to_string_lossy();
+        process::run("bash", &["-n", path.as_ref()], repo)?;
+    }
+    Ok(())
+}
+
+fn collect_scripts(directory: &Path, scripts: &mut Vec<std::path::PathBuf>) -> Result<(), String> {
+    let entries = match std::fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("read {}: {error}", directory.display())),
+    };
+    for entry in entries {
+        let path = entry
+            .map_err(|error| format!("read {}: {error}", directory.display()))?
+            .path();
+        if path.is_dir() {
+            collect_scripts(&path, scripts)?;
+        } else if path.extension().is_some_and(|extension| extension == "sh") {
+            scripts.push(path);
+        }
+    }
     Ok(())
 }
 

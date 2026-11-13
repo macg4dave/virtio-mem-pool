@@ -466,6 +466,7 @@ mod tests {
             command_timeout: Duration::from_secs(10),
             convergence_timeout: Duration::from_secs(300),
             virsh_binary: "virsh".to_owned(),
+            libvirt_uri: "qemu:///system".to_owned(),
             raw_telemetry_path: "telemetry.jsonl".to_owned(),
             raw_telemetry_service_name: "VirtioMemService".to_owned(),
             guest_os: virtio_mem_core::settings::GuestOs::Windows,

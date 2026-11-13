@@ -6,19 +6,25 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use virtio_mem_core::{
-    parse_virtio_mem_xml_for_alias, CompatibilityEvidence, VirtioMemCompatibility,
+    parse_virtio_mem_xml_for_alias, settings::GuestOs, CompatibilityEvidence,
+    VirtioMemCompatibility,
 };
 
 use crate::compatibility_source::CompatibilitySource;
 use crate::virsh::VirshCommand;
 
-pub const COMPATIBILITY_ATTESTATION_VERSION: u32 = 1;
+/// Version 2 names the reviewed guest operating system and drops the
+/// development-only trust flag of version 1; a version 1 attestation must be
+/// made again from an updated review.
+pub const COMPATIBILITY_ATTESTATION_VERSION: u32 = 2;
 const MAX_ATTESTATION_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CompatibilityReview {
-    pub trusted_development_guest: bool,
+    /// The guest operating system reviewed. It must match the VM's settings,
+    /// because the driver behaviour the host relies on differs between them.
+    pub guest_os: GuestOs,
     pub workload_reviewed: bool,
     pub no_vdpa: bool,
     pub no_rdma_migration: bool,
@@ -39,7 +45,6 @@ pub struct CompatibilityReview {
 impl CompatibilityReview {
     fn validate(&self) -> Result<(), String> {
         let confirmations = [
-            (self.trusted_development_guest, "trusted_development_guest"),
             (self.workload_reviewed, "workload_reviewed"),
             (self.no_vdpa, "no_vdpa"),
             (self.no_rdma_migration, "no_rdma_migration"),
@@ -166,7 +171,7 @@ impl CompatibilityAttestation {
     pub fn validate_integrity(&self) -> Result<(), String> {
         if self.version != COMPATIBILITY_ATTESTATION_VERSION {
             return Err(format!(
-                "unsupported compatibility attestation version: {}",
+                "unsupported compatibility attestation version {} (expected {COMPATIBILITY_ATTESTATION_VERSION}); attest the VM again",
                 self.version
             ));
         }
@@ -179,9 +184,19 @@ impl CompatibilityAttestation {
         Ok(())
     }
 
-    pub fn validate_live(&self, live: &LiveCompatibilityEvidence) -> Result<(), String> {
+    pub fn validate_live(
+        &self,
+        live: &LiveCompatibilityEvidence,
+        guest_os: GuestOs,
+    ) -> Result<(), String> {
         self.validate_integrity()?;
         live.validate()?;
+        if self.review.guest_os != guest_os {
+            return Err(format!(
+                "compatibility attestation reviewed a {:?} guest but the VM is configured as {guest_os:?}",
+                self.review.guest_os
+            ));
+        }
         // Each field with its attested and live values, so a drift report
         // identifies what changed.
         let comparisons = [
@@ -351,6 +366,7 @@ impl<C: VirshCommand> VirshCompatibilityEvidenceSource<C> {
 pub struct AttestedCompatibilitySource<C> {
     live: VirshCompatibilityEvidenceSource<C>,
     path: PathBuf,
+    guest_os: GuestOs,
 }
 
 impl<C> AttestedCompatibilitySource<C> {
@@ -358,11 +374,13 @@ impl<C> AttestedCompatibilitySource<C> {
         command: C,
         vm_name: impl Into<String>,
         alias: impl Into<String>,
+        guest_os: GuestOs,
         path: impl Into<PathBuf>,
     ) -> Self {
         Self {
             live: VirshCompatibilityEvidenceSource::new(command, vm_name, alias),
             path: path.into(),
+            guest_os,
         }
     }
 }
@@ -371,7 +389,7 @@ impl<C: VirshCommand> CompatibilitySource for AttestedCompatibilitySource<C> {
     fn compatibility(&self) -> Result<VirtioMemCompatibility, String> {
         let attestation = read_attestation(&self.path)?;
         let live = self.live.collect()?;
-        attestation.validate_live(&live)?;
+        attestation.validate_live(&live, self.guest_os)?;
         Ok(VirtioMemCompatibility {
             dynamic_memslots: evidence(live.dynamic_memslots),
             unplugged_inaccessible: evidence(live.unplugged_inaccessible),
@@ -386,8 +404,11 @@ pub fn read_attestation(path: &Path) -> Result<CompatibilityAttestation, String>
 
 pub fn read_review(path: &Path) -> Result<CompatibilityReview, String> {
     let json = read_bounded_json(path, "compatibility review")?;
-    let review: CompatibilityReview = serde_json::from_str(&json)
-        .map_err(|error| format!("parse compatibility review: {error}"))?;
+    let review: CompatibilityReview = serde_json::from_str(&json).map_err(|error| {
+        format!(
+            "parse compatibility review: {error} (reviews now name guest_os, \"windows\" or \"linux\", and no longer carry trusted_development_guest)"
+        )
+    })?;
     review.validate()?;
     Ok(review)
 }
@@ -685,7 +706,7 @@ mod tests {
 
     fn review() -> CompatibilityReview {
         CompatibilityReview {
-            trusted_development_guest: true,
+            guest_os: GuestOs::Windows,
             workload_reviewed: true,
             no_vdpa: true,
             no_rdma_migration: true,
@@ -735,7 +756,7 @@ mod tests {
         let document = CompatibilityAttestation::new(live(), review()).expect("valid attestation");
         let parsed = CompatibilityAttestation::parse(&document.to_pretty_json().expect("JSON"))
             .expect("valid parsed attestation");
-        assert_eq!(parsed.validate_live(&live()), Ok(()));
+        assert_eq!(parsed.validate_live(&live(), GuestOs::Windows), Ok(()));
     }
 
     #[test]
@@ -764,8 +785,10 @@ mod tests {
         changed.unplugged_inaccessible = false;
         changes.push(changed);
         for changed in changes {
-            assert!(document.validate_live(&changed).is_err());
+            assert!(document.validate_live(&changed, GuestOs::Windows).is_err());
         }
+
+        assert!(document.validate_live(&live(), GuestOs::Linux).is_err());
 
         let mut tampered = document;
         tampered.review.vfio_mapping_budget += 1;

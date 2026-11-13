@@ -34,7 +34,7 @@ ssh=${VIRTIO_MEM_SSH:-ssh}
 index=$(mktemp)
 trap 'rm -f "$index"' EXIT
 rm -f "$index"
-GIT_INDEX_FILE=$index git add -A
+GIT_INDEX_FILE=$index git -c core.safecrlf=false add -A
 tree=$(GIT_INDEX_FILE=$index git write-tree)
 
 echo "==> whitespace validation (working tree against HEAD)"
@@ -61,7 +61,7 @@ git -c core.autocrlf=false archive --format=tar "$tree" |
     mkdir -p '$remote_dir'
     rm -rf '$remote_dir/src.new'
     mkdir '$remote_dir/src.new'
-    tar -x -C '$remote_dir/src.new'
+    tar --warning=no-timestamp -x -C '$remote_dir/src.new'
     rm -rf '$remote_dir/src'
     mv '$remote_dir/src.new' '$remote_dir/src'"
 

@@ -2,26 +2,26 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Windows: build service on win11_gpu",
+      "label": "Windows: build service on the build VM",
       "type": "process",
       "command": "make",
-      "args": ["win11-build"],
+      "args": ["windows-build"],
       "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": []
     },
     {
-      "label": "Windows: native gate on win11_gpu",
+      "label": "Windows: native gate on the build VM",
       "type": "process",
       "command": "make",
-      "args": ["win11-gate"],
+      "args": ["windows-native-gate"],
       "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": []
     },
     {
-      "label": "Windows: build status on win11_gpu",
+      "label": "Windows: installed build status",
       "type": "process",
       "command": "make",
-      "args": ["win11-status"],
+      "args": ["windows-status"],
       "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": []
     },

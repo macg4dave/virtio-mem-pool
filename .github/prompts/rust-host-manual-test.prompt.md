@@ -12,4 +12,4 @@ Goal: `${input:goal:what the trial should demonstrate}`
    when allocation must remain unchanged.
 3. Inspect logs, convergence times, actual returned memory and final live state.
    Summarise acceptance evidence in the roadmap and trim the corresponding
-   backlog task. Distinguish interruption from a completed timeout or recovery.
+   roadmap task. Distinguish interruption from a completed timeout or recovery.

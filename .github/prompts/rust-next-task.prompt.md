@@ -1,9 +1,9 @@
 ---
 mode: agent
-description: Complete one unblocked backlog task
+description: Complete one unblocked roadmap task
 ---
 
-Task: `${input:task:backlog ID or next eligible task}`
+Task: `${input:task:roadmap task ID or next eligible task}`
 
 1. If unspecified, select the highest-priority unblocked task in the earliest
    incomplete roadmap phase. State its completion criteria and dependencies.

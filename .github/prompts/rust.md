@@ -99,4 +99,4 @@ and [Development](../../docs/development.md) for current behaviour and validatio
   do not prove native behaviour. Report what ran, failed and remains unverified.
 - Live tests and deployment need explicit authorisation and bounded resources;
   a code or documentation task does not authorise operational effects. Keep open
-  work and completion criteria in the backlog, not in these standards.
+  work and completion criteria in the roadmap, not in these standards.
