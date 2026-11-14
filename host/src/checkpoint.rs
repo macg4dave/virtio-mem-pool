@@ -17,7 +17,12 @@ use serde::{Deserialize, Serialize};
 use crate::config::HostConfig;
 use crate::ownership::CheckpointOwner;
 
-const CHECKPOINT_VERSION: u16 = 2;
+const CHECKPOINT_VERSION: u16 = 1;
+
+rampire_core::schema_name! {
+    /// The `schema` of a VM's durable checkpoint.
+    struct CheckpointSchema = "rampire.checkpoint";
+}
 const MAX_CHECKPOINT_BYTES: u64 = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,6 +68,7 @@ impl DurableControlState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CheckpointFile {
+    schema: CheckpointSchema,
     version: u16,
     vm_name: String,
     device_alias: String,
@@ -133,6 +139,7 @@ impl Checkpoint {
         persist(
             &self.path,
             &CheckpointFile {
+                schema: CheckpointSchema,
                 version: CHECKPOINT_VERSION,
                 vm_name: self.vm_name.clone(),
                 device_alias: self.device_alias.clone(),
@@ -259,6 +266,7 @@ pub fn read_controller_status(
         ControlHealth::Converged
     };
     let snapshot = ControllerStatusSnapshot {
+        schema: rampire_core::StatusSchema,
         version: CONTROLLER_STATUS_VERSION,
         observed_unix_millis,
         vm_name: config.vm_name.clone(),

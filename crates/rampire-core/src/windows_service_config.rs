@@ -5,13 +5,18 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Version 9 removed everything the host now publishes.
-pub const WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION: u32 = 9;
+pub const WINDOWS_SERVICE_CONFIG_VERSION: u32 = 1;
+
+crate::schema_name! {
+    /// The `schema` of the Windows guest service's configuration file.
+    pub struct WindowsConfigSchema = "rampire.windows-config";
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WindowsServiceConfigFile {
-    pub schema_version: u32,
+    pub schema: WindowsConfigSchema,
+    pub version: u32,
     pub service_name: String,
     pub display_name: String,
     pub description: String,
@@ -21,10 +26,10 @@ pub struct WindowsServiceConfigFile {
 
 impl WindowsServiceConfigFile {
     pub fn validate(&self) -> Result<(), String> {
-        if self.schema_version != WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION {
+        if self.version != WINDOWS_SERVICE_CONFIG_VERSION {
             return Err(format!(
                 "unsupported configuration schema version: {}",
-                self.schema_version
+                self.version
             ));
         }
         for value in [
@@ -161,7 +166,8 @@ mod tests {
     #[test]
     fn configuration_cannot_alias_any_derived_publication_file() {
         let config = WindowsServiceConfigFile {
-            schema_version: WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION,
+            schema: WindowsConfigSchema,
+            version: WINDOWS_SERVICE_CONFIG_VERSION,
             service_name: "RampireGuest".to_owned(),
             display_name: "Virtio memory".to_owned(),
             description: "Virtio memory".to_owned(),

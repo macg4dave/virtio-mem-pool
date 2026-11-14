@@ -254,8 +254,8 @@ mod tests {
     use rampire_core::settings::GlobalSettings;
     use rampire_core::{
         host_status_path, request_state_path, GuestRequestState, GuestSettings, HostMemoryStatus,
-        MemoryOperation, MemoryOutcome, MemoryResourceNotificationState, MemoryResult,
-        MemoryTelemetrySnapshot, MEMORY_REQUEST_VERSION,
+        HostStatusSchema, MemoryOperation, MemoryOutcome, MemoryResourceNotificationState,
+        MemoryResult, MemoryTelemetrySnapshot, MEMORY_REQUEST_VERSION,
     };
     use std::cell::Cell;
     use std::path::PathBuf;
@@ -375,6 +375,7 @@ mod tests {
 
         fn write_status(&self, second: u64, current: u64, result: Option<MemoryResult>) {
             let status = HostMemoryStatus {
+                schema: HostStatusSchema,
                 version: MEMORY_REQUEST_VERSION,
                 vm_name: "debian".to_owned(),
                 service_name: "rampire-guest".to_owned(),

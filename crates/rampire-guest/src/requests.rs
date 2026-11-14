@@ -58,6 +58,7 @@ impl GuestRequests {
                 .map_err(|error| format!("request state is invalid: {error}"))?,
             None => GuestRequestState::default(),
         };
+        state.validate()?;
         settings.validate()?;
         let mut requester =
             GuestRequester::new(settings.policy, vm_name, service_name, session_id, state)?;

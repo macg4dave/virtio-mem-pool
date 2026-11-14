@@ -444,8 +444,8 @@ fn duration_millis(duration: Duration) -> Result<u64, String> {
 mod tests {
     use super::*;
     use rampire_core::{
-        MemoryOperation, MemoryRequest, MemoryResourceNotificationState, MemoryTelemetrySnapshot,
-        RequestIdentity, MEMORY_REQUEST_VERSION,
+        HostStatusSchema, MemoryOperation, MemoryRequest, MemoryResourceNotificationState,
+        MemoryTelemetrySnapshot, RequestIdentity, MEMORY_REQUEST_VERSION,
     };
     use std::sync::Mutex;
 
@@ -621,6 +621,7 @@ mod tests {
             FixedClock(1_000_000),
         );
         let status = HostMemoryStatus {
+            schema: HostStatusSchema,
             version: MEMORY_REQUEST_VERSION,
             vm_name: "guest".to_owned(),
             service_name: "rampire-guest".to_owned(),
@@ -690,6 +691,7 @@ mod tests {
         // A guest that has published nothing yet waits for its settings on
         // the channel, so the status goes there as well as to the files.
         let first = HostMemoryStatus {
+            schema: HostStatusSchema,
             version: MEMORY_REQUEST_VERSION,
             vm_name: "guest".to_owned(),
             service_name: "RampireGuest".to_owned(),
@@ -714,6 +716,7 @@ mod tests {
         guest.write_all(line(&latest).as_bytes()).unwrap();
         assert_eq!(channel.read(), Ok(latest));
         let status = HostMemoryStatus {
+            schema: HostStatusSchema,
             version: MEMORY_REQUEST_VERSION,
             vm_name: "guest".to_owned(),
             service_name: "RampireGuest".to_owned(),
@@ -785,6 +788,7 @@ mod tests {
     #[test]
     fn publishes_complete_status_beside_the_publication() {
         let status = HostMemoryStatus {
+            schema: HostStatusSchema,
             version: MEMORY_REQUEST_VERSION,
             vm_name: "guest".to_owned(),
             service_name: "RampireGuest".to_owned(),

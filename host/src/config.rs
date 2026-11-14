@@ -44,9 +44,8 @@ pub struct HostConfig {
     pub observe_only: bool,
     pub min_ram: u64,
     pub max_ram: u64,
-    /// Published with the host status: every current guest takes its limits
-    /// and policy from the host. Guests built before that are never sent it
-    /// (see `rampire_core::sends_guest_settings_to`).
+    /// Published with the host status: every guest takes its limits and
+    /// policy from the host.
     pub guest_settings: Option<rampire_core::GuestSettings>,
     pub telemetry_path: Option<String>,
 }

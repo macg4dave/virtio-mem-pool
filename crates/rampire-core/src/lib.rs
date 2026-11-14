@@ -1,4 +1,7 @@
-//! Platform-neutral virtio-mem state, policy, and QEMU Guest Agent parsing.
+//! RAMpire's shared core: settings, pool policy, virtio-mem state and the
+//! guest protocol.
+
+pub mod schema;
 
 pub mod compatibility;
 pub mod controller_status;
@@ -21,21 +24,22 @@ pub use compatibility::{
 pub use controller_status::{
     parse_controller_status, CommandDirection, CommandOwnership, ControlHealth,
     ControllerCommandStatus, ControllerStatusError, ControllerStatusSnapshot, GuestInputStatus,
-    RecoveryState, CONTROLLER_STATUS_VERSION, MAX_CONTROLLER_STATUS_BYTES,
+    RecoveryState, StatusSchema, CONTROLLER_STATUS_VERSION, MAX_CONTROLLER_STATUS_BYTES,
 };
 pub use demand::{
-    sends_guest_settings_to, DemandError, MemoryResourceNotificationState, MemoryTelemetrySnapshot,
-    RawTelemetryEnvelope, GUEST_SETTINGS_VERSION, RAW_TELEMETRY_VERSION,
+    DemandError, MemoryResourceNotificationState, MemoryTelemetrySnapshot, PublicationSchema,
+    RawTelemetryEnvelope, RAW_TELEMETRY_VERSION,
 };
 pub use error::VirtioMemError;
 pub use guest_policy::{
     plan_request, GuestDecision, GuestMemoryPolicy, GuestRequestState, GuestRequester,
+    GuestStateSchema, GUEST_STATE_VERSION,
 };
 pub use memory_request::{
     bounded_reason, host_status_path, request_state_path, GuestSettings, HostMemoryStatus,
-    MemoryOperation, MemoryOutcome, MemoryRequest, MemoryRequestJournal, MemoryResult,
-    RequestAdmission, RequestIdentity, MAX_HOST_STATUS_BYTES, MAX_REQUEST_LIFETIME_MILLIS,
-    MEMORY_REQUEST_VERSION,
+    HostStatusSchema, MemoryOperation, MemoryOutcome, MemoryRequest, MemoryRequestJournal,
+    MemoryResult, RequestAdmission, RequestIdentity, MAX_HOST_STATUS_BYTES,
+    MAX_REQUEST_LIFETIME_MILLIS, MEMORY_REQUEST_VERSION,
 };
 pub use pool::{allocate_pool, service_order, PoolAllocation, PoolError, PoolMember};
 pub use stream::{
@@ -50,4 +54,6 @@ pub use virtio_mem::{VirtioMemState, MIN_BLOCK_SIZE_BYTES};
 pub use virtio_mem_xml::{
     parse_virtio_mem_xml, parse_virtio_mem_xml_for_alias, VirtioMemXmlError, VirtioMemXmlState,
 };
-pub use windows_service_config::{WindowsServiceConfigFile, WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION};
+pub use windows_service_config::{
+    WindowsConfigSchema, WindowsServiceConfigFile, WINDOWS_SERVICE_CONFIG_VERSION,
+};

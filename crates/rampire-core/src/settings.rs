@@ -8,8 +8,8 @@ use std::path::Path;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{
-    GuestMemoryPolicy, GuestSettings, TargetPolicyConfig, WindowsServiceConfigFile,
-    WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION,
+    GuestMemoryPolicy, GuestSettings, TargetPolicyConfig, WindowsConfigSchema,
+    WindowsServiceConfigFile, WINDOWS_SERVICE_CONFIG_VERSION,
 };
 
 pub const SERVICE_NAME: &str = "RampireGuest";
@@ -295,7 +295,8 @@ impl VmSettings {
     pub fn service_config(&self) -> Result<WindowsServiceConfigFile, String> {
         let (_, service_account) = self.windows_install()?;
         Ok(WindowsServiceConfigFile {
-            schema_version: WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION,
+            schema: WindowsConfigSchema,
+            version: WINDOWS_SERVICE_CONFIG_VERSION,
             service_name: SERVICE_NAME.to_owned(),
             display_name: "Virtio Memory Service".to_owned(),
             description: "RAMpire guest memory requests.".to_owned(),

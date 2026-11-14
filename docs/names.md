@@ -100,25 +100,31 @@ under `crates/` follow their crate names.
 | Guest device path | `/dev/virtio-ports/org.virtio-mem.control.0` | `/dev/virtio-ports/org.rampire.control.0` |
 | Build stamp file | `virtio-mem-build.json` | `rampire-build.json` |
 
-Every JSON document gains a `schema` field naming it, beside its
-`version`, and every version restarts at 1 (decision D20):
+Every document RAMpire reads or writes names its schema in a `schema`
+field, written first, beside its `version`. Every version restarted at 1
+(decision D20). A reader refuses a document whose `schema` is missing or
+names another document, or whose `version` it doesn't know. The marker
+types come from `rampire_core::schema_name!`.
 
-| Document | `schema` | Constant | Version now |
+| Document | `schema` | Version constant | Was |
 |---|---|---|---|
-| Guest publication (raw telemetry) | `rampire.publication` | `RAW_TELEMETRY_VERSION` | 6 |
-| Guest settings | `rampire.guest-settings` | `GUEST_SETTINGS_VERSION` | 6 |
-| Memory request | `rampire.request` | `MEMORY_REQUEST_VERSION` | 1 |
-| Controller (host) status | `rampire.status` | `CONTROLLER_STATUS_VERSION` | 5 |
-| Attestation | `rampire.attestation` | `COMPATIBILITY_ATTESTATION_VERSION` | 2 |
+| Guest publication | `rampire.publication` | `RAW_TELEMETRY_VERSION` | 6 (read 4 to 6) |
+| Host status, sent to a guest | `rampire.host-status` | `MEMORY_REQUEST_VERSION` | 1 |
+| Guest's retained request state | `rampire.guest-state` | `GUEST_STATE_VERSION` | no version |
+| Controller status for a VM | `rampire.status` | `CONTROLLER_STATUS_VERSION` | 5 |
 | Checkpoint (durable state) | `rampire.checkpoint` | `CHECKPOINT_VERSION` | 2 |
-| Windows service configuration | `rampire.windows-config` | `WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION` | 9 |
-| Build record | `rampire.build` | `RECORD_SCHEMA_VERSION` | 1 |
-| Controller status evidence | `rampire.status-evidence` | `EVIDENCE_VERSION` | 1 |
-| Linux deploy evidence | `rampire.deploy-evidence` | `EVIDENCE_SCHEMA_VERSION` | 1 |
-| Qualification summary | `rampire.qualification` | `SCHEMA_VERSION` | 4 |
+| Attestation | `rampire.attestation` | `COMPATIBILITY_ATTESTATION_VERSION` | 2 |
+| Windows service configuration | `rampire.windows-config` | `WINDOWS_SERVICE_CONFIG_VERSION` | 9, as `schema_version` |
 
-A reader refuses a document whose `schema` or `version` it doesn't
-know.
+A memory request travels inside a publication or a status, not as a
+document of its own, so it keeps its `version` and has no `schema`.
+`GUEST_SETTINGS_VERSION` and the host's choice of which guests to send
+settings to are gone: every guest reads them.
+
+The records `xtask` writes for development (the Windows build record and
+stamp, deploy and preflight evidence, metrics and qualification runs) are
+not RAMpire documents and keep their own versions. A record that moves into
+`rampire`, such as apply evidence in O1.5, gets a schema then.
 
 ## Environment variables
 

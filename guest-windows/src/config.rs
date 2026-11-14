@@ -1,7 +1,7 @@
 use std::io::Read;
 use std::time::Duration;
 
-use rampire_core::{WindowsServiceConfigFile, WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION};
+use rampire_core::{WindowsServiceConfigFile, WINDOWS_SERVICE_CONFIG_VERSION};
 
 use crate::error::ConfigurationError;
 
@@ -65,10 +65,8 @@ impl ServiceConfig {
         }
         let file: WindowsServiceConfigFile = serde_json::from_str(&contents)
             .map_err(|error| ConfigurationError::InvalidFile(error.to_string()))?;
-        if file.schema_version != WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION {
-            return Err(ConfigurationError::UnsupportedSchemaVersion(
-                file.schema_version,
-            ));
+        if file.version != WINDOWS_SERVICE_CONFIG_VERSION {
+            return Err(ConfigurationError::UnsupportedSchemaVersion(file.version));
         }
         let config = Self {
             file,
@@ -122,7 +120,8 @@ pub(crate) fn validate_file_identity(config: &str, report: &str) -> Result<(), C
 pub(crate) fn test_config() -> ServiceConfig {
     ServiceConfig {
         file: WindowsServiceConfigFile {
-            schema_version: WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION,
+            schema: rampire_core::WindowsConfigSchema,
+            version: WINDOWS_SERVICE_CONFIG_VERSION,
             service_name: "TestService".to_owned(),
             display_name: "Test service".to_owned(),
             description: "Test configuration".to_owned(),
@@ -181,7 +180,7 @@ mod tests {
         assert_eq!(loaded.shutdown_timeout(), Duration::from_millis(30));
 
         let mut old = expected.file.clone();
-        old.schema_version = 99;
+        old.version = 99;
         std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
         assert_eq!(
             ServiceConfig::load_from_path(&path),

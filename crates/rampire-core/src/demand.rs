@@ -6,21 +6,12 @@ use thiserror::Error;
 use crate::guest_policy::GuestPolicyDiagnostics;
 use crate::memory_request::{valid_identity, MemoryRequest, MemoryResult};
 
-/// Version 5 adds diagnostic explanations; readers still accept version 4.
-///
-/// Version 6 means the guest reads `HostMemoryStatus::guest_settings`. Older
-/// guests reject a status that carries it, so the host sends it only to a
-/// guest that has published version 6 or nothing yet (see
-/// `sends_guest_settings_to`).
-pub const RAW_TELEMETRY_VERSION: u16 = 6;
-/// The first publication version whose guest reads published settings.
-pub const GUEST_SETTINGS_VERSION: u16 = 6;
+/// The guest publication's version. Decision D20 restarted it at 1.
+pub const RAW_TELEMETRY_VERSION: u16 = 1;
 
-/// Whether a status for a guest whose last publication had `version` (`None`
-/// before any) may carry guest settings. A guest that has published nothing
-/// may be one waiting for its settings before it can start.
-pub fn sends_guest_settings_to(version: Option<u16>) -> bool {
-    version.is_none_or(|version| version >= GUEST_SETTINGS_VERSION)
+crate::schema_name! {
+    /// The `schema` of a guest publication.
+    pub struct PublicationSchema = "rampire.publication";
 }
 
 /// Native, canonical-byte memory observations collected from the guest. The
@@ -104,6 +95,7 @@ pub struct GuestDiagnostics {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RawTelemetryEnvelope {
+    pub schema: PublicationSchema,
     pub version: u16,
     pub vm_name: String,
     pub service_name: String,
@@ -135,6 +127,7 @@ impl RawTelemetryEnvelope {
         memory: MemoryTelemetrySnapshot,
     ) -> Self {
         Self {
+            schema: PublicationSchema,
             version: RAW_TELEMETRY_VERSION,
             vm_name: vm_name.into(),
             service_name: service_name.into(),
@@ -157,7 +150,7 @@ impl RawTelemetryEnvelope {
         max_age_millis: u64,
         future_tolerance_millis: u64,
     ) -> Result<(), DemandError> {
-        if !matches!(self.version, 4 | 5 | RAW_TELEMETRY_VERSION) {
+        if self.version != RAW_TELEMETRY_VERSION {
             return Err(DemandError::UnsupportedTelemetryVersion(self.version));
         }
         for (field, value) in [
@@ -301,18 +294,17 @@ mod tests {
     }
 
     #[test]
-    fn version_four_without_diagnostics_remains_readable() {
-        let mut old = envelope("old-service", 995_000, 10, 0);
-        old.version = 4;
-        let bytes = serde_json::to_vec(&old).unwrap();
+    fn round_trips_with_and_without_diagnostics() {
+        let plain = envelope("service", 995_000, 10, 0);
+        let bytes = serde_json::to_vec(&plain).unwrap();
+        assert!(bytes.starts_with(br#"{"schema":"rampire.publication","version":1,"#));
         let parsed: RawTelemetryEnvelope = serde_json::from_slice(&bytes).unwrap();
         assert!(parsed.diagnostics.is_none());
         assert_eq!(
             parsed.validate_for("guest", "RampireGuest", 1_000_000, 60_000, 5000),
             Ok(())
         );
-        let mut new = old;
-        new.version = RAW_TELEMETRY_VERSION;
+        let mut new = plain;
         new.diagnostics = Some(GuestDiagnostics {
             build_id: "test".to_owned(),
             driver_file_version: Err("not available".to_owned()),
@@ -325,7 +317,7 @@ mod tests {
         let encoded = serde_json::to_string(&new).unwrap();
         assert!(
             !encoded.contains("environment"),
-            "a guest with no facts publishes the earlier format"
+            "a guest with no facts leaves the environment out"
         );
         let parsed: RawTelemetryEnvelope = serde_json::from_str(&encoded).unwrap();
         assert_eq!(parsed, new);
@@ -341,15 +333,6 @@ mod tests {
     }
 
     #[test]
-    fn only_guests_that_read_settings_are_sent_them() {
-        assert!(sends_guest_settings_to(None));
-        assert!(!sends_guest_settings_to(Some(4)));
-        assert!(!sends_guest_settings_to(Some(5)));
-        assert!(sends_guest_settings_to(Some(GUEST_SETTINGS_VERSION)));
-        assert!(sends_guest_settings_to(Some(RAW_TELEMETRY_VERSION)));
-    }
-
-    #[test]
     fn validates_fresh_vm_scoped_raw_telemetry() {
         let current = envelope("session-a", 995_000, 10, 0);
         let check = |envelope: &RawTelemetryEnvelope, vm, service, now| {
@@ -362,11 +345,11 @@ mod tests {
         let future = envelope("session-a", 1_006_000, 20, 1);
         assert!(check(&future, "guest", "RampireGuest", 1_000_000).is_err());
 
-        let mut old = current.clone();
-        old.version = 3;
+        let mut other = current.clone();
+        other.version = 2;
         assert_eq!(
-            check(&old, "guest", "RampireGuest", 1_000_000),
-            Err(DemandError::UnsupportedTelemetryVersion(3))
+            check(&other, "guest", "RampireGuest", 1_000_000),
+            Err(DemandError::UnsupportedTelemetryVersion(2))
         );
         let mut control = current.clone();
         control.session_id = "session\n".to_owned();

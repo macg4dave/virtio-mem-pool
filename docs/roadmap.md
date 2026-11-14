@@ -190,10 +190,12 @@ happens here, once, before the command is built on top of it.
 - [x] **R2** Rename and restructure the workspace following R1: crates,
   binary, units, paths and environment variables. The host unit is
   `rampire@.service` until O1.8 removes the instance.
-- [ ] **R3** Rename the wire identifiers (decision D8): the control
+- [x] **R3** Rename the wire identifiers (decision D8): the control
   channel port in the guest unit, the controller and the documented
   domain XML, and the schema names in publications, host status and
-  attestations. Each schema version restarts at 1.
+  attestations. Each schema version restarts at 1. Done as listed in
+  [names](names.md#wire-identifiers-r3-decision-d8). The publication
+  readers for older versions went with it.
 - [ ] **R4** The configuration layout (decision D5):
   - `global.toml`, and `vms.d/NAME.toml` holding one VM's alias,
     priority, limits and review profile;
@@ -211,7 +213,7 @@ happens here, once, before the command is built on top of it.
   or confirmed by a person, so O3.2 can fill it in.
 - [ ] **R6** Delete the compatibility code the clean break leaves unused:
   - `host-deploy`'s move of attestations from the old layout;
-  - readers for publication versions older than current;
+  - ~~readers for publication versions older than current~~ (done in R3);
   - the `windows_driver_version` review alias;
   - the compatibility tables in [administration](administration.md).
 - [ ] **R7** The README, documentation and repository name. Remove the

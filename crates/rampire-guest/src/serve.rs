@@ -142,7 +142,9 @@ where
 mod tests {
     use super::*;
     use rampire_core::settings::GlobalSettings;
-    use rampire_core::{host_status_path, HostMemoryStatus, MEMORY_REQUEST_VERSION};
+    use rampire_core::{
+        host_status_path, HostMemoryStatus, HostStatusSchema, MEMORY_REQUEST_VERSION,
+    };
 
     const GIB: u64 = 1 << 30;
 
@@ -173,6 +175,7 @@ mod tests {
         };
         let write = |observed: u64, with_settings: bool| {
             let status = HostMemoryStatus {
+                schema: HostStatusSchema,
                 version: MEMORY_REQUEST_VERSION,
                 vm_name: "debian".to_owned(),
                 service_name: "rampire-guest".to_owned(),

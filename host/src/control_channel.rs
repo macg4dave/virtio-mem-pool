@@ -1,5 +1,5 @@
 //! The host end of a guest's control channel: the virtio-serial port
-//! `org.virtio-mem.control.0`, which libvirt exposes on the host as a Unix
+//! `org.rampire.control.0`, which libvirt exposes on the host as a Unix
 //! socket. The guest sends its publications over it and the host sends its
 //! status back, one JSON record per line, with no guest agent involved.
 //!

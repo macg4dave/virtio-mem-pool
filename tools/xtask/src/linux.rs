@@ -246,7 +246,7 @@ echo \"unit_sha256=$(sha256sum \"$u\" 2>/dev/null | cut -d' ' -f1)\"
 echo \"active=$(systemctl is-active {UNIT_NAME} 2>/dev/null)\"
 echo \"enabled=$(systemctl is-enabled {UNIT_NAME} 2>/dev/null)\"
 echo \"kernel=$(uname -r)\"
-if test -e /dev/virtio-ports/org.virtio-mem.control.0; then echo control_channel=present; else echo control_channel=absent; fi
+if test -e /dev/virtio-ports/org.rampire.control.0; then echo control_channel=present; else echo control_channel=absent; fi
 if sudo -n test -e {REMOTE_STATE}/control.json.request-state; then echo request_state=present; else echo request_state=absent; fi
 "
     )

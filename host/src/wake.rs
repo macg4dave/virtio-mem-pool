@@ -246,16 +246,13 @@ mod tests {
     use super::*;
     #[test]
     fn discovers_only_the_dedicated_channel() {
-        let xml = "<domain><devices><channel type='unix'><source path='/qga'/><target type='virtio' name='org.qemu.guest_agent.0'/></channel><channel type='unix'><source path='/control'/><target type='virtio' name='org.virtio-mem.control.0'/></channel></devices></domain>";
+        let xml = "<domain><devices><channel type='unix'><source path='/qga'/><target type='virtio' name='org.qemu.guest_agent.0'/></channel><channel type='unix'><source path='/control'/><target type='virtio' name='org.rampire.control.0'/></channel></devices></domain>";
         assert_eq!(
-            channel_path(xml, "org.virtio-mem.control.0"),
+            channel_path(xml, "org.rampire.control.0"),
             Ok(Some("/control".to_owned()))
         );
-        assert_eq!(channel_path(xml, "org.virtio-mem.other.0"), Ok(None));
-        assert_eq!(
-            channel_path("<domain/>", "org.virtio-mem.control.0"),
-            Ok(None)
-        );
+        assert_eq!(channel_path(xml, "org.rampire.other.0"), Ok(None));
+        assert_eq!(channel_path("<domain/>", "org.rampire.control.0"), Ok(None));
     }
 
     #[test]

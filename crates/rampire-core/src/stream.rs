@@ -8,7 +8,7 @@
 
 /// The virtio-serial port that carries guest publications to the host and
 /// host status to the guest.
-pub const MEMORY_CONTROL_CHANNEL_NAME: &str = "org.virtio-mem.control.0";
+pub const MEMORY_CONTROL_CHANNEL_NAME: &str = "org.rampire.control.0";
 
 /// Larger than any publication or status either side accepts.
 pub const MAX_STREAM_RECORD_BYTES: usize = 64 * 1024;

@@ -12,7 +12,7 @@ ExecStart=/usr/local/libexec/rampire-guest run
 # The control channel to the host. systemd opens it and hands the service the
 # descriptor, so the unprivileged service needs no device access. "graceful":
 # a VM without the port starts the service anyway, on the control files.
-OpenFile=/dev/virtio-ports/org.virtio-mem.control.0:control:graceful
+OpenFile=/dev/virtio-ports/org.rampire.control.0:control:graceful
 # When the guest runs out of memory this service is what asks for more, so
 # it must be among the last processes the kernel kills. On 2026-11-13 a
 # fast fill killed it and the guest could never grow again.

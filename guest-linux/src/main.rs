@@ -154,13 +154,13 @@ mod tests {
             parse(&[
                 "run",
                 "--channel",
-                "/dev/virtio-ports/org.virtio-mem.control.0",
+                "/dev/virtio-ports/org.rampire.control.0",
                 "--control",
                 "/tmp/c.json"
             ]),
             Ok(run(
                 "/tmp/c.json",
-                Some("/dev/virtio-ports/org.virtio-mem.control.0")
+                Some("/dev/virtio-ports/org.rampire.control.0")
             ))
         );
         assert_eq!(parse(&["version"]), Ok(Command::Version));

@@ -90,13 +90,47 @@ pub fn plan_request(
     Ok(None)
 }
 
+/// The version of the guest's retained request state.
+pub const GUEST_STATE_VERSION: u16 = 1;
+
+crate::schema_name! {
+    /// The `schema` of the guest's retained request state.
+    pub struct GuestStateSchema = "rampire.guest-state";
+}
+
 /// What the guest retains across service restarts.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GuestRequestState {
+    pub schema: GuestStateSchema,
+    pub version: u16,
     pub pending: Option<MemoryRequest>,
     /// Issuance watermark: the host refuses requests that do not advance it.
     pub last_issued_unix_millis: u64,
+}
+
+impl Default for GuestRequestState {
+    fn default() -> Self {
+        Self {
+            schema: GuestStateSchema,
+            version: GUEST_STATE_VERSION,
+            pending: None,
+            last_issued_unix_millis: 0,
+        }
+    }
+}
+
+impl GuestRequestState {
+    /// Refuses state written under another version.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.version != GUEST_STATE_VERSION {
+            return Err(format!(
+                "unsupported guest request state version {} (expected {GUEST_STATE_VERSION})",
+                self.version
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -423,6 +457,7 @@ impl GuestRequester {
         self.state = GuestRequestState {
             pending: Some(request.clone()),
             last_issued_unix_millis: now,
+            ..GuestRequestState::default()
         };
         Ok(GuestDecision {
             request: Some(request),
@@ -444,7 +479,7 @@ impl GuestRequester {
 mod tests {
     use super::*;
     use crate::memory_request::MemoryOutcome;
-    use crate::MemoryTelemetrySnapshot;
+    use crate::{HostStatusSchema, MemoryTelemetrySnapshot};
 
     const MIB: u64 = 1024 * 1024;
     const GIB: u64 = 1024 * MIB;
@@ -491,6 +526,7 @@ mod tests {
 
     fn status(second: u64, current: u64, result: Option<MemoryResult>) -> HostMemoryStatus {
         HostMemoryStatus {
+            schema: HostStatusSchema,
             version: MEMORY_REQUEST_VERSION,
             vm_name: "guest".to_owned(),
             service_name: "service".to_owned(),

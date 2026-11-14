@@ -183,7 +183,7 @@ impl<S: Read + Write + std::fmt::Debug> Transport for StreamTransport<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rampire_core::MEMORY_REQUEST_VERSION;
+    use rampire_core::{HostStatusSchema, MEMORY_REQUEST_VERSION};
     use std::collections::VecDeque;
 
     /// A stream whose host end the test plays: bytes queued in `incoming`
@@ -231,6 +231,7 @@ mod tests {
 
     fn status(current: u64) -> HostMemoryStatus {
         HostMemoryStatus {
+            schema: HostStatusSchema,
             version: MEMORY_REQUEST_VERSION,
             vm_name: "debian".to_owned(),
             service_name: "rampire-guest".to_owned(),

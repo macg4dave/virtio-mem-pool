@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use rampire_core::{
     allocate_pool, bounded_reason, service_order, CommandDirection, CommandOwnership,
-    HostMemoryStatus, MemoryOperation, MemoryOutcome, MemoryRequest,
+    HostMemoryStatus, HostStatusSchema, MemoryOperation, MemoryOutcome, MemoryRequest,
     MemoryResourceNotificationState, MemoryResult, PoolMember, RequestAdmission, VirtioMemState,
     MEMORY_REQUEST_VERSION, MIN_BLOCK_SIZE_BYTES,
 };
@@ -134,8 +134,6 @@ pub struct VmController<G, S, R> {
     status_unpublished_reported: bool,
     health_report: Option<(Instant, u64, u64)>,
     last_observed_request: Option<rampire_core::RequestIdentity>,
-    /// The publication version of the guest's last valid record.
-    guest_version: Option<u16>,
 }
 
 impl<G, S, R> VmController<G, S, R> {
@@ -167,7 +165,6 @@ impl<G, S, R> VmController<G, S, R> {
             status_unpublished_reported: false,
             health_report: None,
             last_observed_request: None,
-            guest_version: None,
         })
     }
 }
@@ -397,7 +394,6 @@ where
         let (request, base_ram) = match self.guest.read() {
             Ok(envelope) => {
                 self.guest_unavailable_reported = false;
-                self.guest_version = Some(envelope.version);
                 if let Some(path) = &self.config.telemetry_path {
                     let result = serde_json::to_vec(&envelope)
                         .map_err(|error| error.to_string())
@@ -1059,6 +1055,7 @@ where
     fn publish(&mut self, state: VirtioMemState, refusal: Option<MemoryResult>) {
         let published = SystemUnixClock.now_unix_millis().and_then(|now| {
             self.guest.publish_status(&HostMemoryStatus {
+                schema: HostStatusSchema,
                 version: MEMORY_REQUEST_VERSION,
                 vm_name: self.config.vm_name.clone(),
                 service_name: self.config.raw_telemetry_service_name.clone(),
@@ -1069,10 +1066,7 @@ where
                 requested_bytes: state.requested_bytes,
                 current_bytes: state.current_bytes,
                 result: refusal.or_else(|| self.control.journal.result.clone()),
-                guest_settings: self
-                    .config
-                    .guest_settings
-                    .filter(|_| rampire_core::sends_guest_settings_to(self.guest_version)),
+                guest_settings: self.config.guest_settings,
             })
         });
         match published {
@@ -1294,8 +1288,6 @@ mod tests {
         /// Report Windows' total as fixed RAM plus this device's current
         /// allocation, as a real guest does; otherwise a fixed 8 GiB.
         device: Option<Device>,
-        /// Publish this record version instead of the current one.
-        version: Option<u16>,
         /// Publish nothing, as a guest still waiting for its settings.
         silent: bool,
     }
@@ -1351,9 +1343,6 @@ mod tests {
             );
             envelope.request = self.0.borrow().request.clone();
             envelope.native_pressure = self.0.borrow().native;
-            if let Some(version) = self.0.borrow().version {
-                envelope.version = version;
-            }
             if let Some(device) = &self.0.borrow().device {
                 envelope.memory.physical_total_bytes = device.live().current_bytes;
             }
@@ -1515,7 +1504,7 @@ mod tests {
     }
 
     #[test]
-    fn guest_settings_reach_only_guests_that_can_read_them() {
+    fn guest_settings_reach_every_guest() {
         let settings = rampire_core::settings::GlobalSettings::default().guest_policy(GIB, 8 * GIB);
         let published = rampire_core::GuestSettings {
             policy: settings,
@@ -1523,24 +1512,21 @@ mod tests {
             max_ram: 16 * GIB,
             poll_interval_millis: 5000,
         };
-        let sent = |silent: bool, version: Option<u16>| {
+        let sent = |silent: bool| {
             let mut fixture = Fixture::new("guest-settings", 100, 4 * GIB);
             fixture.config.guest_settings = Some(published);
             {
                 let mut guest = fixture.guest.0.borrow_mut();
                 guest.silent = silent;
-                guest.version = version;
             }
             let mut runtime = runtime(vec![fixture.controller(None)], 64 * GIB, None);
             round(&mut runtime);
             let statuses = &fixture.guest.0.borrow().statuses;
             statuses.last().expect("a status").guest_settings
         };
-        // A guest still waiting for its settings, and a current one, get them.
-        assert_eq!(sent(true, None), Some(published));
-        assert_eq!(sent(false, None), Some(published));
-        // A guest built before settings were published would reject them.
-        assert_eq!(sent(false, Some(5)), None);
+        // A guest still waiting for its settings, and one publishing, get them.
+        assert_eq!(sent(true), Some(published));
+        assert_eq!(sent(false), Some(published));
     }
 
     #[test]

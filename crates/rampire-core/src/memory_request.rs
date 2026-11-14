@@ -7,7 +7,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::VirtioMemState;
 
+/// The version of a memory request and of the host status that answers it.
 pub const MEMORY_REQUEST_VERSION: u16 = 1;
+
+crate::schema_name! {
+    /// The `schema` of the host status the controller publishes to a guest.
+    pub struct HostStatusSchema = "rampire.host-status";
+}
 /// Admission freshness. Execution/result resolution may outlive this interval.
 pub const MAX_REQUEST_LIFETIME_MILLIS: u64 = 60_000;
 /// Bounds a host status read; a status with its result is a few kilobytes.
@@ -238,6 +244,7 @@ impl GuestSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HostMemoryStatus {
+    pub schema: HostStatusSchema,
     pub version: u16,
     pub vm_name: String,
     pub service_name: String,

@@ -6,7 +6,12 @@ use thiserror::Error;
 use crate::memory_request::{MemoryRequest, MemoryResult};
 use crate::VirtioMemState;
 
-pub const CONTROLLER_STATUS_VERSION: u16 = 5;
+pub const CONTROLLER_STATUS_VERSION: u16 = 1;
+
+crate::schema_name! {
+    /// The `schema` of the controller's status for one VM.
+    pub struct StatusSchema = "rampire.status";
+}
 pub const MAX_CONTROLLER_STATUS_BYTES: usize = 64 * 1024;
 const MAX_IDENTITY_BYTES: usize = 256;
 const MAX_REASON_BYTES: usize = 1024;
@@ -75,6 +80,7 @@ pub struct GuestInputStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ControllerStatusSnapshot {
+    pub schema: StatusSchema,
     pub version: u16,
     pub observed_unix_millis: u64,
     pub vm_name: String,
@@ -267,6 +273,7 @@ mod tests {
 
     fn status() -> ControllerStatusSnapshot {
         ControllerStatusSnapshot {
+            schema: StatusSchema,
             version: CONTROLLER_STATUS_VERSION,
             observed_unix_millis: 1,
             vm_name: "guest".to_owned(),

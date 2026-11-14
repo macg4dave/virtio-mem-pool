@@ -1287,7 +1287,7 @@ function Assert-LegacySetting($old,$new,[string]$name) {{
 if(Test-Path $config) {{
   $oldConfig=Get-Content -LiteralPath $config -Raw | ConvertFrom-Json
   $newConfig=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{config_base64}')) | ConvertFrom-Json
-  if($oldConfig.schema_version -ne $newConfig.schema_version) {{
+  if($oldConfig.version -ne $newConfig.version) {{
     foreach($field in @('service_name','service_account','shutdown_timeout_millis')) {{
       Assert-LegacySetting $oldConfig.$field $newConfig.$field $field
     }}
@@ -1653,7 +1653,7 @@ mod tests {
             .expect("distinct paths");
         let script = deployment_powershell(&vm, "candidate.exe", "e30=");
         assert!(script.contains(CONTROL_PATH));
-        assert!(script.contains("Set-RampirePortAccess -PortName 'org.virtio-mem.control.0'"));
+        assert!(script.contains("Set-RampirePortAccess -PortName 'org.rampire.control.0'"));
         assert!(script.contains("deployment-backups"));
         assert!(script.contains("Assert-LegacySetting"));
     }

@@ -18,7 +18,12 @@ use crate::virsh::VirshCommand;
 /// Version 2 names the reviewed guest operating system and drops the
 /// development-only trust flag of version 1; a version 1 attestation must be
 /// made again from an updated review.
-pub const COMPATIBILITY_ATTESTATION_VERSION: u32 = 2;
+pub const COMPATIBILITY_ATTESTATION_VERSION: u32 = 1;
+
+rampire_core::schema_name! {
+    /// The `schema` of a VM's compatibility attestation.
+    pub struct AttestationSchema = "rampire.attestation";
+}
 const MAX_ATTESTATION_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -136,6 +141,7 @@ impl LiveCompatibilityEvidence {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CompatibilityAttestation {
+    pub schema: AttestationSchema,
     pub version: u32,
     pub evidence: LiveCompatibilityEvidence,
     pub review: CompatibilityReview,
@@ -150,6 +156,7 @@ impl CompatibilityAttestation {
         evidence.validate()?;
         review.validate()?;
         let mut document = Self {
+            schema: AttestationSchema,
             version: COMPATIBILITY_ATTESTATION_VERSION,
             evidence,
             review,
@@ -959,7 +966,7 @@ mod tests {
 
     #[test]
     fn channel_connection_status_is_runtime_but_binding_is_attested() {
-        let xml = "<domain><devices><channel type='unix'><source path='/wake'/><target type='virtio' name='org.virtio-mem.wake.0' state='connected'/><address port='2'/></channel></devices></domain>";
+        let xml = "<domain><devices><channel type='unix'><source path='/wake'/><target type='virtio' name='org.rampire.wake.0' state='connected'/><address port='2'/></channel></devices></domain>";
         assert_eq!(
             scrub_runtime_identity(xml),
             scrub_runtime_identity(&xml.replace("connected", "disconnected"))
@@ -1104,7 +1111,7 @@ mod tests {
     fn generated_interface_and_channel_names_do_not_change_domain_fingerprint() {
         let started = |id: u32, tap: &str| {
             format!(
-                "<domain id='{id}'><devices><interface type='bridge'><mac address='52:54:00:a6:60:01'/><source bridge='br0'/><target dev='{tap}'/></interface><channel type='unix'><source mode='bind' path='/run/libvirt/qemu/channel/{id}-vm/org.virtio-mem.control.0'/><target type='virtio' name='org.virtio-mem.control.0'/></channel></devices></domain>"
+                "<domain id='{id}'><devices><interface type='bridge'><mac address='52:54:00:a6:60:01'/><source bridge='br0'/><target dev='{tap}'/></interface><channel type='unix'><source mode='bind' path='/run/libvirt/qemu/channel/{id}-vm/org.rampire.control.0'/><target type='virtio' name='org.rampire.control.0'/></channel></devices></domain>"
             )
         };
         assert_eq!(

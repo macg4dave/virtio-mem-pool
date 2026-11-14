@@ -151,7 +151,7 @@ Homepage: {HOMEPAGE}
 Description: RAMpire guest memory requests
  Asks the KVM host's RAMpire controller for memory when the guest
  needs more and returns it when the guest has spare. Talks to the host
- over the virtio-serial port org.virtio-mem.control.0, or through control
+ over the virtio-serial port org.rampire.control.0, or through control
  files the QEMU guest agent carries when the VM has no such port.
 "
     )

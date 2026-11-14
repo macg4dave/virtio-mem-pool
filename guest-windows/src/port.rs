@@ -1,5 +1,5 @@
 //! The control channel on Windows: the virtio-serial port
-//! `org.virtio-mem.control.0`, opened for overlapped I/O and presented as a
+//! `org.rampire.control.0`, opened for overlapped I/O and presented as a
 //! non-blocking stream for the shared transport. A read that cannot finish
 //! now reports `WouldBlock` and stays queued; a write waits at most a moment
 //! for the host and otherwise reports `WouldBlock`, so the newest record is

@@ -15,7 +15,7 @@ the request within the pool, the VM's limits and the host's own reserve,
 resizes the VM's virtio-mem device and reports the result.
 
 Guest and host talk over a dedicated virtio-serial port,
-`org.virtio-mem.control.0` (the control channel). A VM without the port is
+`org.rampire.control.0` (the control channel). A VM without the port is
 served through control files that the controller reads and writes with the
 QEMU guest agent.
 
@@ -183,7 +183,7 @@ VM's settings needs only a controller install, never a guest change.
 
    ```xml
    <channel type='unix'>
-     <target type='virtio' name='org.virtio-mem.control.0'/>
+     <target type='virtio' name='org.rampire.control.0'/>
      <alias name='ua-virtiomem-control'/>
    </channel>
    ```
@@ -335,7 +335,7 @@ LocalService). Its install configuration is
 the host as for Linux. Deploy it with `make windows-deploy` from a checkout
 whose `site/windows-build.mk` names the VM. Deployment gives LocalService
 access to the control channel's device instance
-(`\\.\Global\org.virtio-mem.control.0`) and checks that the service stays
+(`\\.\Global\org.rampire.control.0`) and checks that the service stays
 running. Without the port the service uses the control files through the
 guest agent.
 
