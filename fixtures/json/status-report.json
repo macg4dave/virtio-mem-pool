@@ -1,0 +1,35 @@
+{
+  "schema": "rampire.status-report",
+  "version": 1,
+  "vms": [
+    {
+      "schema": "rampire.status",
+      "version": 1,
+      "observed_unix_millis": 1794600000000,
+      "vm_name": "web",
+      "device_alias": "ua-virtiomem0",
+      "device_size_bytes": 16106127360,
+      "block_size_bytes": 2097152,
+      "maximum_target_bytes": 16106127360,
+      "requested_bytes": 1073741824,
+      "current_bytes": 1073741824,
+      "observe_only": false,
+      "guest_input": {
+        "error": null,
+        "observed_unix_millis": 1794599999500,
+        "request": null
+      },
+      "admitted_request": null,
+      "result": null,
+      "command_ownership": "none",
+      "command": null,
+      "control_health": "converged",
+      "actuation_latched": false,
+      "latch_reason": null,
+      "recovery_state": "not_required",
+      "recovery_reason": null,
+      "last_latch_clear_reason": null,
+      "compatibility_fingerprint_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  ]
+}

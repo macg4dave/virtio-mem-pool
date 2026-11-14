@@ -1,0 +1,15 @@
+{
+  "schema": "rampire.check",
+  "version": 1,
+  "passed": false,
+  "vms": [
+    {
+      "vm_name": "web",
+      "problem": null
+    },
+    {
+      "vm_name": "db",
+      "problem": "live compatibility: drifted: domain_xml_sha256"
+    }
+  ]
+}

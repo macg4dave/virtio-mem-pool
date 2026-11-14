@@ -1,0 +1,19 @@
+{
+  "schema": "rampire.doctor",
+  "version": 1,
+  "passed": false,
+  "findings": [
+    {
+      "check": "QEMU",
+      "ok": true,
+      "detail": "10.1.0",
+      "fix": null
+    },
+    {
+      "check": "service account",
+      "ok": false,
+      "detail": "there is no user rampire",
+      "fix": "useradd --system --no-create-home --shell /sbin/nologin rampire"
+    }
+  ]
+}

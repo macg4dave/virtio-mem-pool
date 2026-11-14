@@ -431,8 +431,8 @@ folder. Not yet tried end to end on a VM with no device.
 
 ### O4 — Fleets
 
-- [ ] **O4.1** Document every `--json` schema with a version, and test
-  each one against fixtures.
+- [x] **O4.1** Document every `--json` schema with a version, and test
+  each one against fixtures. Done: [json](json.md), `fixtures/json`.
 - [ ] **O4.2** Metrics as a Prometheus textfile
   (`/run/rampire/metrics.prom`), so there's no listening socket and the
   sandbox doesn't change.

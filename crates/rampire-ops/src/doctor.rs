@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::process;
 
@@ -24,7 +24,8 @@ const UNIT_PATHS: [&str; 2] = [
 pub type Version = (u32, u32, u32);
 
 /// One thing `doctor` checked.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Finding {
     pub check: String,
     pub ok: bool,

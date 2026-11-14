@@ -12,6 +12,7 @@ pub mod evidence;
 pub mod init;
 pub mod pool;
 pub mod process;
+pub mod reports;
 pub mod set;
 pub mod units;
 pub mod vm;

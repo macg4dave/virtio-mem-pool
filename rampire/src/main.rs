@@ -36,52 +36,10 @@ mod exit {
     pub const CHANGED: u8 = 2;
 }
 
-rampire_core::schema_name! {
-    /// `rampire status --json`.
-    struct StatusReportSchema = "rampire.status-report";
-}
-
-rampire_core::schema_name! {
-    /// `rampire check --json`.
-    struct CheckSchema = "rampire.check";
-}
-
-rampire_core::schema_name! {
-    /// `rampire doctor --json`.
-    struct DoctorSchema = "rampire.doctor";
-}
-
-/// `rampire doctor --json`.
-#[derive(Debug, Serialize)]
-struct DoctorReport {
-    schema: DoctorSchema,
-    version: u16,
-    passed: bool,
-    findings: Vec<rampire_ops::doctor::Finding>,
-}
-
-/// `rampire status --json`: every VM's controller status.
-#[derive(Debug, Serialize)]
-struct StatusReport {
-    schema: StatusReportSchema,
-    version: u16,
-    vms: Vec<ControllerStatusSnapshot>,
-}
-
-/// `rampire check --json`.
-#[derive(Debug, Serialize)]
-struct CheckReport {
-    schema: CheckSchema,
-    version: u16,
-    passed: bool,
-    vms: Vec<CheckedVm>,
-}
-
-#[derive(Debug, Serialize)]
-struct CheckedVm {
-    vm_name: String,
-    problem: Option<String>,
-}
+use rampire_ops::reports::{
+    CheckReport, CheckSchema, CheckedVm, DoctorReport, DoctorSchema, StatusReport,
+    StatusReportSchema,
+};
 
 /// The draft people and tools edit.
 const DRAFT: &str = "/etc/rampire";
