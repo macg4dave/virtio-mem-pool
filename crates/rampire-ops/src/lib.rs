@@ -6,6 +6,7 @@
 pub mod applied;
 pub mod check;
 pub mod dashboard;
+pub mod evidence;
 pub mod pool;
 pub mod process;
 pub mod units;

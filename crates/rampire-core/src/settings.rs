@@ -124,6 +124,9 @@ pub struct GlobalSettings {
     pub convergence_timeout_seconds: u64,
     /// The libvirt connection the controller manages its VMs through.
     pub libvirt_uri: String,
+    /// How many applied copies, and records of what each apply did, are
+    /// kept. At least 2, so there is always a copy to roll back to.
+    pub retention: u32,
 }
 
 impl Default for GlobalSettings {
@@ -136,6 +139,7 @@ impl Default for GlobalSettings {
             command_timeout_seconds: 10,
             convergence_timeout_seconds: 300,
             libvirt_uri: "qemu:///system".to_owned(),
+            retention: 10,
         }
     }
 }
@@ -166,6 +170,9 @@ impl GlobalSettings {
             || !self.libvirt_uri.contains(":/")
         {
             return Err("libvirt_uri must be a libvirt connection URI".to_owned());
+        }
+        if !(2..=1000).contains(&self.retention) {
+            return Err("retention must be 2..=1000".to_owned());
         }
         Ok(())
     }

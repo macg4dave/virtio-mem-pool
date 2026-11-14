@@ -279,9 +279,11 @@ version.
   Done. Each applied copy holds `global.toml`, the VM files, their
   attestations and the review profiles they name; attestations still come
   from the draft's `attestations/` until O3 makes them.
-- [ ] **O1.5** Evidence: each apply records what it did under
+- [x] **O1.5** Evidence: each apply records what it did under
   `/var/lib/rampire/evidence/`. A retention count, a setting with a
-  documented default, prunes old evidence and old applied copies (X18).
+  documented default, prunes old evidence and old applied copies (X18). Done:
+  `retention` (default 10, at least 2) never removes the current copy or
+  the one before it. `host-deploy`'s deployment backups go when it does.
 - [ ] **O1.6** `set VM KEY=VALUE ...` and `set global KEY=VALUE ...`
   change a setting in the draft with the file's comments kept, then
   `apply`.

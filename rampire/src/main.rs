@@ -547,9 +547,20 @@ fn stage_and_apply(cli: &Cli, root: &Path, staged: &Path) -> Result<bool, String
         return Ok(false);
     }
     secure(staged)?;
-    let applied = rampire_ops::applied::install(root, staged, process::unix_millis()?)?;
+    let millis = process::unix_millis()?;
+    let applied = rampire_ops::applied::install(root, staged, millis)?;
     println!("applied {}", applied.display());
-    restart_if_running(&unit)?;
+    let restarted = restart_if_running(&unit)?;
+    keep_evidence(Change {
+        action: "apply",
+        unix_millis: millis,
+        draft: Some(&cli.config),
+        from: current.as_deref(),
+        to: &applied,
+        report: &report,
+        unit: &unit,
+        restarted,
+    })?;
     Ok(true)
 }
 
@@ -584,8 +595,64 @@ fn rollback(cli: &Cli) -> Result<ExitCode, String> {
     }
     rampire_ops::applied::make_current(root, &previous)?;
     println!("rolled back to {}", previous.display());
-    restart_if_running(&unit)?;
+    let restarted = restart_if_running(&unit)?;
+    keep_evidence(Change {
+        action: "rollback",
+        unix_millis: process::unix_millis()?,
+        draft: None,
+        from: Some(&current),
+        to: &previous,
+        report: &report,
+        unit: &unit,
+        restarted,
+    })?;
     Ok(ExitCode::SUCCESS)
+}
+
+/// One change to the applied configuration, for its record.
+struct Change<'a> {
+    action: &'a str,
+    unix_millis: u64,
+    draft: Option<&'a Path>,
+    from: Option<&'a Path>,
+    to: &'a Path,
+    report: &'a rampire_ops::check::Report,
+    unit: &'a str,
+    restarted: bool,
+}
+
+/// Record what the change did, then prune applied copies and records to
+/// the `retention` of the copy now current.
+fn keep_evidence(change: Change) -> Result<(), String> {
+    use rampire_ops::evidence::{self, ApplyEvidence, ApplyEvidenceSchema};
+    let evidence_root = Path::new(evidence::EVIDENCE_ROOT);
+    let record = evidence::record(
+        evidence_root,
+        &ApplyEvidence {
+            schema: ApplyEvidenceSchema,
+            version: 1,
+            action: change.action.to_owned(),
+            unix_millis: change.unix_millis,
+            build: version(),
+            draft: change.draft.map(|path| path.display().to_string()),
+            from: change.from.map(|path| path.display().to_string()),
+            to: change.to.display().to_string(),
+            files: evidence::digests(change.to)?,
+            checked_vms: change
+                .report
+                .vms
+                .iter()
+                .map(|vm| vm.vm_name.clone())
+                .collect(),
+            unit: change.unit.to_owned(),
+            restarted: change.restarted,
+        },
+    )?;
+    println!("recorded {}", record.display());
+    let keep = rampire_core::settings::load_globals(change.to)?.retention as usize;
+    rampire_ops::applied::prune(applied_root(), keep)?;
+    evidence::prune(evidence_root, keep)?;
+    Ok(())
 }
 
 /// The controller reads the copy as the service account; nobody else does.
@@ -604,8 +671,9 @@ fn secure(copy: &Path) -> Result<(), String> {
 }
 
 /// Restart a running controller on the new copy. One that isn't running is
-/// left alone: it starts on the new copy whenever it starts.
-fn restart_if_running(unit: &str) -> Result<(), String> {
+/// left alone: it starts on the new copy whenever it starts. Returns
+/// whether it restarted.
+fn restart_if_running(unit: &str) -> Result<bool, String> {
     let active = process::bounded_text(
         "systemctl",
         &[process::os("is-active"), process::os(unit)],
@@ -619,7 +687,7 @@ fn restart_if_running(unit: &str) -> Result<(), String> {
     } else {
         println!("{unit} is not running; it will use the new copy when it starts");
     }
-    Ok(())
+    Ok(active)
 }
 
 fn controller_unit() -> String {

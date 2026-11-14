@@ -9,6 +9,7 @@ description = "RAMpire operator views: the pool and a VM's live state"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sha2 = "0.10"
 signal-hook = "0.3"
 wait-timeout = "0.2"
 rampire-core = { path = "../rampire-core" }

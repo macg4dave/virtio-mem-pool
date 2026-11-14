@@ -37,3 +37,6 @@ command_timeout_seconds = 10
 convergence_timeout_seconds = 300
 # The libvirt connection that runs the VMs.
 libvirt_uri = "qemu:///system"
+# How many applied copies of these settings, and records of what each
+# apply did, are kept under /var/lib/rampire. At least 2.
+retention = 10

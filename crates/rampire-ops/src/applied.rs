@@ -91,7 +91,7 @@ pub fn same(a: &Path, b: &Path) -> Result<bool, String> {
 }
 
 /// Every regular file below `root`, relative to it, sorted.
-fn files_below(root: &Path) -> Result<Vec<PathBuf>, String> {
+pub(crate) fn files_below(root: &Path) -> Result<Vec<PathBuf>, String> {
     let mut found = Vec::new();
     let mut pending = vec![PathBuf::new()];
     while let Some(relative) = pending.pop() {
@@ -147,6 +147,39 @@ pub fn copies(root: &Path) -> Result<Vec<PathBuf>, String> {
 /// name order is time order.
 fn is_copy_name(name: &str) -> bool {
     name.len() == 16 && name.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+/// Remove the oldest applied copies until at most `keep` remain, never the
+/// current copy or the one before it, which `rollback` returns to. Returns
+/// what was removed.
+pub fn prune(root: &Path, keep: usize) -> Result<Vec<PathBuf>, String> {
+    let copies = copies(root)?;
+    let current = current(root)?;
+    let mut protected = Vec::new();
+    if let Some(index) = copies
+        .iter()
+        .position(|copy| Some(copy) == current.as_ref())
+    {
+        protected.push(copies[index].clone());
+        if let Some(previous) = index.checked_sub(1) {
+            protected.push(copies[previous].clone());
+        }
+    }
+    let mut remaining = copies.len();
+    let mut removed = Vec::new();
+    for copy in copies {
+        if remaining <= keep {
+            break;
+        }
+        if protected.contains(&copy) {
+            continue;
+        }
+        std::fs::remove_dir_all(&copy)
+            .map_err(|error| format!("remove {}: {error}", copy.display()))?;
+        remaining -= 1;
+        removed.push(copy);
+    }
+    Ok(removed)
 }
 
 /// A new, empty place to stage a copy in, inside `root`.
@@ -316,10 +349,19 @@ mod tests {
         let second = install(&applied, &second, 1_000).unwrap();
         assert_ne!(first, second);
         assert_eq!(copies(&applied).unwrap(), [first.clone(), second.clone()]);
-        assert_eq!(current(&applied).unwrap(), Some(second));
+        assert_eq!(current(&applied).unwrap(), Some(second.clone()));
 
         make_current(&applied, &first).unwrap();
-        assert_eq!(current(&applied).unwrap(), Some(first));
+        assert_eq!(current(&applied).unwrap(), Some(first.clone()));
+
+        // A third copy, then back to the first: pruning to one keeps the
+        // current copy, and nothing older than it is left to protect.
+        let third = staging(&applied).unwrap();
+        snapshot(&draft, &third).unwrap();
+        let third = install(&applied, &third, 2_000).unwrap();
+        make_current(&applied, &second).unwrap();
+        assert_eq!(prune(&applied, 1).unwrap(), [third]);
+        assert_eq!(copies(&applied).unwrap(), [first, second]);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

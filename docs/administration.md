@@ -31,6 +31,7 @@ Run one controller per host: separate controllers cannot share a pool.
 | Configuration (the draft) | `/etc/rampire/` (`global.toml`, `vms.d/<vm_name>.toml`, `reviews/`) |
 | Attestations | `/etc/rampire/attestations/<vm_name>.attestation.json`, apart from the settings |
 | Applied copies | `/var/lib/rampire/applied/<id>/`, with `current` naming the one the controller runs |
+| What each apply did | `/var/lib/rampire/evidence/<id>-apply.json` (and `-rollback.json`): the build, the copies switched between, every file's SHA-256, the VMs checked, whether the controller restarted |
 | Durable request state | `/var/lib/rampire/state/<vm_name>-requests.json` (the unit's `StateDirectory`) |
 | Guest publications for tools | `/run/rampire/<vm_name>.publication.json` |
 | Deployment backups | `/var/lib/rampire/deployment-backups/` |
@@ -98,7 +99,9 @@ it keep the copy under `/var/lib/rampire/applied/`, point `current` at it
 and restart the controller. A draft that fails changes nothing.
 `--detailed-exitcode` exits 0 when nothing changed, 2 when something
 changed and 1 on failure. `rollback` returns to the copy before the
-current one, through the same checks.
+current one, through the same checks. Each change is recorded under `/var/lib/rampire/evidence/`; the
+`retention` setting decides how many copies and records are kept, never
+removing the current copy or the one before it.
 
 The daemon resolves `current` once when it starts, so an apply never
 changes the files under a running controller.
@@ -128,6 +131,7 @@ accepted.
 | `command_timeout_seconds` | `10` | Limit on each `virsh` command |
 | `convergence_timeout_seconds` | `300` | How long a Windows removal may stop moving before it is settled at what the guest returned, and the deadline for each settle command. Linux removals use their own built-in time (below) |
 | `libvirt_uri` | `qemu:///system` | The libvirt connection that owns the VMs |
+| `retention` | `10` | Applied copies, and records of what each apply did, kept under `/var/lib/rampire`. At least 2, so there is always a copy to roll back to |
 
 A Linux removal that stops moving is settled after 380 s without
 movement, not after `convergence_timeout_seconds`. The guest driver

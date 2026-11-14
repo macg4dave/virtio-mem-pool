@@ -707,6 +707,7 @@ dependencies = [
  "rampire-host",
  "serde",
  "serde_json",
+ "sha2",
  "signal-hook",
  "wait-timeout",
 ]
