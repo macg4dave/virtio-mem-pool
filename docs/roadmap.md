@@ -443,12 +443,19 @@ folder. Not yet tried end to end on a VM with no device.
 - [x] **O4.4** An example Ansible role (`rampire check`, then
   `rampire apply --yes --detailed-exitcode`) and a cloud-init snippet for
   guests.
-- [ ] **O4.5** `systemctl reload rampire`: priority, limit and pool
+- [x] **O4.5** `systemctl reload rampire`: priority, limit and pool
   changes take effect without a restart. Adding or removing a VM may
   still restart.
 
 Exit: a host's configuration kept in git and applied by the example role
 reports "changed" only when something changed.
+
+Status, 2026-11-14: O4.1 to O4.5 are built. A reload was tried live on
+pc101 (`rampire set safe_vm priority=110` reloaded the controller under the
+same PID). The role passes Ansible's syntax check and reports "changed"
+from `apply --detailed-exitcode`'s exit code 2, but it hasn't been run
+against a host: there is no package repository to install from yet
+(O2.7).
 
 ### O5 — Documentation
 
