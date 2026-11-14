@@ -251,14 +251,14 @@ fn require_root() -> Result<(), String> {
 fn load_scenario(path: &Path) -> Result<Scenario, String> {
     let scenario: Scenario = toml::from_str(&process::read_file(path)?)
         .map_err(|error| format!("{}: {error}", path.display()))?;
-    if scenario.boot_mib < 512 || scenario.boot_mib % 128 != 0 {
+    if scenario.boot_mib < 512 || !scenario.boot_mib.is_multiple_of(128) {
         return Err("boot_mib must be a multiple of 128, at least 512".to_owned());
     }
     for (field, value) in [
         ("device_mib", scenario.device_mib),
         ("hotplug_mib", scenario.hotplug_mib),
     ] {
-        if value % 128 != 0 {
+        if !value.is_multiple_of(128) {
             return Err(format!("{field} must be a multiple of 128"));
         }
     }
@@ -422,7 +422,11 @@ fn serial_log(name: &str) -> PathBuf {
 
 fn describe(plan: &Plan<'_>) {
     let scenario = &plan.scenario;
-    println!("test VM {} from {}", plan.name, plan.scenario_path.display());
+    println!(
+        "test VM {} from {}",
+        plan.name,
+        plan.scenario_path.display()
+    );
     println!("  image:   {} ({})", scenario.image, plan.image.display());
     println!(
         "  disk:    {} ({} GiB overlay)",
@@ -529,9 +533,7 @@ fn image_path(image: &str, images: &Path) -> Result<PathBuf, String> {
         let file = rest
             .rsplit('/')
             .next()
-            .filter(|file| {
-                !file.is_empty() && !file.starts_with('.') && !file.contains(['?', '#'])
-            })
+            .filter(|file| !file.is_empty() && !file.starts_with('.') && !file.contains(['?', '#']))
             .ok_or_else(|| format!("no file name in {image}"))?;
         Ok(images.join("testvm-cache").join(file))
     } else if image.contains("://") {
@@ -602,7 +604,13 @@ fn mem_available_mib() -> Result<u64, String> {
     meminfo
         .lines()
         .find_map(|line| line.strip_prefix("MemAvailable:"))
-        .and_then(|rest| rest.trim().trim_end_matches("kB").trim().parse::<u64>().ok())
+        .and_then(|rest| {
+            rest.trim()
+                .trim_end_matches("kB")
+                .trim()
+                .parse::<u64>()
+                .ok()
+        })
         .map(|kib| kib / 1024)
         .ok_or_else(|| "no MemAvailable in /proc/meminfo".to_owned())
 }
@@ -929,7 +937,11 @@ fn down(name: &str, apply: bool, repo: &Path) -> Result<(), String> {
         .exists();
     println!(
         "remove test VM {name}: {}the domain, {}, {}",
-        if managed { "RAMpire's management, " } else { "" },
+        if managed {
+            "RAMpire's management, "
+        } else {
+            ""
+        },
         paths.disk.display(),
         paths.seed.display()
     );
@@ -1069,7 +1081,9 @@ mod tests {
         let serial = Path::new("/var/log/t.log");
         let plain = domain_xml("t", &scenario(0, 0), &paths(), serial, "br0");
         assert!(
-            !plain.contains("maxMemory") && !plain.contains("numa") && !plain.contains("virtio-mem")
+            !plain.contains("maxMemory")
+                && !plain.contains("numa")
+                && !plain.contains("virtio-mem")
         );
         let room = domain_xml("t", &scenario(0, 2048), &paths(), serial, "br0");
         assert!(room.contains("<maxMemory slots='1' unit='MiB'>3072</maxMemory>"));
@@ -1110,7 +1124,10 @@ mod tests {
         let mut loaded = 0;
         for entry in std::fs::read_dir(&folder).expect("tools/testvm") {
             let path = entry.expect("entry").path();
-            if path.extension().is_some_and(|extension| extension == "toml") {
+            if path
+                .extension()
+                .is_some_and(|extension| extension == "toml")
+            {
                 load_scenario(&path).unwrap_or_else(|error| panic!("{error}"));
                 loaded += 1;
             }
