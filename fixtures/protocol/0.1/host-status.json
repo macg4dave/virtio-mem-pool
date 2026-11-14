@@ -1,0 +1,34 @@
+{
+  "schema": "rampire.host-status",
+  "version": 1,
+  "vm_name": "guest",
+  "service_name": "rampire-guest",
+  "device_alias": "memory0",
+  "observed_unix_millis": 1000500,
+  "device_size_bytes": 8589934592,
+  "block_size_bytes": 2097152,
+  "requested_bytes": 1073741824,
+  "current_bytes": 1073741824,
+  "result": null,
+  "guest_settings": {
+    "policy": {
+      "target": {
+        "configured_minimum_bytes": 0,
+        "physical_reserve_bytes": 536870912,
+        "commit_reserve_bytes": 536870912,
+        "safe_floor_physical_reserve_bytes": 268435456,
+        "safe_floor_commit_reserve_bytes": 268435456,
+        "history_window_millis": 1000,
+        "maximum_gap_millis": 15000,
+        "downward_hysteresis_bytes": 67108864
+      },
+      "grow_step_bytes": 268435456,
+      "shrink_step_bytes": 8589934592,
+      "host_status_max_age_millis": 30000,
+      "request_lifetime_millis": 30000
+    },
+    "min_ram": 1073741824,
+    "max_ram": 9663676416,
+    "poll_interval_millis": 5000
+  }
+}

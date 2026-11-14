@@ -1,0 +1,34 @@
+{
+  "schema": "rampire.publication",
+  "version": 1,
+  "vm_name": "guest",
+  "service_name": "rampire-guest",
+  "session_id": "session-a",
+  "observed_unix_millis": 1000000,
+  "monotonic_millis": 10,
+  "sequence": 3,
+  "memory": {
+    "physical_total_bytes": 4294967296,
+    "physical_available_bytes": 1073741824,
+    "memory_load_percent": 75,
+    "commit_total_bytes": 3221225472,
+    "commit_limit_bytes": 8589934592,
+    "commit_peak_bytes": 3221225472,
+    "system_cache_bytes": 536870912,
+    "kernel_paged_bytes": 0,
+    "kernel_nonpaged_bytes": 0
+  },
+  "request": {
+    "version": 1,
+    "identity": {
+      "vm_name": "guest",
+      "service_name": "rampire-guest",
+      "session_id": "session-a",
+      "sequence": 3
+    },
+    "operation": "add",
+    "bytes": 1073741824,
+    "issued_unix_millis": 999000,
+    "expires_unix_millis": 1029000
+  }
+}
