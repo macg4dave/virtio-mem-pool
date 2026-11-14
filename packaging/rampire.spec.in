@@ -1,0 +1,93 @@
+# The host and guest RPMs built from source, for COPR (roadmap O2.7).
+# packaging/srpm.sh fills in @VERSION@ and @BUILD_ID@ and builds the
+# source RPM. The files and scripts match the nfpm packages in
+# rampire.nfpm.yaml and rampire-guest.nfpm.yaml; CI compares the two.
+#
+# The build fetches the crates named in Cargo.lock (--locked), so the COPR
+# project needs network access during builds.
+
+%global debug_package %{nil}
+
+Name:           rampire
+Version:        @VERSION@
+Release:        1%{?dist}
+Summary:        Shares a pool of RAM between the VMs on a KVM host
+License:        GPL-3.0-or-later
+URL:            https://github.com/macg4dave/rampire
+Source0:        rampire-%{version}.tar.gz
+ExclusiveArch:  x86_64
+
+BuildRequires:  cargo
+BuildRequires:  rust
+BuildRequires:  gcc
+BuildRequires:  systemd-rpm-macros
+Requires:       libvirt-client
+Requires:       polkit
+Requires:       systemd
+
+%description
+RAMpire shares a pool of RAM between the VMs on a KVM host. Each guest
+asks for memory when it needs more and returns it when it has spare; the
+controller resizes the VM's virtio-mem device within the pool, the VM's
+limits and the host's own reserve.
+
+%package guest
+Summary:        The guest side of RAMpire
+Requires:       systemd >= 253
+
+%description guest
+The guest side of RAMpire: asks the KVM host's RAMpire controller for
+memory when the guest needs more and returns it when the guest has
+spare, over the virtio-serial port org.rampire.control.0 or through
+control files the QEMU guest agent carries.
+
+%prep
+%autosetup -n rampire-%{version}
+
+%build
+export RAMPIRE_BUILD_ID=@BUILD_ID@
+cargo build --release --locked -p rampire -p rampire-guest-linux
+sed 's#/usr/local/libexec/rampire-guest#/usr/libexec/rampire-guest#' \
+  guest-linux/systemd/rampire-guest.service > rampire-guest.service
+grep -q '^ExecStart=/usr/libexec/rampire-guest ' rampire-guest.service
+
+%install
+install -D -m 0755 target/release/rampire %{buildroot}/usr/bin/rampire
+install -D -m 0644 host/systemd/rampire.service %{buildroot}/usr/lib/systemd/system/rampire.service
+install -D -m 0644 host/systemd/50-rampire.rules %{buildroot}/usr/share/polkit-1/rules.d/50-rampire.rules
+install -D -m 0644 packaging/rampire.sysusers %{buildroot}/usr/lib/sysusers.d/rampire.conf
+install -d -m 0755 %{buildroot}/etc/rampire/vms.d %{buildroot}/etc/rampire/attestations
+install -D -m 0644 deploy/examples/reviews/linux-standard.toml %{buildroot}/etc/rampire/reviews/linux-standard.toml
+install -D -m 0644 deploy/examples/global.toml %{buildroot}/usr/share/doc/rampire/examples/global.toml
+install -D -m 0644 deploy/examples/vms.d/linux-vm.toml %{buildroot}/usr/share/doc/rampire/examples/vms.d/linux-vm.toml
+install -D -m 0644 LICENSE %{buildroot}/usr/share/doc/rampire/LICENSE
+install -D -m 0755 target/release/rampire-guest %{buildroot}/usr/libexec/rampire-guest
+install -D -m 0644 rampire-guest.service %{buildroot}/usr/lib/systemd/system/rampire-guest.service
+install -D -m 0755 tools/linux/watch-ram.sh %{buildroot}/usr/bin/rampire-watch-ram
+install -D -m 0644 LICENSE %{buildroot}/usr/share/doc/rampire-guest/LICENSE
+
+# The nfpm packages' scripts, unchanged: RPM passes the same arguments.
+%post -f packaging/scripts/host-postinstall.sh
+%preun -f packaging/scripts/host-preremove.sh
+%postun -f packaging/scripts/host-postremove.sh
+%post guest -f packaging/scripts/guest-postinstall.sh
+%preun guest -f packaging/scripts/guest-preremove.sh
+%postun guest -f packaging/scripts/guest-postremove.sh
+
+%files
+/usr/bin/rampire
+/usr/lib/systemd/system/rampire.service
+/usr/share/polkit-1/rules.d/50-rampire.rules
+/usr/lib/sysusers.d/rampire.conf
+%dir /etc/rampire
+%dir /etc/rampire/vms.d
+%dir /etc/rampire/attestations
+%dir /etc/rampire/reviews
+%config(noreplace) /etc/rampire/reviews/linux-standard.toml
+/usr/share/doc/rampire
+
+%files guest
+/usr/libexec/rampire-guest
+/usr/lib/systemd/system/rampire-guest.service
+/usr/bin/rampire-watch-ram
+/usr/share/doc/rampire-guest
