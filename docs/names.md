@@ -72,7 +72,7 @@ under `crates/` follow their crate names.
 | VM list and VM settings | `host_list.toml`, `NAME_settings.toml` | `vms.d/NAME.toml` (R4) |
 | Review | JSON review | `reviews/NAME.toml` (R5) |
 | Applied configuration | — | `/var/lib/rampire/applied/` (O1.4) |
-| Attestations | `/etc/virtio-mem-host/attestations/` | `/var/lib/rampire/attestations/` |
+| Attestations | `/etc/virtio-mem-host/attestations/` | `/etc/rampire/attestations/`, carried into every applied copy (O3 judgment call) |
 | Evidence | in the checkout | `/var/lib/rampire/evidence/` (O1.5) |
 | Durable state | `/var/lib/virtio-mem-host/state` | `/var/lib/rampire/state` |
 | Runtime directory | `/run/virtio-mem-host` | `/run/rampire`, mode 0750 (O1.8) |
