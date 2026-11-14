@@ -638,6 +638,7 @@ dependencies = [
  "rampire-core",
  "rampire-host",
  "rampire-ops",
+ "serde",
  "serde_json",
  "signal-hook",
 ]

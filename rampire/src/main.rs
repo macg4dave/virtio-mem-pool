@@ -9,19 +9,73 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use rampire_core::{ControlHealth, ControllerStatusSnapshot};
 use rampire_host::cli::Target;
 use rampire_host::config::HostSettings;
 use rampire_ops::process;
+use serde::Serialize;
 
 /// The account the controller runs as. Recovery writes the controller's
 /// state as this account, so the daemon can still write it afterwards.
 const SERVICE_ACCOUNT: &str = "rampire";
 /// The controller unit when systemd lists none, or several.
 const DEFAULT_UNIT: &str = "rampire.service";
+/// The build this binary came from, stamped by the build (`RAMPIRE_BUILD_ID`).
+const BUILD_ID: &str = match option_env!("RAMPIRE_BUILD_ID") {
+    Some(id) => id,
+    None => "unversioned",
+};
+
+/// Exit codes, the same for every command.
+mod exit {
+    /// Done, or nothing to report.
+    pub const SUCCESS: u8 = 0;
+    /// The command failed, or `check` found a problem.
+    pub const FAILURE: u8 = 1;
+    /// The command line was wrong (clap's own code).
+    pub const USAGE: u8 = 2;
+}
+
+rampire_core::schema_name! {
+    /// `rampire status --json`.
+    struct StatusReportSchema = "rampire.status-report";
+}
+
+rampire_core::schema_name! {
+    /// `rampire check --json`.
+    struct CheckSchema = "rampire.check";
+}
+
+/// `rampire status --json`: every VM's controller status.
+#[derive(Debug, Serialize)]
+struct StatusReport {
+    schema: StatusReportSchema,
+    version: u16,
+    vms: Vec<ControllerStatusSnapshot>,
+}
+
+/// `rampire check --json`.
+#[derive(Debug, Serialize)]
+struct CheckReport {
+    schema: CheckSchema,
+    version: u16,
+    passed: bool,
+    vms: Vec<CheckedVm>,
+}
+
+#[derive(Debug, Serialize)]
+struct CheckedVm {
+    vm_name: String,
+    problem: Option<String>,
+}
+
+fn version() -> String {
+    format!("{} (build {BUILD_ID})", env!("CARGO_PKG_VERSION"))
+}
 
 /// Share a pool of RAM between the VMs on a KVM host.
 #[derive(Debug, Parser)]
-#[command(name = "rampire", version, propagate_version = true)]
+#[command(name = "rampire", version = version(), propagate_version = true)]
 struct Cli {
     /// The configuration directory.
     #[arg(
@@ -38,6 +92,9 @@ struct Cli {
     /// Answer yes to every question, as a script does.
     #[arg(long, global = true)]
     yes: bool,
+    /// Write a versioned JSON document instead of text.
+    #[arg(long, global = true)]
+    json: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -122,15 +179,34 @@ struct View {
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
-    if let Command::Daemon = cli.command {
-        return daemon::run(&cli.config);
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error) => {
+            let code = if error.use_stderr() {
+                exit::USAGE
+            } else {
+                exit::SUCCESS
+            };
+            let _ = error.print();
+            return ExitCode::from(code);
+        }
+    };
+    match &cli.command {
+        // The unit runs the daemon as the service account, and recovery
+        // runs its own step as that account too.
+        Command::Daemon => return daemon::run(&cli.config),
+        Command::ClearLatch { .. } => {}
+        _ if process::effective_uid() != 0 => {
+            eprintln!("rampire: run this as root, for example with sudo");
+            return ExitCode::from(exit::FAILURE);
+        }
+        _ => {}
     }
     match run(&cli) {
         Ok(code) => code,
         Err(error) => {
             eprintln!("rampire: {error}");
-            ExitCode::FAILURE
+            ExitCode::from(exit::FAILURE)
         }
     }
 }
@@ -231,36 +307,112 @@ fn status(cli: &Cli, vm: Option<&str>) -> Result<ExitCode, String> {
             .map(|config| config.vm_name)
             .collect(),
     };
-    if names.is_empty() {
+    let mut vms = Vec::new();
+    for name in &names {
+        let mut bytes = Vec::new();
+        rampire_host::cli::status(&target(cli, Some(name))?, &mut bytes)?;
+        vms.push(
+            rampire_core::parse_controller_status(&bytes)
+                .map_err(|error| format!("status of {name}: {error}"))?,
+        );
+    }
+    if cli.json {
+        print_json(&StatusReport {
+            schema: StatusReportSchema,
+            version: 1,
+            vms,
+        })?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    if vms.is_empty() {
         println!(
             "RAMpire manages no VMs yet. Add one to {}.",
             cli.config
                 .join(rampire_core::settings::VMS_DIRECTORY)
                 .display()
         );
-        return Ok(ExitCode::SUCCESS);
     }
-    let mut documents = Vec::new();
-    for name in &names {
-        let mut bytes = Vec::new();
-        rampire_host::cli::status(&target(cli, Some(name))?, &mut bytes)?;
-        documents.push(
-            serde_json::from_slice::<serde_json::Value>(&bytes)
-                .map_err(|error| format!("status of {name}: {error}"))?,
-        );
+    for status in &vms {
+        println!("{}", status_line(status));
     }
-    let output = if vm.is_some() {
-        documents.remove(0)
-    } else {
-        serde_json::Value::Array(documents)
-    };
-    let text = serde_json::to_string_pretty(&output).map_err(|error| error.to_string())?;
-    println!("{text}");
     Ok(ExitCode::SUCCESS)
+}
+
+/// One VM's status in a line a person can read.
+fn status_line(status: &ControllerStatusSnapshot) -> String {
+    let state = if status.actuation_latched {
+        format!(
+            "latched: {}",
+            status
+                .latch_reason
+                .as_deref()
+                .unwrap_or("no reason recorded")
+        )
+    } else {
+        match status.control_health {
+            ControlHealth::Converged => "steady".to_owned(),
+            ControlHealth::Growing => "growing".to_owned(),
+            ControlHealth::Shrinking => "shrinking".to_owned(),
+            ControlHealth::RecoveryRequired => "needs recovery: see rampire recover".to_owned(),
+            ControlHealth::Latched => "latched".to_owned(),
+        }
+    };
+    let guest = match &status.guest_input.error {
+        Some(error) => format!("; guest: {error}"),
+        None => String::new(),
+    };
+    format!(
+        "{}: {} of at most {}, {state}{}{guest}",
+        status.vm_name,
+        size(status.current_bytes),
+        size(status.maximum_target_bytes),
+        if status.observe_only {
+            " (observe only)"
+        } else {
+            ""
+        },
+    )
+}
+
+fn size(bytes: u64) -> String {
+    const MIB: u64 = 1 << 20;
+    const GIB: u64 = 1 << 30;
+    if bytes >= GIB {
+        format!("{:.1} GiB", bytes as f64 / GIB as f64)
+    } else {
+        format!("{} MiB", bytes / MIB)
+    }
+}
+
+fn print_json<T: Serialize>(document: &T) -> Result<(), String> {
+    let text = serde_json::to_string_pretty(document).map_err(|error| error.to_string())?;
+    println!("{text}");
+    Ok(())
 }
 
 fn check(cli: &Cli) -> Result<ExitCode, String> {
     let report = rampire_ops::check::run(&cli.config)?;
+    let code = ExitCode::from(if report.passed() {
+        exit::SUCCESS
+    } else {
+        exit::FAILURE
+    });
+    if cli.json {
+        print_json(&CheckReport {
+            schema: CheckSchema,
+            version: 1,
+            passed: report.passed(),
+            vms: report
+                .vms
+                .into_iter()
+                .map(|vm| CheckedVm {
+                    vm_name: vm.vm_name,
+                    problem: vm.problem,
+                })
+                .collect(),
+        })?;
+        return Ok(code);
+    }
     if report.vms.is_empty() {
         println!("ok: the configuration is valid and manages no VMs");
     }
@@ -270,11 +422,7 @@ fn check(cli: &Cli) -> Result<ExitCode, String> {
             Some(problem) => println!("problem: {}: {problem}", vm.vm_name),
         }
     }
-    Ok(if report.passed() {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::FAILURE
-    })
+    Ok(code)
 }
 
 fn controller_unit() -> String {
@@ -402,6 +550,33 @@ mod tests {
         assert!(cli.yes);
         assert!(Cli::try_parse_from(["rampire", "recover", "web"]).is_err());
         assert!(Cli::try_parse_from(["rampire"]).is_err());
+    }
+
+    #[test]
+    fn json_documents_name_their_schema() {
+        let report = CheckReport {
+            schema: CheckSchema,
+            version: 1,
+            passed: true,
+            vms: vec![],
+        };
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.starts_with(r#"{"schema":"rampire.check","version":1,"#));
+        let cli = Cli::try_parse_from(["rampire", "status", "--json"]).unwrap();
+        assert!(cli.json);
+    }
+
+    #[test]
+    fn the_version_names_the_build() {
+        assert!(version().starts_with(env!("CARGO_PKG_VERSION")));
+        assert!(version().contains("(build "));
+    }
+
+    #[test]
+    fn sizes_read_as_a_person_would_write_them() {
+        assert_eq!(size(512 << 20), "512 MiB");
+        assert_eq!(size(3 << 30), "3.0 GiB");
+        assert_eq!(size((3 << 30) + (512 << 20)), "3.5 GiB");
     }
 
     #[test]

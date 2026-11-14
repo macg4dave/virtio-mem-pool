@@ -255,13 +255,17 @@ version.
   `recover` (which replaces `recover-latch.sh`). `diff` and `apply` come
   with O1.4, `doctor` with O1.9. Completions and man pages are generated
   from the same definition when the packages are built (O2).
-- [ ] **O1.3** The contract shared by every command (X6):
+- [x] **O1.3** The contract shared by every command (X6):
   - `--json`, `--yes`, and no prompts without a terminal;
   - documented exit codes, including `apply --detailed-exitcode`;
   - a default for every timeout;
   - `--version`, matching the build identity.
 
   Every command runs as root (decision D14).
+
+  Done for the commands O1.2 built; `apply --detailed-exitcode` comes
+  with `apply` in O1.4. The contract is in
+  [administration](administration.md#the-rampire-command).
 - [ ] **O1.4** The applied configuration (decision D10, X12):
   - `/etc/rampire` is the draft that people and tools edit;
   - `apply` checks the draft while the controller keeps running (X2),

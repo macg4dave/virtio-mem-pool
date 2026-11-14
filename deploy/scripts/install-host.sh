@@ -40,6 +40,10 @@ if pgrep -f 'target/release/rampire' >/dev/null; then
   exit 1
 fi
 mkdir -p .artifacts/deploy
+# rampire --version reports this build: the commit, and -dirty for
+# uncommitted changes.
+RAMPIRE_BUILD_ID=$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- || echo -dirty)
+export RAMPIRE_BUILD_ID
 cargo build --release --locked -p rampire -p xtask
 # host-deploy validates exclusive ownership and requires this unit inactive;
 # a unit left `failed` (for example by a polkit outage) is not inactive.

@@ -343,6 +343,30 @@ that stops moving for the convergence timeout settles at what the guest
 kept. Windows guests are moving to Hyper-V Dynamic Memory;
 see [the roadmap](roadmap.md), milestone W.
 
+## The `rampire` command
+
+Every operator command runs as root (`sudo rampire ...`); only
+`rampire daemon`, which the unit runs, runs as the service account. The
+configuration directory is `/etc/rampire` unless `--config` or
+`RAMPIRE_CONFIG` says otherwise. `rampire --help` and
+`rampire COMMAND --help` list every option.
+
+The same command serves a person and a script:
+
+- On a terminal, a command that changes something explains and asks.
+  `--yes` answers yes. Without a terminal and without `--yes` it changes
+  nothing and says so.
+- `--json` writes a versioned document instead of text. It names its
+  schema: `rampire.status-report` for `status` and `rampire.check` for
+  `check`.
+- `rampire --version` names the build: `0.1.0 (build 6b0e2db1a2c3)`.
+
+| Exit code | Meaning |
+|---|---|
+| 0 | Done |
+| 1 | The command failed, or `check` found a problem |
+| 2 | The command line was wrong |
+
 ## Observing
 
 ```bash
