@@ -383,9 +383,14 @@ see [the roadmap](roadmap.md), milestone W.
 ## The `rampire` command
 
 Every operator command runs as root (`sudo rampire ...`); only
-`rampire daemon`, which the unit runs, runs as the service account. The
-configuration directory is `/etc/rampire` unless `--config` or
-`RAMPIRE_CONFIG` says otherwise. `rampire --help` and
+`rampire daemon`, which the unit runs, runs as the service account.
+Commands that change or check the configuration (`check`, `diff`,
+`apply`, `set`, `init`) work on the draft, `/etc/rampire`; the views and
+recovery (`status`, `top`, `watch`, `recover`) on the applied copy the
+controller runs, so a mistake in the draft doesn't hide what is running.
+`--config` or `RAMPIRE_CONFIG` names another directory for both. On a
+development install in `/usr/local/bin`, RHEL's `sudo` doesn't search that
+folder: run `sudo /usr/local/bin/rampire`. `rampire --help` and
 `rampire COMMAND --help` list every option.
 
 The same command serves a person and a script:

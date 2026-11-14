@@ -487,7 +487,7 @@ fn build(
     let g = frame.glyphs;
     frame.bar(
         &format!(
-            "{} VIRTIO-MEM POOL MONITOR  {}  {} VMs",
+            "{} RAMPIRE POOL  {}  {} VMs",
             g.dot,
             host_name(),
             command.vms.len()

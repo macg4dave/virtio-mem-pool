@@ -83,6 +83,28 @@ struct CheckedVm {
     problem: Option<String>,
 }
 
+/// The draft people and tools edit.
+const DRAFT: &str = "/etc/rampire";
+
+/// The configuration to change or check: `--config`, or the draft.
+fn draft(cli: &Cli) -> PathBuf {
+    cli.config.clone().unwrap_or_else(|| PathBuf::from(DRAFT))
+}
+
+/// The configuration the controller runs: `--config`, or the applied copy,
+/// or the draft before anything has been applied.
+fn running(cli: &Cli) -> PathBuf {
+    if let Some(config) = &cli.config {
+        return config.clone();
+    }
+    let current = applied_root().join(rampire_ops::applied::CURRENT);
+    if current.exists() {
+        current
+    } else {
+        PathBuf::from(DRAFT)
+    }
+}
+
 fn version() -> String {
     format!("{} (build {BUILD_ID})", env!("CARGO_PKG_VERSION"))
 }
@@ -91,15 +113,11 @@ fn version() -> String {
 #[derive(Debug, Parser)]
 #[command(name = "rampire", version = version(), propagate_version = true)]
 struct Cli {
-    /// The configuration directory.
-    #[arg(
-        long,
-        global = true,
-        value_name = "DIR",
-        env = "RAMPIRE_CONFIG",
-        default_value = "/etc/rampire"
-    )]
-    config: PathBuf,
+    /// The configuration directory. Default: /etc/rampire, the draft, for
+    /// commands that change or check the configuration; the applied copy
+    /// the controller runs for the views and recovery.
+    #[arg(long, global = true, value_name = "DIR", env = "RAMPIRE_CONFIG")]
+    config: Option<PathBuf>,
     /// The libvirt connection; default the configuration's `libvirt_uri`.
     #[arg(long, global = true, value_name = "URI")]
     connect: Option<String>,
@@ -246,7 +264,7 @@ fn main() -> ExitCode {
     match &cli.command {
         // The unit runs the daemon as the service account, and recovery
         // runs its own step as that account too.
-        Command::Daemon => return daemon::run(&cli.config),
+        Command::Daemon => return daemon::run(&running(&cli)),
         Command::ClearLatch { .. } => {}
         _ if process::effective_uid() != 0 => {
             eprintln!("rampire: run this as root, for example with sudo");
@@ -312,7 +330,7 @@ fn run(cli: &Cli) -> Result<ExitCode, String> {
                 .iter()
                 .map(|change| rampire_ops::set::parse_assignment(change))
                 .collect::<Result<Vec<_>, _>>()?;
-            let path = rampire_ops::set::set(&cli.config, target, &changes)?;
+            let path = rampire_ops::set::set(&draft(cli), target, &changes)?;
             println!("changed {}", path.display());
             if *no_apply {
                 println!("not applied: run rampire apply when ready");
@@ -334,7 +352,7 @@ fn run(cli: &Cli) -> Result<ExitCode, String> {
 fn view_args(cli: &Cli, view: &View) -> Result<Vec<String>, String> {
     let mut args = vec![
         "--config".to_owned(),
-        path_text(&cli.config)?,
+        path_text(&running(cli))?,
         "--connect".to_owned(),
         connection(cli)?,
         "--interval-seconds".to_owned(),
@@ -356,13 +374,13 @@ fn path_text(path: &Path) -> Result<String, String> {
 fn connection(cli: &Cli) -> Result<String, String> {
     match &cli.connect {
         Some(uri) => Ok(uri.clone()),
-        None => Ok(rampire_core::settings::load_globals(&cli.config)?.libvirt_uri),
+        None => Ok(rampire_core::settings::load_globals(&running(cli))?.libvirt_uri),
     }
 }
 
 fn target(cli: &Cli, vm: Option<&str>) -> Result<Target, String> {
     Ok(Target {
-        config: cli.config.clone(),
+        config: running(cli),
         vm: vm.map(str::to_owned),
         connection: connection(cli)?,
     })
@@ -371,7 +389,7 @@ fn target(cli: &Cli, vm: Option<&str>) -> Result<Target, String> {
 fn status(cli: &Cli, vm: Option<&str>) -> Result<ExitCode, String> {
     let names = match vm {
         Some(vm) => vec![vm.to_owned()],
-        None => HostSettings::load(&cli.config)
+        None => HostSettings::load(&running(cli))
             .map_err(|error| error.to_string())?
             .vms
             .into_iter()
@@ -398,7 +416,7 @@ fn status(cli: &Cli, vm: Option<&str>) -> Result<ExitCode, String> {
     if vms.is_empty() {
         println!(
             "RAMpire manages no VMs yet. Add one to {}.",
-            cli.config
+            draft(cli)
                 .join(rampire_core::settings::VMS_DIRECTORY)
                 .display()
         );
@@ -462,7 +480,7 @@ fn print_json<T: Serialize>(document: &T) -> Result<(), String> {
 }
 
 fn check(cli: &Cli) -> Result<ExitCode, String> {
-    let report = rampire_ops::check::run(&cli.config)?;
+    let report = rampire_ops::check::run(&draft(cli))?;
     let code = ExitCode::from(if report.passed() {
         exit::SUCCESS
     } else {
@@ -522,11 +540,11 @@ fn init(cli: &Cli) -> Result<ExitCode, String> {
         rampire_ops::applied::REVIEW_DIRECTORY,
         rampire_host::config::ATTESTATION_DIRECTORY,
     ] {
-        let path = cli.config.join(folder);
+        let path = draft(cli).join(folder);
         std::fs::create_dir_all(&path)
             .map_err(|error| format!("create {}: {error}", path.display()))?;
     }
-    let global = cli.config.join(rampire_core::settings::GLOBAL_FILE);
+    let global = draft(cli).join(rampire_core::settings::GLOBAL_FILE);
     if global.exists() {
         println!(
             "{} already exists and is unchanged. Suggested from this host:
@@ -602,7 +620,7 @@ fn show_difference(from: Option<&Path>, to: &Path) -> Result<bool, String> {
 fn diff(cli: &Cli) -> Result<ExitCode, String> {
     let staged = std::env::temp_dir().join(format!("rampire-draft-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&staged);
-    let result = rampire_ops::applied::snapshot(&cli.config, &staged).and_then(|()| {
+    let result = rampire_ops::applied::snapshot(&draft(cli), &staged).and_then(|()| {
         let current = rampire_ops::applied::current(applied_root())?;
         show_difference(current.as_deref(), &staged)
     });
@@ -630,7 +648,7 @@ fn apply(cli: &Cli, detailed: bool) -> Result<ExitCode, String> {
 
 /// Returns whether the applied configuration changed.
 fn stage_and_apply(cli: &Cli, root: &Path, staged: &Path) -> Result<bool, String> {
-    rampire_ops::applied::snapshot(&cli.config, staged)?;
+    rampire_ops::applied::snapshot(&draft(cli), staged)?;
     // Check the copy, so what is checked is exactly what is applied.
     let report = rampire_ops::check::run(staged)?;
     if !report.passed() {
@@ -658,7 +676,7 @@ fn stage_and_apply(cli: &Cli, root: &Path, staged: &Path) -> Result<bool, String
     keep_evidence(Change {
         action: "apply",
         unix_millis: millis,
-        draft: Some(&cli.config),
+        draft: Some(&draft(cli)),
         from: current.as_deref(),
         to: &applied,
         report: &report,
@@ -847,11 +865,11 @@ fn logs(follow: bool, since: Option<&str>) -> Result<ExitCode, String> {
 
 fn recover(cli: &Cli, vm: &str, reason: &str) -> Result<ExitCode, String> {
     let unit = controller_unit();
-    let config = path_text(&cli.config)?;
+    let config = path_text(&running(cli))?;
     let connection = connection(cli)?;
     let executable =
         std::env::current_exe().map_err(|error| format!("find the rampire executable: {error}"))?;
-    let clear_latch = |apply: bool| {
+    let clear_latch = || {
         let mut command = std::process::Command::new("runuser");
         command
             .args(["-u", SERVICE_ACCOUNT, "--"])
@@ -865,9 +883,7 @@ fn recover(cli: &Cli, vm: &str, reason: &str) -> Result<ExitCode, String> {
                 vm,
                 reason,
             ]);
-        if apply {
-            command.arg("--apply");
-        }
+        command.arg("--apply");
         command
             .status()
             .map_err(|error| format!("run clear-latch as {SERVICE_ACCOUNT}: {error}"))
@@ -878,8 +894,13 @@ fn recover(cli: &Cli, vm: &str, reason: &str) -> Result<ExitCode, String> {
                     .ok_or_else(|| format!("clear-latch failed with {status}"))
             })
     };
-    // Show what recovery would do while the controller still runs.
-    clear_latch(false)?;
+    // Show the VM as the controller sees it; clearing waits for the
+    // controller to stop, since only one may hold the VM.
+    let mut bytes = Vec::new();
+    rampire_host::cli::status(&target(cli, Some(vm))?, &mut bytes)?;
+    let status = rampire_core::parse_controller_status(&bytes)
+        .map_err(|error| format!("status of {vm}: {error}"))?;
+    println!("{}", status_line(&status));
     if !confirm(
         cli,
         &format!("Stop {unit}, clear {vm}'s latch and start it again?"),
@@ -888,7 +909,7 @@ fn recover(cli: &Cli, vm: &str, reason: &str) -> Result<ExitCode, String> {
         return Ok(ExitCode::SUCCESS);
     }
     systemctl("stop", &unit)?;
-    let cleared = clear_latch(true);
+    let cleared = clear_latch();
     // Start it again however recovery ended: a still-latched controller
     // only observes.
     let started = systemctl("start", &unit);
@@ -941,7 +962,8 @@ mod tests {
     #[test]
     fn options_go_before_or_after_the_command() {
         let cli = Cli::try_parse_from(["rampire", "status", "--config", "/tmp/x", "web"]).unwrap();
-        assert_eq!(cli.config, PathBuf::from("/tmp/x"));
+        assert_eq!(cli.config, Some(PathBuf::from("/tmp/x")));
+        assert_eq!(running(&cli), PathBuf::from("/tmp/x"));
         assert!(matches!(cli.command, Command::Status { vm: Some(ref vm) } if vm == "web"));
         let cli = Cli::try_parse_from(["rampire", "--yes", "recover", "web", "checked"]).unwrap();
         assert!(cli.yes);
@@ -984,7 +1006,7 @@ mod tests {
     fn the_default_configuration_is_etc_rampire() {
         let cli = Cli::try_parse_from(["rampire", "check"]).unwrap();
         if std::env::var_os("RAMPIRE_CONFIG").is_none() {
-            assert_eq!(cli.config, PathBuf::from("/etc/rampire"));
+            assert_eq!(draft(&cli), PathBuf::from("/etc/rampire"));
         }
     }
 }

@@ -462,7 +462,7 @@ fn build(
     let g = frame.glyphs;
     frame.bar(
         &format!(
-            "{} VIRTIO-MEM HOST MONITOR  {}  {}/{}",
+            "{} RAMPIRE VM  {}  {}/{}",
             g.dot,
             host_name(),
             command.vm,
