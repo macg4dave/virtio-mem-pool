@@ -703,6 +703,7 @@ dependencies = [
 name = "rampire-ops"
 version = "0.1.0"
 dependencies = [
+ "quick-xml",
  "rampire-core",
  "rampire-host",
  "serde",

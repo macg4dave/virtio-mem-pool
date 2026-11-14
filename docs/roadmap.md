@@ -289,12 +289,19 @@ version.
   `apply`. Done; `--no-apply` edits only. `global` means
   `global.toml`, so `global` is a reserved VM name (judgment call,
   2026-11-14).
-- [ ] **O1.7** `init`: on a first run, read the host's memory and every
+- [x] **O1.7** `init`: on a first run, read the host's memory and every
   libvirt domain, and write `global.toml`. It suggests `host_reserve`,
   and suggests `pool` as the host's memory minus:
   - the reserve;
   - each managed VM's boot RAM;
   - all the memory of every VM RAMpire won't manage.
+
+  Done. Judgment calls (2026-11-14): until `vm add` (O3) exists, a domain
+  with a virtio-mem device counts as managed and sets aside its boot RAM
+  (its NUMA cells); every other domain, running or not, sets aside all its
+  `<memory>`. `host_reserve` is an eighth of the host, 2 to 8 GiB. An
+  existing `global.toml` is never changed: the suggestion is shown. `init`
+  then applies, so a new host's controller can start with no VMs.
 - [ ] **O1.8** One unit, `rampire.service`, with no `@INSTANCE`
   template (decision D2, X4). Because every command runs as root, the
   runtime directory holding guest publications becomes private to the

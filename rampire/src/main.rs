@@ -105,6 +105,12 @@ struct Cli {
 enum Command {
     /// Run the controller. The systemd unit runs this.
     Daemon,
+    /// Set up a new host: suggest global.toml from the host's memory and
+    /// its VMs, create the configuration folders and apply.
+    ///
+    /// An existing global.toml is never changed; the suggestion is shown
+    /// instead.
+    Init,
     /// Show the controller's status for one VM, or for every VM.
     Status {
         /// The VM; default every VM.
@@ -251,6 +257,7 @@ fn run(cli: &Cli) -> Result<ExitCode, String> {
     match &cli.command {
         Command::Daemon => unreachable!("handled in main"),
         Command::Status { vm } => status(cli, vm.as_deref()),
+        Command::Init => init(cli),
         Command::Top { view, events } => {
             let mut args = view_args(cli, view)?;
             args.extend(["--events".to_owned(), events.to_string()]);
@@ -478,6 +485,61 @@ fn check(cli: &Cli) -> Result<ExitCode, String> {
         }
     }
     Ok(code)
+}
+
+fn init(cli: &Cli) -> Result<ExitCode, String> {
+    use rampire_ops::init;
+    let host = rampire_ops::watch::read_meminfo()?.total;
+    let connection = connection(cli)?;
+    let timeout = std::time::Duration::from_secs(30);
+    let virsh = |args: &[&str]| {
+        let mut arguments = vec![process::os("-c"), process::os(&connection)];
+        arguments.extend(args.iter().map(process::os));
+        process::bounded_text("virsh", &arguments, Path::new("/"), timeout)
+    };
+    let mut domains = Vec::new();
+    for name in virsh(&["list", "--all", "--name"])?.lines().map(str::trim) {
+        if !name.is_empty() {
+            domains.push(init::parse_domain(
+                name,
+                &virsh(&["dumpxml", "--inactive", name])?,
+            )?);
+        }
+    }
+    let suggestion = init::suggest(host, &domains);
+    let text = init::global_toml(&suggestion, &domains);
+    for folder in [
+        rampire_core::settings::VMS_DIRECTORY,
+        rampire_ops::applied::REVIEW_DIRECTORY,
+        rampire_host::config::ATTESTATION_DIRECTORY,
+    ] {
+        let path = cli.config.join(folder);
+        std::fs::create_dir_all(&path)
+            .map_err(|error| format!("create {}: {error}", path.display()))?;
+    }
+    let global = cli.config.join(rampire_core::settings::GLOBAL_FILE);
+    if global.exists() {
+        println!(
+            "{} already exists and is unchanged. Suggested from this host:
+
+{text}",
+            global.display()
+        );
+        println!("Change a value with: rampire set global KEY=VALUE");
+    } else {
+        std::fs::write(&global, &text)
+            .map_err(|error| format!("write {}: {error}", global.display()))?;
+        println!(
+            "wrote {}:
+
+{text}",
+            global.display()
+        );
+    }
+    if suggestion.pool_bytes.is_none() {
+        println!("This host has no memory left for a pool once its VMs have theirs.");
+    }
+    apply(cli, false)
 }
 
 fn applied_root() -> &'static Path {

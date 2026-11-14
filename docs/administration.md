@@ -55,6 +55,12 @@ QEMU, `virsh` on the path, polkit, and Rust to build the controller.
 
 2. Write the site configuration in a directory of your own, starting from
    [deploy/examples](../deploy/examples). See [Configuration](#configuration).
+   On a host with the controller installed, `sudo rampire init` writes a
+   suggested `global.toml` instead: it reads the host's memory and every
+   libvirt domain, sets aside the boot RAM of each VM with a virtio-mem
+   device and all the memory of every other VM, and keeps an eighth of the
+   host (2 to 8 GiB) as `host_reserve`. It never overwrites an existing
+   `global.toml`.
 
 3. Prepare each VM and attest it ([Adding a VM](#adding-a-vm)).
 

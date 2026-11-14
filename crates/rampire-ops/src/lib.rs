@@ -7,6 +7,7 @@ pub mod applied;
 pub mod check;
 pub mod dashboard;
 pub mod evidence;
+pub mod init;
 pub mod pool;
 pub mod process;
 pub mod set;
