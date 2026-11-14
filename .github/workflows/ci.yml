@@ -95,9 +95,9 @@ jobs:
             gpg --batch --import "$RUNNER_TEMP/signing.asc"
           else
             gpg --batch --passphrase '' --quick-gen-key 'RAMpire CI test <ci@invalid>' rsa4096 sign 1d
-            gpg --batch --armor --export-secret-keys > "$RUNNER_TEMP/signing.asc"
           fi
-          echo "RAMPIRE_SIGNING_KEY_FILE=$RUNNER_TEMP/signing.asc" >> "$GITHUB_ENV"
+          key=$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')
+          echo "RAMPIRE_SIGNING_KEY_ID=$key" >> "$GITHUB_ENV"
       - name: Source RPM, and the RPMs COPR would build from it
         run: |
           bash packaging/srpm.sh "$VERSION" "${GITHUB_SHA::12}" srpm --rebuild
@@ -109,8 +109,13 @@ jobs:
         run: |
           bash packaging/apt-repo.sh dist public
           gpg --batch --armor --export > "$RUNNER_TEMP/rampire.asc"
-          sudo rpm --import "$RUNNER_TEMP/rampire.asc"
-          for package in dist/*.x86_64.rpm; do rpm -K "$package" | tee /dev/stderr | grep -q 'signatures OK'; done
+          rpmdb=(--dbpath "$RUNNER_TEMP/rpmdb")
+          rpm "${rpmdb[@]}" --initdb
+          rpm "${rpmdb[@]}" --import "$RUNNER_TEMP/rampire.asc"
+          for package in dist/*.rpm; do
+            rpm "${rpmdb[@]}" -Kv "$package"
+            rpm "${rpmdb[@]}" -K "$package" | grep -q 'signatures OK'
+          done
           sudo install -D -m 0644 "$RUNNER_TEMP/rampire.asc" /etc/apt/keyrings/rampire.asc
           sed "s#^URIs: .*#URIs: file://$PWD/public/apt#" public/apt/rampire.sources \
             | sudo tee /etc/apt/sources.list.d/rampire.sources

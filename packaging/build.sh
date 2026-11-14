@@ -59,5 +59,12 @@ if [[ -x $musl/rampire && -x $musl/rampire-guest ]]; then
   tar -C "$stage" -czf "$output/rampire-guest-$version-x86_64-linux.tar.gz" "${guest##*/}"
 fi
 
+# With RAMPIRE_SIGNING_KEY_ID (a key in the GnuPG keyring), every RPM in the
+# output, the source RPM included, is signed before the checksums. The
+# .deb packages are covered by the apt repository's signature.
+if [[ -n ${RAMPIRE_SIGNING_KEY_ID:-} ]]; then
+  rpmsign --define "_gpg_name $RAMPIRE_SIGNING_KEY_ID" --addsign "$output"/*.rpm
+fi
+
 (cd "$output" && rm -f SHA256SUMS && sha256sum -- * > "$stage/SHA256SUMS" && mv "$stage/SHA256SUMS" SHA256SUMS)
 ls -l "$output"
