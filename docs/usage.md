@@ -1,298 +1,380 @@
-# Usage
+# Usage guide
 
-How to use virtio-mem-pool once it is installed: what it does, the
-commands you run day to day and what each one is for. This guide is the
-starting point. [Administration](administration.md) has the full install,
-configuration and recovery reference, and [tools](tools.md) has each
-observation tool in detail.
+This guide explains how to use virtio-mem-pool in plain language. It
+covers what the program does, where its settings are, how to change them
+and how to check that everything is working. You do not need to know how
+the program works inside.
 
-## What it does
+Every command in this guide is typed into a terminal on the **host**, the
+physical computer that runs your virtual machines. Copy each one exactly,
+changing only the parts this guide tells you to change.
 
-A KVM host has a fixed amount of RAM to give its VMs. Without this
-program each VM gets a size up front and keeps it, used or not. With it,
-the VMs share one **pool**:
+## What the program does
 
-1. Each VM boots on a small, fixed **boot RAM**.
-2. A **guest service** inside the VM watches its own memory. When free
-   memory falls below the VM's `free_ram`, it asks the host for more.
-   When it has more than `free_ram` spare, it gives some back.
-3. The **controller** on the host (`virtio-mem-host`) decides each
-   request. It grants growth only from free pool memory, within the VM's
-   `min_ram`–`max_ram`, and never below the host's own reserve
-   (`host_min_headroom_bytes`). Higher-priority VMs are served first. It
-   never takes memory from one VM to give to another.
-4. The controller resizes the VM's virtio-mem device and reports to the
-   guest what it actually got.
+Your host has a fixed amount of memory (RAM) to share between its virtual
+machines (VMs). Normally each VM is given a set amount and keeps all of
+it, even when it is sitting idle.
 
-You set three things per VM (`min_ram`, `max_ram`, `free_ram`) and one
-pool size for the host. Everything else follows from them.
+This program shares the memory out as it is needed instead:
 
-| Part | Runs on | Name |
+- Each VM starts small.
+- When a VM gets busy and runs low on memory, it asks for more, and the
+  program gives it more.
+- When the VM quietens down, it hands the spare memory back, so another
+  VM can use it.
+
+The memory the VMs share is called the **pool**. You decide how big the
+pool is, how much each VM may have, and which VMs come first when memory
+is short.
+
+## Words used in this guide
+
+| Word | Meaning |
+|---|---|
+| **Host** | The physical computer that runs the VMs |
+| **VM** | A virtual machine running on the host |
+| **Pool** | The memory the VMs share |
+| **Controller** | The part of the program on the host that hands out memory. It runs all the time in the background |
+| **Guest service** | The small part of the program inside each VM. It works out when the VM needs more or less memory and asks the controller |
+| **Priority** | A number you give each VM. When there isn't enough memory for everyone, the VM with the higher number is served first |
+| **Instance name** | The name the controller was installed under. You need it for some commands ([how to find it](#find-your-instance-name)) |
+
+### How sizes are written
+
+Sizes are written in quotes, for example `"8GB"` or `"512MB"`. Here, 1 GB
+is 1024 MB. Use whole numbers of GB, or multiples of 16 MB (`"512MB"`,
+`"768MB"`, `"1536MB"`). If a size can't be used, the program tells you
+when you install the change.
+
+## Before you start
+
+You need:
+
+- A terminal on the host, logged in as a user who can use `sudo`
+  (`sudo` runs a command as an administrator, and asks for your password).
+- The project folder, the copy of this project on the host that the
+  controller was installed from. This guide calls it `~/virtio-mem-pool`.
+  If yours is somewhere else, use that path instead.
+
+### Find your instance name
+
+Type:
+
+```bash
+systemctl list-units --all 'virtio-mem-host@*'
+```
+
+You will see a line like this:
+
+```text
+virtio-mem-host@main.service   loaded active running   Virtio-mem controller for main
+```
+
+The instance name is the part between `@` and `.service`. Here it is
+`main`. This guide uses `main` in its examples. Use your own name instead.
+
+### Find the names of your VMs
+
+Type:
+
+```bash
+sudo virsh list --all
+```
+
+The `Name` column lists every VM on the host. The program uses exactly
+these names.
+
+## Where the settings are
+
+The settings are plain text files. The controller reads them from this
+folder on the host:
+
+```text
+/etc/virtio-mem-host/
+```
+
+| File | What it controls |
+|---|---|
+| `global-settings.toml` | Settings for the whole host: the pool size and how much memory the host keeps for itself |
+| `host_list.toml` | Which VMs the program manages, and each VM's **priority** |
+| `<vm name>_settings.toml` | One file per VM: the smallest and largest that VM may be, and how much spare memory it keeps. For a VM called `webserver`, the file is `webserver_settings.toml` |
+| `<vm name>.attestation.json` | One per VM, made by the program. It records that the VM was checked as safe to resize. **Don't edit it** |
+
+To see what's there, type:
+
+```bash
+ls /etc/virtio-mem-host/
+```
+
+To read a file without changing it, type `cat` and the file's name:
+
+```bash
+cat /etc/virtio-mem-host/host_list.toml
+```
+
+**Don't edit the files in `/etc/virtio-mem-host/` directly.** The
+controller reads them only when it starts. To change a setting, edit
+your own copy of the files, then install the copy. The next two sections
+show how. Installing checks your changes, so a mistake is caught before
+it can reach the controller.
+
+## One-time setup: your own copy of the settings
+
+Do this once. It makes a folder called `virtio-mem-config` in your home
+folder, holding a copy of every settings file.
+
+```bash
+mkdir -p ~/virtio-mem-config
+sudo cp /etc/virtio-mem-host/*.toml /etc/virtio-mem-host/*.attestation.json ~/virtio-mem-config/
+sudo chown "$USER" ~/virtio-mem-config/*
+ls ~/virtio-mem-config
+```
+
+The last command lists the copied files. From now on, `~/virtio-mem-config`
+is where you change settings.
+
+## The settings explained
+
+Edit a file with the `nano` text editor, for example:
+
+```bash
+nano ~/virtio-mem-config/host_list.toml
+```
+
+In `nano`, move around with the arrow keys and type to change text.
+Press **Ctrl+O** then **Enter** to save, and **Ctrl+X** to leave.
+
+Lines that start with `#` are notes for people. The program ignores them.
+Each setting is a name, `=`, and a value. Change only the value.
+
+### Pool size and host reserve: `global-settings.toml`
+
+```toml
+pool_bytes = "16GB"
+host_min_headroom_bytes = "4GB"
+```
+
+| Setting | What it means | How to choose |
 |---|---|---|
-| Controller | KVM host (RHEL-family, libvirt, QEMU) | `virtio-mem-host@INSTANCE.service` |
-| Linux guest service | Each Linux VM | `virtio-mem-guest.service` |
-| Windows guest service | Each Windows VM (paused, see below) | `VirtioMemService` |
-| Operator tools | Host, from a checkout | `cargo xtask ...` |
+| `pool_bytes` | The total extra memory all the VMs may share, on top of the small amount each one starts with | The host's memory, minus what the host needs for itself, minus each VM's starting memory |
+| `host_min_headroom_bytes` | Memory the host always keeps free for itself. The program never gives VMs memory that would take the host below this | `"4GB"` suits most hosts. Raise it if the host runs other programs |
 
-**Windows guests:** the Windows virtio-mem path is paused because of an
-upstream driver bug, and Windows support is moving to Hyper-V Dynamic
-Memory ([roadmap](roadmap.md), milestone W). Use Linux guests for real
-work today.
+Other settings may appear in this file too. Leave them alone unless the
+[administration guide](administration.md#global-settingstoml) tells you
+otherwise. One of them, `observe_only`, is useful for a trial run: set to
+`true`, the program decides and logs everything but changes no VM's
+memory. Set it back to `false` for normal use.
 
-## Quick start
+### Which VMs, and their priority: `host_list.toml`
 
-The short path from nothing to a managed Linux VM. Each step links to the
-full detail.
+There is one block per VM. Each block starts with `[[vm]]`:
 
-1. **Write the configuration.** Copy [deploy/examples](../deploy/examples)
-   to a directory of your own (for example `site/config/`) and edit:
-   - `global-settings.toml`: `pool_bytes`, the memory all VMs share, and
-     `host_min_headroom_bytes`, what the host keeps for itself.
-   - `host_list.toml`: one `[[vm]]` per VM, with its libvirt name, the
-     device alias and a priority.
-   - `<vm_name>_settings.toml` per VM: `min_ram`, `max_ram`, `free_ram`
-     and `guest_os = "linux"`.
+```toml
+[[vm]]
+vm_name = "webserver"
+alias = "ua-virtiomem0"
+priority = 100
 
-   See [Configuration](administration.md#configuration).
+[[vm]]
+vm_name = "backup"
+alias = "ua-virtiomem0"
+priority = 50
+```
 
-2. **Prepare the VM.** Give the domain a virtio-mem device with
-   `<requested>` 0, and the control channel
-   `org.virtio-mem.control.0`. See [Adding a VM](administration.md#adding-a-vm).
-
-3. **Attest the VM.** Write the compatibility review JSON, then, with the
-   VM running:
-
-   ```bash
-   cargo xtask attestation VM ALIAS REVIEW.json --output VM.attestation.json --command-timeout-seconds 60
-   ```
-
-4. **Install the controller.**
-
-   ```bash
-   deploy/scripts/install-host.sh CONFIG_DIR INSTANCE VM=VM.attestation.json
-   ```
-
-5. **Install the guest service** in the VM, from the Debian package
-   (`cargo xtask linux package --output DIR`) or, on a development VM:
-
-   ```bash
-   cargo xtask linux deploy user@vm --output .artifacts/linux-deploy.json --apply
-   ```
-
-6. **Watch it work.**
-
-   ```bash
-   cargo xtask pool --config /etc/virtio-mem-host/host_list.toml
-   ```
-
-   Start something memory-hungry in the guest and watch the VM grow, then
-   shrink once it finishes.
-
-## Everyday commands
-
-`CONFIG` is the installed host list, `/etc/virtio-mem-host/host_list.toml`.
-With several VMs, `--vm NAME` picks one. The `cargo xtask` commands run
-from a checkout of this repository on the host.
-
-### Is it healthy?
-
-| Question | Command |
+| Setting | What it means |
 |---|---|
-| Is the controller running? | `systemctl status virtio-mem-host@INSTANCE` |
-| What has it decided? | `journalctl -u virtio-mem-host@INSTANCE -f` |
-| How is the pool shared right now? | `cargo xtask pool --config CONFIG` |
-| What is one VM doing? | `cargo xtask watch --config CONFIG --vm NAME` |
-| One VM's full state, as JSON | `virtio-mem-host status --config CONFIG --vm NAME` |
-| Is the guest service running? | In the guest: `systemctl status virtio-mem-guest` |
-| What memory does the guest see? | In the guest: `virtio-mem-watch-ram` (or `tools/linux/watch-ram.sh`) |
+| `vm_name` | The VM's name, exactly as `virsh list` shows it. Don't change it |
+| `alias` | An internal name for the VM's memory device. Don't change it |
+| `priority` | Who comes first when memory is short |
 
-`pool` is the best overview: one bar for the pool split by VM, a row per
-VM (plugged size, growing or shrinking, RAM in use, pending request), a
-history chart and recent grants and refusals. `--once` prints a single
-snapshot. From a Windows workstation,
-`tools\windows\Watch-Pool.ps1` opens it over SSH ([tools](tools.md#watching-the-pool)).
+#### Setting a priority
 
-In `virtio-mem-host status` output, check these fields first:
+Priority is a whole number above zero. **A higher number means more
+important.**
 
-| Field | Healthy value |
+- When there is plenty of memory in the pool, priority makes no
+  difference. Every VM gets what it asks for.
+- When the pool is running short, a VM with a higher priority gets the
+  memory first.
+- Two VMs with the same priority are served in the order they asked.
+- The program never takes memory away from one VM to give it to another.
+  A low-priority VM keeps what it already has, but it may have to wait
+  for more.
+
+In the example above, if `webserver` (100) and `backup` (50) both ask for
+memory when only a little is left, `webserver` gets it.
+
+Spacing the numbers out (100, 50, 10) leaves room to add a VM between
+them later.
+
+### Limits for one VM: `<vm name>_settings.toml`
+
+```toml
+vm_name = "webserver"
+guest_os = "linux"
+min_ram = "2GB"
+max_ram = "8GB"
+free_ram = "512MB"
+```
+
+| Setting | What it means | How to choose |
+|---|---|---|
+| `vm_name` | The VM's name. Must match the file name and `host_list.toml`. Don't change it | — |
+| `guest_os` | The VM's operating system. Don't change it | — |
+| `min_ram` | The smallest the VM is ever made. Memory is never taken back below this | Usually the amount the VM starts with |
+| `max_ram` | The largest the VM may ever grow | The most this VM should ever have. For a Linux VM, keep it no more than about four times the memory the VM starts with, or the VM may not be able to give memory back reliably |
+| `free_ram` | How much spare memory the VM keeps ready. It asks for more when its spare falls below this, and hands memory back when it has more spare than this | `"512MB"` to `"1GB"` suits most VMs. More makes the VM respond faster to sudden demand but keeps more memory idle. Less shares memory more tightly |
+
+All three sizes cover the VM's total memory, including what it starts
+with.
+
+## How to change a setting
+
+The steps are always the same: edit your copy, install it, check it.
+
+**Example: make `backup` more important than `webserver`.**
+
+1. Open the host list:
+
+   ```bash
+   nano ~/virtio-mem-config/host_list.toml
+   ```
+
+2. Find the `backup` block and change `priority = 50` to
+   `priority = 150`. Save with **Ctrl+O**, **Enter**, then leave with
+   **Ctrl+X**.
+
+3. Install the change. Use your own instance name in place of `main`,
+   and add one `name=file` pair for **every** VM in `host_list.toml`:
+
+   ```bash
+   cd ~/virtio-mem-pool
+   deploy/scripts/install-host.sh ~/virtio-mem-config main \
+     webserver=$HOME/virtio-mem-config/webserver.attestation.json \
+     backup=$HOME/virtio-mem-config/backup.attestation.json
+   ```
+
+   It asks for your `sudo` password. It can take a few minutes the first
+   time. It then:
+   1. briefly stops the controller,
+   2. checks all your settings,
+   3. installs them, keeping a backup of the old ones,
+   4. starts the controller again.
+
+   Your VMs keep running throughout and keep the memory they have.
+
+4. Check that it worked. The script ends by showing the controller's
+   state, which should say **`active (running)`** in green. Then look at
+   the pool ([Checking that it's working](#checking-that-its-working)).
+
+**Example: let `webserver` grow to 12 GB.** Open
+`~/virtio-mem-config/webserver_settings.toml`, change `max_ram = "8GB"`
+to `max_ram = "12GB"`, save, and install exactly as in step 3 above.
+
+### If the install reports an error
+
+The error message says which file and setting is wrong, for example a
+misspelt setting name or a size that can't be used. Your old settings are
+still in place, but **the controller is left stopped**. Either:
+
+- fix the mistake in `~/virtio-mem-config` and run the install command
+  again, or
+- go back to your old settings for now by starting the controller:
+
+  ```bash
+  sudo systemctl start virtio-mem-host@main
+  ```
+
+## Checking that it's working
+
+### Is the controller running?
+
+```bash
+systemctl status virtio-mem-host@main
+```
+
+Look for **`active (running)`**. Press **q** to get back to the prompt.
+
+### See the pool live
+
+The pool view shows every VM and how the memory is shared, updating every
+second:
+
+```bash
+cd ~/virtio-mem-pool
+cargo build --release -p virtio-mem-xtask
+sudo target/release/virtio-mem-xtask pool --config /etc/virtio-mem-host/host_list.toml
+```
+
+(The `cargo build` line is needed only the first time, and after you
+update the project folder.)
+
+How to read it:
+
+- **Pool**, at the top: one bar for the whole pool. Each VM's share is in
+  its own colour, and the rest of the bar is free memory. Below the bar
+  is how much is in use, how much is free, and how much memory the host
+  has left.
+- **VMs**: one line per VM, showing its priority, its current size,
+  whether it is growing or shrinking, how much of its memory is in use,
+  and any request it is waiting on. A VM marked **stale** hasn't reported
+  in for over 30 seconds.
+- **Pool history**: a chart of how the pool's use has changed.
+- **Pool events**: the latest decisions, such as memory given, refused or
+  returned.
+
+Press **Ctrl+C** to leave.
+
+You can open the same view from a Windows PC. See
+[Watching the pool](tools.md#watching-the-pool).
+
+### What has the controller been doing?
+
+```bash
+journalctl -u virtio-mem-host@main --since "1 hour ago"
+```
+
+This shows the controller's log. Press **Space** to page down, and **q**
+to leave. To watch new lines as they happen, use
+`journalctl -u virtio-mem-host@main -f` and press **Ctrl+C** to stop.
+
+## Stopping and starting
+
+| To | Type |
 |---|---|
-| `requested_bytes` vs `current_bytes` | Equal, or moving towards each other |
-| `actuation_latched` | `false` |
-| `observe_only` | `false`, unless you set it |
-| `guest_input.error` | `null` |
-| `recovery_state` | No recovery under way |
+| Stop the controller | `sudo systemctl stop virtio-mem-host@main` |
+| Start it again | `sudo systemctl start virtio-mem-host@main` |
 
-### Recording a run
-
-```bash
-cargo xtask metrics --config CONFIG --vm NAME [--duration-seconds N]
-cargo xtask metrics --config CONFIG --vm all
-```
-
-This records samples, controller events and any crash or restart to
-`.artifacts/metrics/`. On a terminal it shows a live UI. Press `m` to add
-a marker such as "started build" and `q` to stop. `--vm all` records
-every VM and writes a combined `pool.csv`. To send someone a record of a
-problem, use the run directory, in particular `summary.json` and
-`incidents/`. See [Recording a run](tools.md#recording-a-run).
-
-### Changing a VM's limits
-
-Edit `<vm_name>_settings.toml` (or `global-settings.toml`) in your
-configuration directory and install again:
-
-```bash
-deploy/scripts/install-host.sh CONFIG_DIR INSTANCE VM=ATTESTATION [VM=ATTESTATION ...]
-```
-
-The running controller does not reload configuration on its own. Guests
-take their settings from the host, so nothing changes inside the guest.
-
-Choosing the sizes:
-
-- **`free_ram`**: the headroom the guest keeps. Larger values grow sooner
-  and keep more memory idle. Smaller values pack the pool tighter but
-  leave less margin for a sudden spike. It must be a multiple of eight
-  device blocks.
-- **`min_ram`**: usually the boot RAM, so an idle guest can return its
-  whole device.
-- **`max_ram`**: for reliable removal on Linux, keep it within about four
-  times boot RAM ([why](administration.md#linux-guests)).
-- **`priority`** in `host_list.toml`: when the pool is short, VMs with a
-  higher priority get memory first.
-
-### Trying it without resizing
-
-Set `observe_only = true` in `global-settings.toml` and install. The
-controller evaluates and logs every request, then refuses it before
-touching any device. This is useful for a first look at a new VM or a
-new pool size.
-
-### Adding another VM
-
-For a new VM, follow [Adding a VM](administration.md#adding-a-vm), then
-install with every VM's attestation. For test fleets, two scripts do it
-in one step:
-
-```bash
-deploy/scripts/clone-vm.sh TEMPLATE NEW HOSTNAME BASE_IMAGE USER_DATA --apply
-deploy/scripts/add-linux-vm.sh --apply CONFIG_DIR INSTANCE TEMPLATE NEW user@new
-```
-
-`clone-vm.sh` creates a fresh copy of a managed Linux VM, and
-`add-linux-vm.sh` installs the guest service, attests the copy and
-installs the controller. Without `--apply` each one only prints its plan.
-
-### Changing a VM's definition
-
-Any change to the domain (devices, CPU, QEMU options) makes its
-attestation stale, and the controller then refuses resizes with
-`live compatibility evidence drifted: FIELD`. Attest again and install:
-
-```bash
-deploy/scripts/restart-vm-attest.sh CONFIG_DIR INSTANCE VM ALIAS REVIEW.json
-```
-
-This cold-restarts the VM so its saved definition takes effect, attests
-it and installs the controller.
-
-### Testing under load
-
-`cargo xtask linux deploy` also installs `virtio-mem-workload` (the Debian
-package does not). It allocates
-memory in phases (peak, settle, peak again) so you can watch growth and
-reclaim:
-
-```bash
-virtio-mem-workload --workload-id test1 --mode resident \
-  --peak-bytes 2147483648 --retained-bytes 268435456 \
-  --max-allocation-bytes 268435456 \
-  --peak-hold-seconds 60 --settled-hold-seconds 120 \
-  --renewed-hold-seconds 60 --refresh-interval-seconds 5
-```
-
-`--mode` is `resident` (memory in use), `committed` (reserved but
-untouched) or `file-cache` (page cache, with `--cache-dir`). For a
-recorded pass/fail run driven from the host, use
-`cargo xtask qualification start VM ALIAS --ssh-target user@vm ...`.
+While the controller is stopped, your VMs keep running with the memory
+they have. They don't grow or shrink until it starts again. Nothing is
+lost: requests the VMs made while it was stopped are handled when it
+starts.
 
 ## When something goes wrong
 
 | What you see | What it means | What to do |
 |---|---|---|
-| Unit `failed` | The controller stops on any fault rather than guess (`Restart=no`) | Read the journal, fix the cause, `systemctl start`. Pending requests resume |
-| `actuation_latched` | A resize ended in a state the controller could not prove safe, so it stopped resizing | `deploy/scripts/recover-latch.sh INSTANCE "why it is safe"` ([Recovering](administration.md#recovering)) |
-| `live compatibility evidence drifted` | The VM changed since it was attested | Check the change was intended, attest again, install |
-| Guest log says it is waiting for settings | No controller has answered yet, or the controller is older than the guest | Start or upgrade the controller first |
-| Growth refused, pool has room | The host is at `host_min_headroom_bytes` | Free host memory or lower the reserve |
-| Growth refused, pool full | Every byte of `pool_bytes` is in use | Raise `pool_bytes`, lower other VMs' `max_ram`, or wait for reclaim |
-| A large single allocation fails in the guest | The kernel refuses it before the guest can ask ([overcommit](administration.md#linux-guests)) | More boot RAM, a higher `min_ram`, or `vm.overcommit_memory=1` |
-| Memory comes back slowly or partly | Linux can only remove memory it can move. The driver retries for several minutes | Wait. If it persists, boot with `memory_hotplug.online_policy=auto-movable` |
-| A rebooted VM is still large | A reboot keeps QEMU's live size | A full shutdown and start applies `<requested>` 0 |
+| `systemctl status` says **failed** | The controller found a problem and stopped itself rather than risk a mistake. It doesn't restart on its own | Look at the log (`journalctl -u virtio-mem-host@main -n 50`). If the cause is clear and fixed, start it again. If not, get help from whoever set it up |
+| A VM never grows | The pool is full, the host is at its reserve, or the VM is at its `max_ram` | Look at the pool view. Raise `pool_bytes` or the VM's `max_ram`, or lower other VMs' `max_ram` |
+| A VM grows, but slowly gives memory back | Normal. A VM returns memory gradually, and can take several minutes when the memory was busy | Wait |
+| A VM stays large after a restart | A restart from inside the VM keeps its size | Shut the VM down fully, then start it |
+| The log mentions **latched** | The controller stopped resizing after something it couldn't confirm was safe | It needs a person to check it. See [Recovering](administration.md#recovering) |
+| The log mentions **drifted** | The VM's setup was changed after it was checked | The VM must be checked again. See [Adding a VM](administration.md#adding-a-vm), step 4 |
+| A VM's line in the pool view says **stale** | The VM's guest service hasn't reported in | Check that the VM is running. Inside the VM, `systemctl status virtio-mem-guest` should say `active (running)` |
 
-Never delete the request state files under `/var/lib/virtio-mem-host/`
-or `/var/lib/virtio-mem-guest/` to get past an error. Each request must
-still receive its result.
+**Never delete files under `/var/lib/virtio-mem-host/` or
+`/var/lib/virtio-mem-guest/`.** They hold the requests in progress, and
+deleting them can leave a VM in the wrong state.
 
-## Upgrading
+## Going further
 
-Upgrade the **controller first, then the guest services**. A new
-controller serves older guests. A new guest under an older controller may
-wait for settings. Details are in [Upgrading](administration.md#upgrading).
+These jobs need more technical knowledge, and the
+[administration guide](administration.md) covers them in full:
 
-## Command reference
+- adding a new VM, or removing one,
+- installing the controller for the first time,
+- recovering a controller that has latched,
+- upgrading to a new version.
 
-### `virtio-mem-host` (on the host)
-
-```text
-virtio-mem-host --config FILE
-virtio-mem-host status --config FILE [--vm NAME] [--connect URI]
-virtio-mem-host clear-latch REASON --config FILE [--vm NAME] [--connect URI] [--apply]
-```
-
-| Command | Purpose |
-|---|---|
-| `--config FILE` | Run the controller. systemd does this; you normally don't |
-| `status` | Print one VM's device, request, guest input and latch state as JSON. Read-only |
-| `clear-latch` | Clear a latch after review. A dry run unless `--apply`. Use `recover-latch.sh` instead, which stops and starts the unit around it |
-
-### Scripts in `deploy/scripts/`
-
-| Script | Purpose |
-|---|---|
-| `install-host.sh CONFIG_DIR INSTANCE VM=ATT...` | Build, validate and install the controller and its configuration, then start it |
-| `recover-latch.sh INSTANCE REASON` | Clear a latched controller safely |
-| `restart-vm-attest.sh CONFIG_DIR INSTANCE VM ALIAS REVIEW` | Cold-restart a VM, attest it and install |
-| `clone-vm.sh` | Make a fresh copy of a managed Linux VM |
-| `add-linux-vm.sh` | Put a copy under the controller |
-
-Run any script without arguments to see its usage.
-
-### `cargo xtask` (from a checkout)
-
-| Command | Purpose |
-|---|---|
-| `pool` | Live view of every VM and the pool |
-| `watch` | Live view of one VM |
-| `metrics` | Record a run (one VM or `--vm all`) |
-| `attestation VM ALIAS REVIEW --output PATH` | Attest a running VM |
-| `host-deploy INSTANCE --config PATH --attestation VM=PATH...` | Validate and install (what `install-host.sh` calls) |
-| `controller-status INSTANCE --host-cli PATH --output PATH` | Run `status` through a given controller binary and save the result as JSON evidence |
-| `doctor host` | Check that the host has `virsh` |
-| `preflight VM ALIAS` | No-resize checks before a Windows VM is managed |
-| `qualification <start\|status\|review>` | Recorded workload runs with pass/fail expectations |
-| `linux build \| package \| deploy \| status \| uninstall` | Build and manage the Linux guest service |
-| `windows ...` | Build and manage the Windows guest service |
-| `gate ...` | Development checks ([development](development.md)) |
-
-`cargo xtask --help` prints every option.
-
-### In the guest
-
-| Command | Purpose |
-|---|---|
-| `systemctl status virtio-mem-guest` | Service state |
-| `journalctl -u virtio-mem-guest` | Readiness report and every request it made |
-| `virtio-mem-watch-ram` | Live view of guest-visible memory |
-| `virtio-mem-workload ...` | Test workload |
-| `tools\windows\Watch-Ram.ps1` | Windows equivalent of the RAM view |
+For recording a session in detail, or other monitoring tools, see
+[tools](tools.md).

@@ -49,7 +49,7 @@ See [development](docs/development.md) for setup and platform details.
 
 | Document | Covers |
 |---|---|
-| [docs/usage.md](docs/usage.md) | Start here: what it does, quick start, everyday commands, troubleshooting |
+| [docs/usage.md](docs/usage.md) | Start here: plain-language guide to the settings, changing them, and checking it works |
 | [docs/administration.md](docs/administration.md) | Installing the controller, adding VMs, guest services, recovery, upgrades |
 | [docs/development.md](docs/development.md) | Building, the gate, which checks need which platform |
 | [docs/tools.md](docs/tools.md) | `watch`, `metrics` and `qualification` |
