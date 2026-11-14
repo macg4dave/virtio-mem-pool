@@ -8,13 +8,16 @@ unless it says "in the VM".
 ## 1. Install
 
 ```bash
-dnf install ./rampire-VERSION.x86_64.rpm      # RHEL, AlmaLinux, Rocky, Fedora
-apt install ./rampire_VERSION_amd64.deb       # Debian, Ubuntu
+dnf copr enable macg4dave/rampire && dnf install rampire   # RHEL, AlmaLinux, Rocky, Fedora
+apt install rampire                                        # Debian, Ubuntu, after adding the repository
 ```
 
-The packages are on the
-[releases page](https://github.com/macg4dave/rampire/releases). For a host
-without a package, the static tarball has its own `INSTALL.md`.
+[Releasing](releasing.md#installing-from-the-repositories) shows how to
+add the apt repository. The packages are also on the
+[releases page](https://github.com/macg4dave/rampire/releases)
+(`dnf install ./rampire-VERSION.x86_64.rpm`,
+`apt install ./rampire_VERSION_amd64.deb`). For a host without a package,
+the static tarball has its own `INSTALL.md`.
 
 ## 2. Check the host
 

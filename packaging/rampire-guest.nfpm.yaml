@@ -27,6 +27,12 @@ contents:
   - src: "./LICENSE"
     dst: /usr/share/doc/rampire-guest/LICENSE
     file_info: { mode: 0644 }
+# A release signs the RPM with the project key (CI sets the path); an
+# empty path builds it unsigned. The .deb is covered by the apt
+# repository's signature.
+rpm:
+  signature:
+    key_file: "${RAMPIRE_SIGNING_KEY_FILE}"
 scripts:
   postinstall: "./packaging/scripts/guest-postinstall.sh"
   preremove: "./packaging/scripts/guest-preremove.sh"

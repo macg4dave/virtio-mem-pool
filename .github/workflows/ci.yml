@@ -1,5 +1,10 @@
 # The gate and the packages on every push and pull request; on a v* tag
-# the packages are also signed and published (roadmap O2.1).
+# the packages are also signed and published (roadmap O2.1, O2.7): a
+# GitHub release, the apt repository on GitHub Pages, and a COPR build.
+#
+# A tag needs these repository secrets (docs/releasing.md):
+#   RAMPIRE_SIGNING_KEY         armoured OpenPGP private key, no passphrase
+#   COPR_CONFIG                 the ~/.config/copr file from COPR's API page
 name: CI
 
 on:
@@ -54,7 +59,7 @@ jobs:
       - name: Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools rpm
+          sudo apt-get install -y musl-tools rpm apt-utils
           curl -sSfL -o nfpm.deb \
             "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_amd64.deb"
           sudo dpkg -i nfpm.deb
@@ -75,8 +80,52 @@ jobs:
           export RAMPIRE_BUILD_ID=${GITHUB_SHA::12}
           cargo build --release --locked -p rampire -p rampire-guest-linux
           cargo build --release --locked --target x86_64-unknown-linux-musl -p rampire -p rampire-guest-linux
+      # A release signs with the project key. Every other build signs with a
+      # throwaway key, so the signing and the apt repository are tested on
+      # every push.
+      - name: Signing key
+        env:
+          RAMPIRE_SIGNING_KEY: ${{ secrets.RAMPIRE_SIGNING_KEY }}
+        run: |
+          umask 077
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then
+            test -n "$RAMPIRE_SIGNING_KEY" \
+              || { echo 'a release needs the RAMPIRE_SIGNING_KEY secret' >&2; exit 1; }
+            printf '%s\n' "$RAMPIRE_SIGNING_KEY" > "$RUNNER_TEMP/signing.asc"
+            gpg --batch --import "$RUNNER_TEMP/signing.asc"
+          else
+            gpg --batch --passphrase '' --quick-gen-key 'RAMpire CI test <ci@invalid>' rsa4096 sign 1d
+            gpg --batch --armor --export-secret-keys > "$RUNNER_TEMP/signing.asc"
+          fi
+          echo "RAMPIRE_SIGNING_KEY_FILE=$RUNNER_TEMP/signing.asc" >> "$GITHUB_ENV"
+      - name: Source RPM, and the RPMs COPR would build from it
+        run: |
+          bash packaging/srpm.sh "$VERSION" "${GITHUB_SHA::12}" srpm --rebuild
+          mkdir -p dist
+          cp srpm/*.src.rpm dist/
       - name: Package
         run: bash packaging/build.sh "$VERSION" dist
+      - name: The packages are signed, and apt installs from the repository
+        run: |
+          bash packaging/apt-repo.sh dist public
+          gpg --batch --armor --export > "$RUNNER_TEMP/rampire.asc"
+          sudo rpm --import "$RUNNER_TEMP/rampire.asc"
+          for package in dist/*.x86_64.rpm; do rpm -K "$package" | tee /dev/stderr | grep -q 'signatures OK'; done
+          sudo install -D -m 0644 "$RUNNER_TEMP/rampire.asc" /etc/apt/keyrings/rampire.asc
+          sed "s#^URIs: .*#URIs: file://$PWD/public/apt#" public/apt/rampire.sources \
+            | sudo tee /etc/apt/sources.list.d/rampire.sources
+          sudo apt-get update
+          apt-get install --simulate rampire rampire-guest
+          sudo rm /etc/apt/sources.list.d/rampire.sources
+      - name: The COPR RPMs hold what the nfpm RPMs hold
+        run: |
+          files() {
+            rpm -qp --qf '[%{FILEMODES:perms} %{FILENAMES}\n]' "$1" \
+              | grep -v '^d' | grep -v ' /usr/lib/.build-id/' | sort
+          }
+          for package in rampire rampire-guest; do
+            diff <(files dist/$package-*.x86_64.rpm) <(files srpm/$package-[0-9]*.x86_64.rpm)
+          done
       - name: Package contents
         run: |
           for package in dist/*.deb; do dpkg-deb --contents "$package"; done
@@ -95,3 +144,33 @@ jobs:
         with:
           files: dist/*
           body_path: CHANGELOG.md
+      - uses: actions/upload-pages-artifact@v3
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          path: public
+      - name: COPR build
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
+        run: |
+          test -n "$COPR_CONFIG" \
+            || { echo 'a release needs the COPR_CONFIG secret' >&2; exit 1; }
+          pipx install copr-cli
+          mkdir -p ~/.config
+          (umask 077 && printf '%s\n' "$COPR_CONFIG" > ~/.config/copr)
+          copr-cli build --nowait rampire dist/*.src.rpm
+
+  pages:
+    name: Package repository
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [packages]
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
