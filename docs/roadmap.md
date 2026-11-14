@@ -346,33 +346,42 @@ unit; it wasn't tried on the shared host.
 
 ### O2 — Packages and releases
 
-- [ ] **O2.1** A CI workflow that runs the Linux gate on every push and,
+- [x] **O2.1** A CI workflow that runs the Linux gate on every push and,
   on a tag, builds signed release artefacts with checksums.
-- [ ] **O2.2** A host RPM containing:
+- [x] **O2.2** A host RPM containing:
   - the binary, in `/usr/bin`;
   - the unit and the polkit rule;
   - `sysusers.d` for the service account;
   - example configuration marked `noreplace`.
 
   The unit's libvirt socket group is the RHEL family's `qemu`.
-- [ ] **O2.3** A host `.deb` with the same contents, with the
+- [x] **O2.3** A host `.deb` with the same contents, with the
   `libvirt-qemu` group (decision D3, X8).
 - [x] **O2.4** The unit is ordered after libvirt whichever daemon runs
   it: `libvirtd.service`, or `virtqemud.service` and its socket (X16).
-- [ ] **O2.5** Removing the host package (X15):
+- [x] **O2.5** Removing the host package (X15):
   - it stops the controller, and each VM keeps the memory it has;
   - it keeps `/etc/rampire` and `/var/lib/rampire`;
   - purging removes both.
-- [ ] **O2.6** A guest RPM beside the guest `.deb`.
+- [x] **O2.6** A guest RPM beside the guest `.deb`.
 - [ ] **O2.7** Signed package repositories (COPR, and an apt
   repository), so installs and upgrades go through `dnf` and `apt`.
-- [ ] **O2.8** A static (musl) tarball for hosts without a package.
-- [ ] **O2.9** `CHANGELOG.md`, and the version-skew test from
+- [x] **O2.8** A static (musl) tarball for hosts without a package.
+- [x] **O2.9** `CHANGELOG.md`, and the version-skew test from
   [Versions and releases](#versions-and-releases).
 
 Exit: release 0.1.0. A clean host of each supported family goes from
 nothing to a running controller, managing no VMs yet, with the package
 manager and `rampire init`. A guest installs with one package command.
+
+Status, 2026-11-14: everything but O2.7 is built. Packages are made with
+nfpm from `packaging/` by `packaging/build.sh`; CI builds and lists them
+on every push and, on a `v*` tag, signs `SHA256SUMS` with cosign (keyless)
+and publishes a GitHub release. The binary is `/usr/bin/rampire` for
+development installs too. Left for the owner: O2.7 (a COPR project, an
+apt repository and their signing keys), signing the packages themselves
+with that key, tagging `v0.1.0`, and installing on a clean host of each
+family.
 
 ### O3 — Adding and removing VMs
 
