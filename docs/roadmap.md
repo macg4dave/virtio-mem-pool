@@ -403,11 +403,11 @@ family.
   - `free_ram` 512 MB.
 
   Each can be overridden on the command line.
-- [ ] **O3.5** `apply` attests a VM that has no attestation yet, when
+- [x] **O3.5** `apply` attests a VM that has no attestation yet, when
   its file names a review profile and the VM is running. A VM whose live
   evidence has drifted still needs a person: `vm attest NAME`
   (decision D11).
-- [ ] **O3.6** `vm attest NAME [--restart]`, and `vm attest --drifted`
+- [x] **O3.6** `vm attest NAME [--restart]`, and `vm attest --drifted`
   for every VM whose live evidence no longer matches.
 - [ ] **O3.7** `vm remove NAME` stops managing the VM at once. The VM
   keeps the memory it has until its next cold start, which begins on boot

@@ -27,7 +27,8 @@ pub struct Libvirt {
 }
 
 impl Libvirt {
-    fn virsh(&self, args: &[&str]) -> Result<String, String> {
+    /// Run `virsh` on this connection.
+    pub fn virsh(&self, args: &[&str]) -> Result<String, String> {
         let mut arguments = vec![process::os("-c"), process::os(&self.connection)];
         arguments.extend(args.iter().map(process::os));
         process::bounded_text("virsh", &arguments, Path::new("/"), self.timeout)
