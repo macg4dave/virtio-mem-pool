@@ -4,9 +4,9 @@ Observation and development tools. Run `watch`, `metrics` and
 `qualification` on the KVM host; they read the controller's journal,
 libvirt and each guest's publication. `CONFIG` below is the configuration
 directory the controller runs (installed as `/etc/rampire`); with
-several VMs, `--vm NAME` picks one. They follow the one
-`rampire@INSTANCE` unit installed on the host, or the one named
-with `--instance INSTANCE`.
+several VMs, `--vm NAME` picks one. They follow the controller unit,
+`rampire.service`. On the host, `rampire top` and `rampire watch` are the
+same views without a checkout.
 
 ## Guest publications
 

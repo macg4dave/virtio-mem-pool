@@ -132,3 +132,25 @@ Nothing site-specific is tracked. VM names, hosts, SSH aliases, paths and
 pool sizes live in a site's own files: on a host, its installed
 configuration; in a checkout, the untracked `site/` directory. The tracked
 [deploy/examples](../deploy/examples) are neutral templates.
+
+## Installing a development build
+
+Until there are packages (roadmap O2), a development host installs from a
+checkout:
+
+```bash
+export RAMPIRE_BUILD_ID=$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- || echo -dirty)
+cargo build --release --locked -p rampire -p xtask
+sudo systemctl stop rampire 2>/dev/null; sudo systemctl reset-failed rampire 2>/dev/null
+target/release/xtask host-deploy --config CONFIG_DIR --attestation-dir CONFIG_DIR/attestations \
+  --output .artifacts/deploy/host-deploy-$(date +%Y%m%dT%H%M%S).json \
+  --command-timeout-seconds 60 --apply --elevate
+sudo /usr/local/bin/rampire apply --yes
+sudo systemctl enable --now rampire
+```
+
+`host-deploy` checks every attestation against the live VMs and installs
+the binary as `/usr/local/bin/rampire`, `rampire.service`, the polkit
+rule and the draft configuration in `/etc/rampire`, keeping a backup of
+what it replaces. `rampire apply` then makes the copy the unit runs.
+`RAMPIRE_BUILD_ID` is what `rampire --version` reports.

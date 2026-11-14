@@ -21,9 +21,9 @@ const HELP: &str = r#"Repository build and test tooling
 Usage:
   cargo xtask gate <format|build|test|lint|checks|local|all>
   cargo xtask doctor host
-  cargo xtask controller-status INSTANCE [OPTIONS]
+  cargo xtask controller-status [OPTIONS]
   cargo xtask attestation VM_NAME ALIAS REVIEW --output PATH [OPTIONS]
-  cargo xtask host-deploy INSTANCE --config PATH (--attestation-dir DIR | --attestation VM=PATH...) [OPTIONS]
+  cargo xtask host-deploy --config DIR (--attestation-dir DIR | --attestation VM=PATH...) [OPTIONS]
   cargo xtask host-run --config PATH --max-run-seconds N [OPTIONS]
   cargo xtask preflight VM_NAME ALIAS [OPTIONS]
   cargo xtask linux build
@@ -48,7 +48,7 @@ Attestation options:
   --command-timeout-seconds N   Required external-command bound.
   --connect URI                 Libvirt URI; default qemu:///system.
 
-Host deployment options (INSTANCE names the unit; settings install under /etc/rampire/):
+Host deployment options (installs rampire.service; settings install under /etc/rampire/):
   --config DIR                  Reviewed configuration directory (global.toml and
                                 vms.d/NAME.toml), installed exactly as written
                                 (comments and sizes kept).
@@ -69,7 +69,7 @@ Host run options (the daemon in the foreground instead of systemd):
   --sudo                        Run the daemon through sudo (root-only attestation).
 
 Controller status options:
-  --vm NAME                     Select the VM; required when the instance has several.
+  --vm NAME                     Select the VM; required when there are several.
   --host-cli PATH               Required absolute candidate host executable.
   --output PATH                 Required structured JSON evidence path.
   --command-timeout-seconds N   Required external-command bound.
@@ -77,7 +77,7 @@ Controller status options:
   --elevate                     Invoke this prebuilt xtask once through sudo.
 
 No-actuation preflight options:
-  --unit UNIT                   Required disabled/inactive rampire@INSTANCE unit.
+  --unit UNIT                   Required disabled/inactive rampire.service.
   --telemetry-path PATH         Required protected Windows telemetry path.
   --service SERVICE             Required Windows telemetry service identity.
   --attestation PATH            Required reviewed attestation.
@@ -123,7 +123,7 @@ Qualification options:
   --expect-no-reclaim         Require growth without any lower requested target; replaces --expect-reclaim-bytes.
   --require-renewed-during-pending-shrink Require an observed pending shrink before renewed pressure.
   --remote-workload PATH     Required workload executable path in the guest.
-  --controller-unit UNIT     Required rampire@INSTANCE unit whose config holds VM.
+  --controller-unit UNIT     Required rampire.service, whose config holds VM.
   --guest-service NAME       Required guest service identity on the wire.
   --apply-service-restart    Restart the named Windows service after the controller is active.
   --guest-service-cycle-timeout-seconds N Required bound for that explicit restart.

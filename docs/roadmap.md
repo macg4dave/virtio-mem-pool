@@ -302,10 +302,10 @@ version.
   `<memory>`. `host_reserve` is an eighth of the host, 2 to 8 GiB. An
   existing `global.toml` is never changed: the suggestion is shown. `init`
   then applies, so a new host's controller can start with no VMs.
-- [ ] **O1.8** One unit, `rampire.service`, with no `@INSTANCE`
+- [x] **O1.8** One unit, `rampire.service`, with no `@INSTANCE`
   template (decision D2, X4). Because every command runs as root, the
   runtime directory holding guest publications becomes private to the
-  service account and root.
+  service account and root. Done.
 - [ ] **O1.9** `doctor` checks:
   - `virsh` and the polkit rule;
   - the service account and its libvirt socket group;
@@ -313,9 +313,13 @@ version.
   - the libvirt version.
 
   It gives the fix for each problem it finds.
-- [ ] **O1.10** Delete `install-host.sh`, `recover-latch.sh`,
+- [x] **O1.10** Delete `install-host.sh`, `recover-latch.sh`,
   `restart-vm-attest.sh` and `add-linux-vm.sh`. `clone-vm.sh` stays a
-  development tool.
+  development tool. Done; a development host installs with
+  `xtask host-deploy` and `rampire apply`
+  ([development](development.md#installing-a-development-build)). Adding a
+  VM and re-attesting after a cold restart are by hand until `vm add` and
+  `vm attest --restart` (O3).
 - [ ] **O1.11** Remove the old installs from the development host and
   the test VMs, and install them again with `rampire`. The VMs get the
   new control channel port, are attested again and are restarted cold.

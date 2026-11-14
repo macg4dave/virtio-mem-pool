@@ -13,7 +13,6 @@ use rampire_ops::process;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Command {
-    instance: String,
     config: PathBuf,
     /// One reviewed source attestation per configured VM.
     attestations: BTreeMap<String, PathBuf>,
@@ -32,7 +31,6 @@ struct Evidence {
     schema_version: u32,
     captured_unix_millis: u64,
     applied: bool,
-    instance: String,
     unit: String,
     candidate_binary_sha256: String,
     installed_binary_sha256: Option<String>,
@@ -58,10 +56,6 @@ struct AttestationEvidence {
 const CONFIG_DIRECTORY: &str = "/etc/rampire";
 
 pub fn parse(args: &[String]) -> Result<Command, String> {
-    let instance = args
-        .first()
-        .ok_or_else(|| "host-deploy requires INSTANCE and explicit options".to_owned())?;
-    validate_identity(instance)?;
     let mut config = None;
     let mut attestations = BTreeMap::new();
     let mut attestation_dir = None;
@@ -70,7 +64,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
     let mut apply = false;
     let mut elevate = false;
     let mut elevated_child = false;
-    let mut index = 1;
+    let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
             "--apply" if !apply => apply = true,
@@ -126,7 +120,6 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         return Err("host-deploy elevation requires --apply".to_owned());
     }
     Ok(Command {
-        instance: instance.clone(),
         config: config.ok_or_else(|| "host-deploy requires --config".to_owned())?,
         attestations,
         attestation_dir,
@@ -230,7 +223,7 @@ fn stale_vm_files(installed: &Path, keep: &[String]) -> Result<Vec<PathBuf>, Str
 fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
     let config_source = resolve(repo, &command.config);
     let candidate = repo.join("target/release/rampire");
-    let unit_source = repo.join("host/systemd/rampire@.service");
+    let unit_source = repo.join("host/systemd/rampire.service");
     let policy_source = repo.join("host/systemd/50-rampire.rules");
     for path in [&config_source, &candidate, &unit_source, &policy_source] {
         if !path.is_file() {
@@ -245,8 +238,7 @@ fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
     let config_source = snapshot_configuration(
         &config_source,
         &repo.join(format!(
-            ".artifacts/deploy/{}-{}-{}-config",
-            command.instance,
+            ".artifacts/deploy/{}-{}-config",
             now_millis()?,
             std::process::id()
         )),
@@ -279,9 +271,9 @@ fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
         CompatibilityAttestation::parse(&text)?;
         validate_live_attestation(config, &attestation.source, command.timeout)?;
     }
-    let unit = format!("rampire@{}.service", command.instance);
-    let before = properties(&unit, repo, command.timeout)?;
-    require_inactive(&before, &unit)?;
+    let unit = rampire_ops::units::CONTROLLER_UNIT;
+    let before = properties(unit, repo, command.timeout)?;
+    require_inactive(&before, unit)?;
 
     let candidate_hash = hash(&candidate, repo, command.timeout)?;
     let mut config_index = String::new();
@@ -321,8 +313,8 @@ fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
             &before,
         )?);
     }
-    let after = properties(&unit, repo, command.timeout)?;
-    require_inactive(&after, &unit)?;
+    let after = properties(unit, repo, command.timeout)?;
+    require_inactive(&after, unit)?;
     let restart_policy = one(&after, "Restart")?;
     if command.apply && restart_policy != "no" {
         return Err(format!(
@@ -333,8 +325,7 @@ fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
         schema_version: 4,
         captured_unix_millis: now_millis()?,
         applied: command.apply,
-        instance: command.instance.clone(),
-        unit,
+        unit: unit.to_owned(),
         candidate_binary_sha256: candidate_hash,
         installed_binary_sha256: command
             .apply
@@ -461,7 +452,7 @@ fn install(
     let stale = stale_vm_files(Path::new(CONFIG_DIRECTORY), &config_files)?;
     let targets = [
         PathBuf::from("/usr/local/bin/rampire"),
-        PathBuf::from("/etc/systemd/system/rampire@.service"),
+        PathBuf::from("/etc/systemd/system/rampire.service"),
         PathBuf::from("/etc/polkit-1/rules.d/50-rampire.rules"),
     ]
     .into_iter()
@@ -529,7 +520,7 @@ fn install(
     )?;
     install_file(
         unit,
-        "/etc/systemd/system/rampire@.service",
+        "/etc/systemd/system/rampire.service",
         "root",
         "root",
         "0644",
@@ -584,7 +575,7 @@ fn install(
         "systemctl",
         &[
             process::os("disable"),
-            process::os(format!("rampire@{}.service", command.instance)),
+            process::os(rampire_ops::units::CONTROLLER_UNIT),
         ],
         repo,
         command.timeout,
@@ -750,7 +741,6 @@ fn run_elevated(command: &Command, repo: &Path) -> Result<String, String> {
 fn elevated_arguments(command: &Command) -> Vec<OsString> {
     let mut arguments = vec![
         process::os("host-deploy"),
-        process::os(&command.instance),
         process::os("--config"),
         command.config.as_os_str().to_owned(),
     ];
@@ -795,13 +785,6 @@ fn resolve(repo: &Path, path: &Path) -> PathBuf {
         repo.join(path)
     }
 }
-fn validate_identity(value: &str) -> Result<(), String> {
-    if rampire_ops::units::valid_instance(value) {
-        Ok(())
-    } else {
-        Err("host-deploy INSTANCE contains unsafe characters".to_owned())
-    }
-}
 use rampire_ops::process::unix_millis as now_millis;
 
 unsafe extern "C" {
@@ -817,7 +800,6 @@ mod tests {
     #[test]
     fn parses_explicit_apply_and_elevation() {
         let args = [
-            "guest",
             "--config",
             "host.toml",
             "--attestation",
@@ -837,15 +819,15 @@ mod tests {
         assert_eq!(command.attestations.len(), 2);
         assert_eq!(
             parse(&args).map(|command| elevated_arguments(&command).len()),
-            Ok(14)
+            Ok(13)
         );
         let mut duplicate = args.to_vec();
-        duplicate[6] = "guest=again.json".to_owned();
+        duplicate[5] = "guest=again.json".to_owned();
         assert!(parse(&duplicate).is_err());
 
         let mut with_folder = args.to_vec();
         with_folder.splice(
-            3..7,
+            2..6,
             [
                 "--attestation-dir".to_owned(),
                 "site/attestations".to_owned(),

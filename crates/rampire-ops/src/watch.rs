@@ -41,9 +41,6 @@ pub const HELP: &str = "Watch options (read-only live dashboard):
   --config PATH                 Required host TOML; the VM, device alias,
                                 telemetry path and host floor come from it.
   --vm NAME                     The [[vm]] to show; required with several.
-  --instance NAME               Controller unit rampire@NAME.service;
-                                default the one installed controller unit,
-                                else the VM name.
   --connect URI                 Libvirt URI; default qemu:///system.
   --interval-seconds N          Refresh period; default 1.
   --guest-interval-seconds N    Guest-agent telemetry read period; default 1.
@@ -58,8 +55,6 @@ pub struct Command {
     vm: String,
     alias: String,
     unit: String,
-    /// `--instance` named the unit; otherwise `run` looks for the installed one.
-    unit_named: bool,
     telemetry_path: String,
     connect: String,
     interval: Duration,
@@ -73,12 +68,10 @@ pub struct Command {
 pub fn parse(args: &[String]) -> Result<Command, String> {
     let mut config_path = None;
     let mut vm = None;
-    let mut instance = None;
     let mut command = Command {
         vm: String::new(),
         alias: String::new(),
-        unit: String::new(),
-        unit_named: false,
+        unit: crate::units::CONTROLLER_UNIT.to_owned(),
         telemetry_path: String::new(),
         connect: "qemu:///system".to_owned(),
         interval: Duration::from_secs(1),
@@ -110,7 +103,6 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
                 match option {
                     "--config" => config_path = Some(std::path::PathBuf::from(value)),
                     "--vm" => vm = Some(value.clone()),
-                    "--instance" => instance = Some(value.clone()),
                     "--connect" => command.connect = value.clone(),
                     "--interval-seconds" => command.interval = seconds()?,
                     "--guest-interval-seconds" => command.guest_interval = seconds()?,
@@ -130,11 +122,6 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
     let config_path = config_path.ok_or_else(|| format!("watch requires --config\n\n{HELP}"))?;
     let config = HostConfig::load_vm(&config_path, vm.as_deref())
         .map_err(|error| format!("{}: {error}", config_path.display()))?;
-    command.unit = format!(
-        "rampire@{}.service",
-        instance.as_deref().unwrap_or(&config.vm_name)
-    );
-    command.unit_named = instance.is_some();
     command.vm = config.vm_name;
     command.alias = config.alias;
     command.telemetry_path = config.raw_telemetry_path;
@@ -143,16 +130,6 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
 }
 
 pub fn run(command: &Command, cwd: &Path) -> Result<(), String> {
-    let resolved;
-    let command = if command.unit_named {
-        command
-    } else {
-        resolved = Command {
-            unit: crate::units::installed_controller_unit(&command.unit, cwd),
-            ..command.clone()
-        };
-        &resolved
-    };
     let interactive = !command.once && std::io::stdout().is_terminal();
     let stop = Arc::new(AtomicBool::new(false));
     for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
@@ -743,17 +720,12 @@ mod tests {
         assert_eq!(defaults.alias, expected.alias);
         assert_eq!(defaults.telemetry_path, expected.raw_telemetry_path);
         assert_eq!(defaults.host_floor_bytes, expected.host_min_headroom_bytes);
-        assert_eq!(
-            defaults.unit,
-            format!("rampire@{}.service", expected.vm_name)
-        );
+        assert_eq!(defaults.unit, "rampire.service");
         assert_eq!(defaults.interval, Duration::from_secs(1));
         let command = parse(
             &[
                 "--config",
                 config,
-                "--instance",
-                "other",
                 "--interval-seconds",
                 "0.5",
                 "--events",
@@ -763,7 +735,6 @@ mod tests {
             .map(str::to_owned),
         )
         .expect("options");
-        assert_eq!(command.unit, "rampire@other.service");
         assert_eq!(command.interval, Duration::from_millis(500));
         assert_eq!(command.events, 3);
         assert!(!command.guest);

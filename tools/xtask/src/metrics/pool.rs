@@ -75,7 +75,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 options.duration = Some(seconds(1.0)?);
                 options.forwarded.extend([option.to_owned(), value.clone()]);
             }
-            "--instance" | "--connect" | "--guest-interval-seconds" => {
+            "--connect" | "--guest-interval-seconds" => {
                 options.forwarded.extend([option.to_owned(), value.clone()]);
             }
             _ => return Err(format!("metrics --vm all does not take {option}")),
@@ -364,8 +364,8 @@ mod tests {
             "--plain",
             "--duration-seconds",
             "60",
-            "--instance",
-            "main",
+            "--connect",
+            "qemu:///system",
         ]))
         .expect("options");
         assert_eq!(options.duration, Some(Duration::from_secs(60)));
@@ -382,8 +382,8 @@ mod tests {
                 "/out/a",
                 "--duration-seconds",
                 "60",
-                "--instance",
-                "main",
+                "--connect",
+                "qemu:///system",
             ])
         );
         assert!(parse(&strings(&["--vm", "all"])).is_err(), "needs --config");

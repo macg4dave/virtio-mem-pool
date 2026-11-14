@@ -37,7 +37,6 @@ is short.
 | **Controller** | The part of the program on the host that hands out memory. It runs all the time in the background |
 | **Guest service** | The small part of the program inside each VM. It works out when the VM needs more or less memory and asks the controller |
 | **Priority** | A number you give each VM. When there isn't enough memory for everyone, the VM with the higher number is served first |
-| **Instance name** | The name the controller was installed under. You need it for some commands ([how to find it](#find-your-instance-name)) |
 
 ## Before you start
 
@@ -45,26 +44,8 @@ You need:
 
 - A terminal on the host, logged in as a user who can use `sudo`
   (`sudo` runs a command as an administrator, and asks for your password).
-- The project folder, the copy of this project on the host that the
-  controller was installed from. This guide calls it `~/rampire`.
-  If yours is somewhere else, use that path instead.
-
-### Find your instance name
-
-Type:
-
-```bash
-systemctl list-units --all 'rampire@*'
-```
-
-You will see a line like this:
-
-```text
-rampire@main.service   loaded active running   RAMpire memory controller for main
-```
-
-The instance name is the part between `@` and `.service`. Here it is
-`main`. This guide uses `main` in its examples. Use your own name instead.
+- RAMpire installed on the host. Every command here starts with
+  `sudo rampire`; `rampire --help` lists them all.
 
 ### Find the names of your VMs
 
@@ -280,7 +261,7 @@ To go back to the settings before the last apply, use
 ### Is the controller running?
 
 ```bash
-systemctl status rampire@main
+systemctl status rampire
 ```
 
 Look for **`active (running)`**. Press **q** to get back to the prompt.
@@ -326,8 +307,8 @@ This shows the controller's log. To watch new lines as they happen, use
 
 | To | Type |
 |---|---|
-| Stop the controller | `sudo systemctl stop rampire@main` |
-| Start it again | `sudo systemctl start rampire@main` |
+| Stop the controller | `sudo systemctl stop rampire` |
+| Start it again | `sudo systemctl start rampire` |
 
 While the controller is stopped, your VMs keep running with the memory
 they have. They don't grow or shrink until it starts again. Nothing is

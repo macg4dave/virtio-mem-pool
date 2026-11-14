@@ -31,8 +31,6 @@ use crate::watch::{self, HostMemory, COMMAND_TIMEOUT, MAX_TELEMETRY_BYTES};
 pub const HELP: &str = "Pool options (read-only live dashboard of every VM):
   --config PATH                 Required host list; the VMs, pool size and
                                 host floor come from it.
-  --instance NAME               Controller unit rampire@NAME.service;
-                                default the one installed controller unit.
   --connect URI                 Libvirt URI; default qemu:///system.
   --interval-seconds N          Refresh period; default 1.
   --events N                    Pool events shown; default 8.
@@ -68,8 +66,6 @@ pub struct Command {
     pool_bytes: Option<u64>,
     host_floor_bytes: u64,
     unit: String,
-    /// `--instance` named the unit; otherwise `run` looks for the installed one.
-    unit_named: bool,
     connect: String,
     interval: Duration,
     events: usize,
@@ -78,13 +74,11 @@ pub struct Command {
 
 pub fn parse(args: &[String]) -> Result<Command, String> {
     let mut config_path = None;
-    let mut instance = None;
     let mut command = Command {
         vms: Vec::new(),
         pool_bytes: None,
         host_floor_bytes: 0,
-        unit: String::new(),
-        unit_named: false,
+        unit: crate::units::CONTROLLER_UNIT.to_owned(),
         connect: "qemu:///system".to_owned(),
         interval: Duration::from_secs(1),
         events: 8,
@@ -103,7 +97,6 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
             .ok_or_else(|| format!("{option} requires a value"))?;
         match option {
             "--config" => config_path = Some(PathBuf::from(value)),
-            "--instance" => instance = Some(value.clone()),
             "--connect" => command.connect = value.clone(),
             "--interval-seconds" => {
                 command.interval = value
@@ -138,12 +131,9 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
             max_ram: vm.max_ram,
         })
         .collect();
-    let first = command.vms.first().ok_or("the host list names no VM")?;
-    command.unit = format!(
-        "rampire@{}.service",
-        instance.as_deref().unwrap_or(&first.name)
-    );
-    command.unit_named = instance.is_some();
+    if command.vms.is_empty() {
+        return Err("RAMpire manages no VMs yet: there is no pool to show".to_owned());
+    }
     command.pool_bytes = settings.pool_bytes;
     command.host_floor_bytes = settings
         .vms
@@ -198,16 +188,6 @@ impl Session {
 }
 
 pub fn run(command: &Command, cwd: &Path) -> Result<(), String> {
-    let resolved;
-    let command = if command.unit_named {
-        command
-    } else {
-        resolved = Command {
-            unit: crate::units::installed_controller_unit(&command.unit, cwd),
-            ..command.clone()
-        };
-        &resolved
-    };
     let interactive = !command.once && std::io::stdout().is_terminal();
     let stop = Arc::new(AtomicBool::new(false));
     for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
@@ -860,8 +840,7 @@ mod tests {
             vms: vec![vm("alpha"), vm("a-very-long-vm-name")],
             pool_bytes: Some(15 * GIB),
             host_floor_bytes: 4 * GIB,
-            unit: "rampire@main.service".to_owned(),
-            unit_named: true,
+            unit: "rampire.service".to_owned(),
             connect: "qemu:///system".to_owned(),
             interval: Duration::from_secs(1),
             events: 8,
@@ -886,16 +865,10 @@ mod tests {
         assert_eq!(command.vms.len(), settings.vms.len());
         assert_eq!(command.vms[0].name, settings.vms[0].vm_name);
         assert_eq!(command.pool_bytes, settings.pool_bytes);
-        assert_eq!(
-            command.unit,
-            format!("rampire@{}.service", settings.vms[0].vm_name)
-        );
-        assert!(!command.unit_named);
+        assert_eq!(command.unit, "rampire.service");
         let command = parse(&strings(&[
             "--config",
             &config,
-            "--instance",
-            "main",
             "--interval-seconds",
             "0.5",
             "--events",
@@ -903,8 +876,7 @@ mod tests {
             "--once",
         ]))
         .expect("options");
-        assert_eq!(command.unit, "rampire@main.service");
-        assert!(command.unit_named && command.once);
+        assert!(command.once);
         assert_eq!(command.interval, Duration::from_millis(500));
         assert_eq!(command.events, 3);
         for bad in [

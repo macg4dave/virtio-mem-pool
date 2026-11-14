@@ -441,7 +441,7 @@ fn parse_start(args: &[String], repo: &Path) -> Result<StartOptions, String> {
     identifier(&controller_unit, "--controller-unit")?;
     identifier(&guest_service, "--guest-service")?;
     // The unit may run a shared config; the running config must contain the VM.
-    rampire_ops::units::controller_instance(&controller_unit)?;
+    rampire_ops::units::require_controller_unit(&controller_unit)?;
     if max_allocation_bytes == 0
         || peak_bytes == 0
         || peak_bytes > max_allocation_bytes
@@ -2415,7 +2415,7 @@ mod tests {
             "--remote-workload",
             r"C:\qualification\rampire-workload.exe",
             "--controller-unit",
-            "rampire@vm.service",
+            "rampire.service",
             "--guest-service",
             "ConfiguredService",
             "--telemetry-path",

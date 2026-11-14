@@ -14,8 +14,7 @@ const DEFAULT_CONNECTION: &str = "qemu:///system";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Command {
-    instance: String,
-    /// Required when the instance's config holds more than one VM.
+    /// Required when the configuration holds more than one VM.
     vm: Option<String>,
     host_cli: PathBuf,
     output: PathBuf,
@@ -29,7 +28,6 @@ pub struct Command {
 #[serde(deny_unknown_fields)]
 struct Evidence {
     version: u16,
-    instance: String,
     unit: String,
     active_state: String,
     sub_state: String,
@@ -38,10 +36,6 @@ struct Evidence {
 }
 
 pub fn parse(arguments: &[String]) -> Result<Command, String> {
-    let instance = arguments
-        .first()
-        .ok_or_else(|| "controller-status requires INSTANCE and explicit options".to_owned())?;
-    validate_identity(instance)?;
     let mut host_cli = None;
     let mut vm = None;
     let mut output = None;
@@ -50,7 +44,7 @@ pub fn parse(arguments: &[String]) -> Result<Command, String> {
     let mut connection_seen = false;
     let mut elevate = false;
     let mut elevated_child = false;
-    let mut index = 1;
+    let mut index = 0;
     while index < arguments.len() {
         match arguments[index].as_str() {
             "--elevate" if !elevate => elevate = true,
@@ -104,7 +98,6 @@ pub fn parse(arguments: &[String]) -> Result<Command, String> {
         return Err("controller-status --host-cli must be an absolute path".to_owned());
     }
     Ok(Command {
-        instance: instance.clone(),
         vm,
         host_cli,
         output: output.ok_or_else(|| "controller-status requires --output".to_owned())?,
@@ -168,7 +161,7 @@ fn validate_command(command: &Command, repo: &Path) -> Result<(), String> {
 }
 
 fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
-    let unit = format!("rampire@{}.service", command.instance);
+    let unit = rampire_ops::units::CONTROLLER_UNIT.to_owned();
     let properties = process::bounded_text(
         "systemctl",
         &[
@@ -183,7 +176,7 @@ fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
     let properties = parse_properties(&properties)?;
     let config_path = PathBuf::from("/etc/rampire");
     let configured = HostConfig::load_vm(&config_path, command.vm.as_deref())
-        .map_err(|error| format!("protected host instance configuration: {error}"))?;
+        .map_err(|error| format!("protected host configuration: {error}"))?;
     let environment = [
         ("LIBVIRT_DEFAULT_URI", command.connection.as_str()),
         ("HOME", "/run/rampire"),
@@ -217,7 +210,6 @@ fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
     }
     Ok(Evidence {
         version: EVIDENCE_VERSION,
-        instance: command.instance.clone(),
         unit,
         active_state: one(&properties, "ActiveState")?.to_owned(),
         sub_state: one(&properties, "SubState")?.to_owned(),
@@ -242,10 +234,7 @@ fn run_elevated(command: &Command, repo: &Path) -> Result<String, String> {
 }
 
 fn elevated_arguments(command: &Command) -> Vec<OsString> {
-    let mut arguments = vec![
-        process::os("controller-status"),
-        process::os(&command.instance),
-    ];
+    let mut arguments = vec![process::os("controller-status")];
     if let Some(vm) = &command.vm {
         arguments.extend([process::os("--vm"), process::os(vm)]);
     }
@@ -331,7 +320,7 @@ fn validate_identity(value: &str) -> Result<(), String> {
     {
         Ok(())
     } else {
-        Err("controller-status INSTANCE or VM contains unsafe characters".to_owned())
+        Err("controller-status VM contains unsafe characters".to_owned())
     }
 }
 
@@ -346,7 +335,6 @@ mod tests {
     #[test]
     fn parses_a_fixed_read_only_elevation_scope() {
         let command = parse(&args(&[
-            "pool",
             "--vm",
             "guest",
             "--host-cli",
@@ -360,7 +348,6 @@ mod tests {
             "--elevate",
         ]))
         .expect("valid command");
-        assert_eq!(command.instance, "pool");
         assert_eq!(command.vm.as_deref(), Some("guest"));
         assert!(elevated_arguments(&command).contains(&process::os("guest")));
         assert_eq!(command.timeout, Duration::from_secs(10));

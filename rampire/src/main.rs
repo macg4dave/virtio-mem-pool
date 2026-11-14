@@ -18,8 +18,6 @@ use serde::Serialize;
 /// The account the controller runs as. Recovery writes the controller's
 /// state as this account, so the daemon can still write it afterwards.
 const SERVICE_ACCOUNT: &str = "rampire";
-/// The controller unit when systemd lists none, or several.
-const DEFAULT_UNIT: &str = "rampire.service";
 /// The build this binary came from, stamped by the build (`RAMPIRE_BUILD_ID`).
 const BUILD_ID: &str = match option_env!("RAMPIRE_BUILD_ID") {
     Some(id) => id,
@@ -214,9 +212,6 @@ struct View {
     /// Seconds between refreshes.
     #[arg(long, value_name = "SECONDS", default_value_t = 1)]
     interval_seconds: u64,
-    /// The controller unit's instance; default the installed controller.
-    #[arg(long, value_name = "NAME")]
-    instance: Option<String>,
 }
 
 fn main() -> ExitCode {
@@ -328,9 +323,6 @@ fn view_args(cli: &Cli, view: &View) -> Result<Vec<String>, String> {
         "--interval-seconds".to_owned(),
         view.interval_seconds.to_string(),
     ];
-    if let Some(instance) = &view.instance {
-        args.extend(["--instance".to_owned(), instance.clone()]);
-    }
     if view.once {
         args.push("--once".to_owned());
     }
@@ -786,7 +778,7 @@ fn restart_if_running(unit: &str) -> Result<bool, String> {
 }
 
 fn controller_unit() -> String {
-    rampire_ops::units::installed_controller_unit(DEFAULT_UNIT, Path::new("/"))
+    rampire_ops::units::CONTROLLER_UNIT.to_owned()
 }
 
 fn logs(follow: bool, since: Option<&str>) -> Result<ExitCode, String> {

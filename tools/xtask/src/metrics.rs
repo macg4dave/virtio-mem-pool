@@ -59,9 +59,6 @@ pub const HELP: &str = "Metrics options (read-only stress-test recorder):
                                 per VM in DIR/<vm>/, plus DIR/pool.csv with
                                 every device, the pool and host memory per
                                 interval (plain output only).
-  --instance NAME               Controller unit rampire@NAME.service;
-                                default the one installed controller unit,
-                                else the VM name.
   --connect URI                 Libvirt URI; default qemu:///system.
   --output DIR                  Run directory; default
                                 .artifacts/metrics/VM-YYYYMMDDTHHMMSSZ.
@@ -84,8 +81,6 @@ pub struct Command {
     vm: String,
     alias: String,
     unit: String,
-    /// `--instance` named the unit; otherwise `run` looks for the installed one.
-    unit_named: bool,
     telemetry_path: String,
     connect: String,
     output: Option<PathBuf>,
@@ -108,13 +103,11 @@ pub fn execute(args: &[String], repo: &Path) -> Result<(), String> {
 pub fn parse(args: &[String]) -> Result<Command, String> {
     let mut config_path = None;
     let mut vm = None;
-    let mut instance = None;
     let mut command = Command {
         config_path: PathBuf::new(),
         vm: String::new(),
         alias: String::new(),
-        unit: String::new(),
-        unit_named: false,
+        unit: rampire_ops::units::CONTROLLER_UNIT.to_owned(),
         telemetry_path: String::new(),
         connect: "qemu:///system".to_owned(),
         output: None,
@@ -148,7 +141,6 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         match option {
             "--config" => config_path = Some(PathBuf::from(value)),
             "--vm" => vm = Some(value.clone()),
-            "--instance" => instance = Some(value.clone()),
             "--connect" => command.connect = value.clone(),
             "--output" => command.output = Some(PathBuf::from(value)),
             "--interval-seconds" => command.interval = seconds(0.5)?,
@@ -162,11 +154,6 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
     command.config_path = config_path.clone();
     let config = HostConfig::load_vm(&config_path, vm.as_deref())
         .map_err(|error| format!("{}: {error}", config_path.display()))?;
-    command.unit = format!(
-        "rampire@{}.service",
-        instance.as_deref().unwrap_or(&config.vm_name)
-    );
-    command.unit_named = instance.is_some();
     command.vm = config.vm_name;
     command.alias = config.alias;
     command.telemetry_path = config.raw_telemetry_path;
@@ -338,16 +325,6 @@ impl Recorder {
 }
 
 pub fn run(command: &Command, repo: &Path) -> Result<(), String> {
-    let resolved;
-    let command = if command.unit_named {
-        command
-    } else {
-        resolved = Command {
-            unit: rampire_ops::units::installed_controller_unit(&command.unit, repo),
-            ..command.clone()
-        };
-        &resolved
-    };
     let stop = Arc::new(AtomicBool::new(false));
     for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
         signal_hook::flag::register(signal, Arc::clone(&stop))
@@ -1751,15 +1728,13 @@ mod tests {
                 "/tmp/run",
                 "--duration-seconds",
                 "3600",
-                "--instance",
-                "other",
             ]
             .map(str::to_owned),
         )
         .expect("options");
         assert_eq!(command.output, Some(PathBuf::from("/tmp/run")));
         assert_eq!(command.duration, Some(Duration::from_secs(3600)));
-        assert_eq!(command.unit, "rampire@other.service");
+        assert_eq!(command.unit, "rampire.service");
         for bad in [
             vec![],
             vec!["--config", &config, "--interval-seconds", "0.1"],

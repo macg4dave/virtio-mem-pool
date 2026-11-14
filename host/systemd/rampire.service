@@ -1,5 +1,6 @@
 [Unit]
-Description=RAMpire memory controller for %i
+Description=RAMpire memory controller
+Documentation=https://github.com/macg4dave/rampire
 After=network-online.target libvirtd.service
 Wants=network-online.target
 
@@ -25,10 +26,11 @@ ExecStart=/usr/local/bin/rampire daemon --config /var/lib/rampire/applied/curren
 Restart=no
 # Inherit the host manager's configured stop timeout rather than embedding a
 # test-derived deadline in the repository unit.
-# Readable by host tools: it holds each guest's latest publication
-# (<vm_name>.publication.json). UMask keeps everything else in it private.
+# Holds each guest's latest publication (<vm_name>.publication.json) for
+# `rampire top` and `watch`, which run as root (decision D14), so it is
+# private to the service account and root.
 RuntimeDirectory=rampire
-RuntimeDirectoryMode=0755
+RuntimeDirectoryMode=0750
 StateDirectory=rampire/state
 StateDirectoryMode=0700
 NoNewPrivileges=true

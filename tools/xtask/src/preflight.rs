@@ -118,7 +118,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
             .ok_or_else(|| format!("{name} requires a positive integer"))
     };
     let unit = required("--unit")?;
-    rampire_ops::units::controller_instance(&unit)?;
+    rampire_ops::units::require_controller_unit(&unit)?;
     let telemetry_path = required("--telemetry-path")?;
     if !telemetry_path
         .as_bytes()

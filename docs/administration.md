@@ -8,7 +8,7 @@ tools are in [tools](tools.md).
 ## How it fits together
 
 One controller (`rampire`) runs on the KVM host as the systemd unit
-`rampire@INSTANCE.service`. It manages every VM in its configuration
+`rampire.service`. It manages every VM in its configuration
 from one pool of virtio-mem device memory. In each VM a guest service
 decides when it needs more or less memory and asks; the controller admits
 the request within the pool, the VM's limits and the host's own reserve,
@@ -26,7 +26,7 @@ Run one controller per host: separate controllers cannot share a pool.
 | Item | Location |
 |---|---|
 | Controller binary | `/usr/local/bin/rampire` |
-| Unit | `/etc/systemd/system/rampire@.service` |
+| Unit | `/etc/systemd/system/rampire.service` |
 | libvirt access rule | `/etc/polkit-1/rules.d/50-rampire.rules` |
 | Configuration (the draft) | `/etc/rampire/` (`global.toml`, `vms.d/<vm_name>.toml`, `reviews/`) |
 | Attestations | `/etc/rampire/attestations/<vm_name>.attestation.json`, apart from the settings |
@@ -64,26 +64,17 @@ QEMU, `virsh` on the path, polkit, and Rust to build the controller.
 
 3. Prepare each VM and attest it ([Adding a VM](#adding-a-vm)).
 
-4. Build and install from a checkout:
+4. Install the controller. Until there are packages (roadmap O2), build
+   and install from a checkout
+   ([development](development.md#installing-a-development-build)), then:
 
    ```bash
-   deploy/scripts/install-host.sh CONFIG_DIR INSTANCE [VM=ATTESTATION ...]
+   sudo rampire apply                    # check the draft and switch to it
+   sudo systemctl enable --now rampire
    ```
 
-   It builds the release controller, stops the unit, then runs
-   `cargo xtask host-deploy`. That validates the configuration and every
-   attestation against the live VMs, installs binary, unit, polkit rule,
-   configuration and attestations, keeping a backup of what it replaces,
-   and writes JSON evidence under `.artifacts/deploy/`. The script then
-   runs `rampire apply --yes`, so the unit has an applied copy to run,
-   and enables and starts the unit. Every VM in `vms.d/` needs exactly one
-   attestation: `CONFIG_DIR/attestations/<vm_name>.attestation.json`,
-   unless a `VM=ATTESTATION` argument names another file.
-
-   The settings files are installed byte for byte, so their comments and
-   sizes such as `"3GB"` stay as written. A VM file the new configuration
-   no longer has is removed from `/etc/rampire/vms.d/`, with a copy in the
-   deployment backup.
+   Every VM in `vms.d/` needs its attestation in
+   `/etc/rampire/attestations/<vm_name>.attestation.json`.
 
 ### Changing the configuration
 
@@ -265,14 +256,12 @@ VM's settings needs only a controller install, never a guest change.
    to the VM's definition. The domain XML is read for every resize; what
    cannot change while QEMU runs (its arguments, QEMU and libvirt versions,
    device options) is collected again when the domain restarts and at
-   least every five minutes. `deploy/scripts/restart-vm-attest.sh`
-   cold-restarts a VM (so a saved definition takes effect), attests it and
-   installs the controller in one step.
+   least every five minutes. A saved definition takes effect only after
+   a full shutdown and start of the VM; attest after that.
 
-5. **Settings.** Write `CONFIG_DIR/vms.d/<vm_name>.toml` and install the
-   controller
-   (`install-host.sh CONFIG_DIR INSTANCE`), which takes every VM's
-   attestation from `CONFIG_DIR/attestations/`.
+5. **Settings.** Write `/etc/rampire/vms.d/<vm_name>.toml`, with the
+   attestation in `/etc/rampire/attestations/`, and run
+   `sudo rampire apply`.
 
 6. **Guest service.** Install it in the guest (below). It waits, saying so
    in its log, until the controller has published its settings.
@@ -420,7 +409,7 @@ cargo xtask metrics --config /etc/rampire
 ```
 
 The controller logs every decision to the journal
-(`journalctl -u rampire@INSTANCE`). See [tools](tools.md) for the
+(`sudo rampire logs`). See [tools](tools.md) for the
 recorder's files and incident bundles.
 
 ## Recovering
@@ -467,8 +456,9 @@ controller and the guests from the same build; from release 0.1.0 a
 controller serves guests from its own minor release and the one before it
 (see [the roadmap](roadmap.md#versions-and-releases)).
 
-1. Stop nothing by hand: `install-host.sh` stops and restarts the unit.
-2. If the release notes say the attestation format changed, attest every
+1. If the release notes say the attestation format changed, attest every
    VM again first.
-3. Install the controller.
+2. Install the new controller, then `sudo rampire apply` and
+   `sudo systemctl restart rampire`.
+3. Check with `sudo rampire status`.
 4. Upgrade each guest service (package or `make windows-deploy`).
