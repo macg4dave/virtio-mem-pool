@@ -14,4 +14,5 @@ pub mod pool;
 pub mod process;
 pub mod set;
 pub mod units;
+pub mod vm;
 pub mod watch;

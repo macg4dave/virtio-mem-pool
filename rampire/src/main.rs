@@ -244,6 +244,45 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum VmCommand {
+    /// Start managing a VM: check its definition, review it, write its
+    /// settings and apply.
+    ///
+    /// Reports a missing or wrongly set virtio-mem device or control
+    /// channel; --fix-xml shows the exact change and makes it once
+    /// confirmed, keeping the old definition. Review answers the definition
+    /// shows are filled in; only the rest are asked.
+    Add {
+        /// The libvirt domain.
+        vm: String,
+        /// Fix the domain's definition where it can be fixed.
+        #[arg(long)]
+        fix_xml: bool,
+        /// Use this reviewed profile in reviews/ instead of asking.
+        #[arg(long, value_name = "PROFILE")]
+        review: Option<String>,
+        /// The guest's kernel release (`uname -r`), for a new review.
+        #[arg(long, value_name = "RELEASE")]
+        kernel: Option<String>,
+        /// Pool priority; higher is served first.
+        #[arg(long, default_value_t = 100)]
+        priority: u32,
+        /// Smallest size; default the boot RAM.
+        #[arg(long, value_name = "SIZE")]
+        min_ram: Option<String>,
+        /// Largest size; default the lower of the device and four times
+        /// boot RAM.
+        #[arg(long, value_name = "SIZE")]
+        max_ram: Option<String>,
+        /// Spare memory the guest keeps; default 512MB.
+        #[arg(long, value_name = "SIZE")]
+        free_ram: Option<String>,
+    },
+    /// Stop managing a VM at once. It keeps the memory it has until its next
+    /// cold start, which begins on boot RAM alone.
+    Remove {
+        /// The VM.
+        vm: String,
+    },
     /// Attest a running VM again from its review profile, then apply.
     ///
     /// Needed after any change to the VM's definition: a VM whose live
@@ -376,6 +415,29 @@ fn run(cli: &Cli) -> Result<ExitCode, String> {
                 restart,
                 no_apply,
             } => vm_attest(cli, vm.as_deref(), *drifted, *restart, *no_apply),
+            VmCommand::Add {
+                vm,
+                fix_xml,
+                review,
+                kernel,
+                priority,
+                min_ram,
+                max_ram,
+                free_ram,
+            } => vm_add(
+                cli,
+                &AddOptions {
+                    vm,
+                    fix_xml: *fix_xml,
+                    review: review.as_deref(),
+                    kernel: kernel.as_deref(),
+                    priority: *priority,
+                    min_ram: min_ram.as_deref(),
+                    max_ram: max_ram.as_deref(),
+                    free_ram: free_ram.as_deref(),
+                },
+            ),
+            VmCommand::Remove { vm } => vm_remove(cli, vm),
         },
         Command::ClearLatch { vm, reason, apply } => {
             let target = target(cli, Some(vm))?;
@@ -629,6 +691,236 @@ fn libvirt(cli: &Cli) -> Result<rampire_ops::attest::Libvirt, String> {
         connection: connection(cli)?,
         timeout: std::time::Duration::from_secs(60),
     })
+}
+
+struct AddOptions<'a> {
+    vm: &'a str,
+    fix_xml: bool,
+    review: Option<&'a str>,
+    kernel: Option<&'a str>,
+    priority: u32,
+    min_ram: Option<&'a str>,
+    max_ram: Option<&'a str>,
+    free_ram: Option<&'a str>,
+}
+
+/// Ask a person on the terminal; without one, there is nobody to answer.
+fn ask(question: &str) -> Result<String, String> {
+    if !std::io::stdin().is_terminal() {
+        return Err(format!(
+            "{question} needs a person: answer on a terminal, or name a reviewed profile with --review"
+        ));
+    }
+    print!("{question} ");
+    std::io::stdout()
+        .flush()
+        .map_err(|error| error.to_string())?;
+    let mut answer = String::new();
+    std::io::stdin()
+        .read_line(&mut answer)
+        .map_err(|error| error.to_string())?;
+    Ok(answer.trim().to_owned())
+}
+
+fn write_new(path: &Path, text: &str) -> Result<(), String> {
+    if path.exists() {
+        return Err(format!("{} already exists", path.display()));
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    std::fs::write(path, text).map_err(|error| format!("write {}: {error}", path.display()))
+}
+
+fn vm_add(cli: &Cli, options: &AddOptions) -> Result<ExitCode, String> {
+    use rampire_core::settings::{self, VMS_DIRECTORY};
+    use rampire_ops::vm;
+    let name = options.vm;
+    let directory = draft(cli);
+    let settings_path = directory
+        .join(VMS_DIRECTORY)
+        .join(settings::vm_filename(name)?);
+    if settings_path.exists() {
+        return Err(format!(
+            "{name} is already managed; change it with rampire set {name} KEY=VALUE"
+        ));
+    }
+    let libvirt = libvirt(cli)?;
+    let xml = libvirt.virsh(&["dumpxml", "--inactive", name])?;
+    let mut inspection = vm::inspect(&xml)?;
+    let mut restart_needed = false;
+
+    let fixable = inspection.fixable();
+    if !fixable.is_empty() {
+        for change in &fixable {
+            println!("to fix: {change}");
+        }
+        if !options.fix_xml {
+            println!("rampire vm add {name} --fix-xml makes these changes");
+        } else if let Some(fixed) = vm::fix_xml(&xml, &inspection)? {
+            let temporary =
+                std::env::temp_dir().join(format!("rampire-{name}-{}", std::process::id()));
+            std::fs::create_dir_all(&temporary).map_err(|error| error.to_string())?;
+            let (before, after) = (temporary.join("before.xml"), temporary.join("after.xml"));
+            std::fs::write(&before, &xml).map_err(|error| error.to_string())?;
+            std::fs::write(&after, &fixed).map_err(|error| error.to_string())?;
+            let shown = std::process::Command::new("diff")
+                .args(["-u", "--label", "saved definition", "--label", "fixed"])
+                .arg(&before)
+                .arg(&after)
+                .output()
+                .map_err(|error| format!("run diff: {error}"))?;
+            print!("{}", String::from_utf8_lossy(&shown.stdout));
+            if !confirm(cli, &format!("Change {name}'s saved definition like this?"))? {
+                let _ = std::fs::remove_dir_all(&temporary);
+                println!("nothing changed");
+                return Ok(ExitCode::SUCCESS);
+            }
+            let backups = Path::new("/var/lib/rampire/domain-backups");
+            std::fs::create_dir_all(backups).map_err(|error| error.to_string())?;
+            let backup = backups.join(format!("{name}-{}.xml", process::unix_millis()?));
+            std::fs::copy(&before, &backup)
+                .map_err(|error| format!("keep {}: {error}", backup.display()))?;
+            let defined = libvirt.virsh(&["define", &path_text(&after)?]);
+            let _ = std::fs::remove_dir_all(&temporary);
+            defined?;
+            println!(
+                "changed {name}'s definition; the old one is in {}",
+                backup.display()
+            );
+            inspection = vm::inspect(&libvirt.virsh(&["dumpxml", "--inactive", name])?)?;
+            restart_needed = fixable.iter().any(|change| change.starts_with("add"));
+        }
+    }
+    let problems = inspection.problems();
+    if !problems.is_empty() {
+        for (problem, fix) in &problems {
+            println!("problem: {problem}");
+            println!("  fix: {fix}");
+        }
+        return Err(format!("{name} can't be managed yet; nothing was added"));
+    }
+    let device = inspection.device().expect("no problems means a device");
+    let alias = device.alias.clone().expect("no problems means an alias");
+
+    let review = match options.review {
+        Some(profile) => {
+            let path = directory
+                .join(rampire_ops::applied::REVIEW_DIRECTORY)
+                .join(format!("{profile}.toml"));
+            rampire_host::attestation::read_review(&path)?;
+            profile.to_owned()
+        }
+        None => {
+            use rampire_host::attestation::AnswerSource;
+            let mut answers = Vec::new();
+            for detected in vm::review_answers(&inspection) {
+                let (value, source) = match detected.answer {
+                    Some(answer) => answer,
+                    None => {
+                        let reply =
+                            ask(&format!("{} [y/N]", vm::question_text(detected.question)))?;
+                        (
+                            matches!(reply.as_str(), "y" | "Y" | "yes" | "Yes"),
+                            AnswerSource::Confirmed,
+                        )
+                    }
+                };
+                if !value {
+                    return Err(format!(
+                        "{name} can't be managed: {} is not true for it",
+                        detected.question
+                    ));
+                }
+                answers.push((detected.question, value, source));
+            }
+            let kernel = match options.kernel {
+                Some(kernel) => kernel.to_owned(),
+                None => ask("The guest's kernel release (uname -r in the VM):")?,
+            };
+            if kernel.is_empty() {
+                return Err("a review needs the guest's kernel release".to_owned());
+            }
+            let text = vm::review_toml(
+                name,
+                &answers,
+                inspection.max_memory_slots.unwrap_or(1),
+                &format!("linux {kernel}"),
+            );
+            let path = directory
+                .join(rampire_ops::applied::REVIEW_DIRECTORY)
+                .join(format!("{name}.toml"));
+            write_new(&path, &text)?;
+            rampire_host::attestation::read_review(&path)?;
+            println!("wrote the review {}", path.display());
+            name.to_owned()
+        }
+    };
+
+    let mut suggested = vm::suggest(&inspection, true).expect("a device");
+    let size = |text: Option<&str>, default: u64| -> Result<u64, String> {
+        text.map_or(Ok(default), |text| {
+            rampire_core::parse_byte_size(text).map_err(|error| error.to_string())
+        })
+    };
+    suggested.min_ram = size(options.min_ram, suggested.min_ram)?;
+    suggested.max_ram = size(options.max_ram, suggested.max_ram)?;
+    suggested.free_ram = size(options.free_ram, suggested.free_ram)?;
+    write_new(
+        &settings_path,
+        &vm::vm_toml(&alias, options.priority, &review, &suggested),
+    )?;
+    if let Err(error) = settings::load_vm(&settings_path) {
+        let _ = std::fs::remove_file(&settings_path);
+        return Err(format!("{error}; nothing was added"));
+    }
+    println!("wrote {}", settings_path.display());
+
+    if restart_needed {
+        println!(
+            "{name}'s definition changed: run rampire vm attest {name} --restart to cold-restart, attest and apply"
+        );
+        return Ok(ExitCode::SUCCESS);
+    }
+    if libvirt.state(name)? != "running" {
+        println!("start {name}, then run rampire apply: a VM is attested while it runs");
+        return Ok(ExitCode::SUCCESS);
+    }
+    apply(cli, false)
+}
+
+fn vm_remove(cli: &Cli, name: &str) -> Result<ExitCode, String> {
+    use rampire_core::settings::{self, VMS_DIRECTORY};
+    let directory = draft(cli);
+    let path = directory
+        .join(VMS_DIRECTORY)
+        .join(settings::vm_filename(name)?);
+    let vm = settings::load_vm(&path)?;
+    if !confirm(
+        cli,
+        &format!("Stop managing {name}? It keeps its memory until its next cold start."),
+    )? {
+        println!("nothing changed");
+        return Ok(ExitCode::SUCCESS);
+    }
+    let libvirt = libvirt(cli)?;
+    // The next cold start begins on boot RAM alone (decision D18).
+    if libvirt.state(name).is_ok() {
+        libvirt.virsh(&[
+            "update-memory-device",
+            name,
+            "--alias",
+            &vm.alias,
+            "--requested-size",
+            "0",
+            "--config",
+        ])?;
+    }
+    let parked = directory.join("parked").join(settings::vm_filename(name)?);
+    std::fs::create_dir_all(directory.join("parked")).map_err(|error| error.to_string())?;
+    std::fs::rename(&path, &parked).map_err(|error| format!("move {}: {error}", path.display()))?;
+    println!("{name}'s settings are kept in {}", parked.display());
+    apply(cli, false)
 }
 
 fn vm_attest(
@@ -1078,6 +1370,29 @@ mod tests {
         assert!(Cli::try_parse_from(["rampire", "vm", "attest", "web", "--restart"]).is_ok());
         assert!(Cli::try_parse_from(["rampire", "vm", "attest", "--drifted"]).is_ok());
         assert!(Cli::try_parse_from(["rampire", "vm", "attest"]).is_err());
+        let cli = Cli::try_parse_from([
+            "rampire",
+            "vm",
+            "add",
+            "web",
+            "--fix-xml",
+            "--max-ram",
+            "12GB",
+            "--priority",
+            "50",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Vm {
+                command: VmCommand::Add {
+                    fix_xml: true,
+                    priority: 50,
+                    ..
+                }
+            }
+        ));
+        assert!(Cli::try_parse_from(["rampire", "vm", "remove", "web"]).is_ok());
         assert!(Cli::try_parse_from(["rampire", "vm", "attest", "web", "--drifted"]).is_err());
     }
 
