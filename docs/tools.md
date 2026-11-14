@@ -197,6 +197,36 @@ Every guest takes its settings from the host. Each publication names its
 schema (`rampire.publication`) and version 1, and the host refuses any
 other. Diagnostic fields never authorise memory changes.
 
+## Test VMs
+
+```bash
+set -a; . site/testvm.env; set +a      # from deploy/examples/testvm.env.example
+sudo -E target/debug/xtask testvm up tools/testvm/SCENARIO.toml --name NAME \
+  [--file PATH]... [--keep] [--apply]
+sudo -E target/debug/xtask testvm down NAME [--apply]
+sudo -E target/debug/xtask testvm list
+```
+
+Every VM a test needs is made by `testvm`, never by hand. A scenario in
+[tools/testvm](../tools/testvm) says what the VM is (cloud image, boot RAM,
+a virtio-mem device or room for one, nested virtualisation) and the
+commands it runs on first boot. `up` downloads the image once, makes a
+qcow2 overlay and a cloud-init seed carrying the commands and each
+`--file` (a file or a folder; commands find them in `$SEED`), starts the
+VM and waits. Each command's exit status comes back over the serial port.
+Evidence and the serial log go to `.artifacts/testvm/`. The VM is removed
+afterwards unless `--keep`, which prints its address instead.
+
+`down` removes only a VM that `up` made, which it knows by a metadata
+element naming the VM's disk and seed. If RAMpire manages the VM, `down`
+runs `rampire vm remove` first. `up` refuses to start a VM unless the host
+has its boot RAM and 1 GiB more available.
+
+| Scenario | What it shows |
+|---|---|
+| `clean-host-almalinux10`, `-rocky10`, `-fedora45`, `-debian13`, `-ubuntu2404` | A clean host of each supported family goes from nothing to a running controller with the package manager and `rampire init` (roadmap O2 exit) |
+| `linux-guest-debian13` | A guest with the guest package, room for a device but no device and no control channel, for `rampire vm add --fix-xml` (O3 exit); use `--keep` |
+| `ansible-almalinux10` | The example Ansible role on a clean host: "changed", then no change, then "changed" after a settings change (O4 exit) |
 
 ## Watching guest RAM
 

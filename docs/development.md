@@ -126,6 +126,10 @@ recollection, and open `tools/linux/watch-ram.sh` (Linux guest) or
 `tools/windows/Watch-Ram.ps1` (Windows guest) to watch them. Results go in
 the roadmap with the capture's path under `.artifacts/`.
 
+Every VM a test needs is made and removed with `cargo xtask testvm`
+([tools](tools.md#test-vms)). A test that needs a VM no scenario
+describes gets a new scenario in `tools/testvm`, not a VM made by hand.
+
 ## Site configuration
 
 Nothing site-specific is tracked. VM names, hosts, SSH aliases, paths and
