@@ -20,6 +20,13 @@ use crate::qga::{GuestFileReader, GuestFileWriter};
 /// the unit's runtime directory: the copies go when the controller stops.
 pub const PUBLICATION_COPY_DIRECTORY: &str = "/run/virtio-mem-host";
 
+/// How long the control files are left alone after libvirt answers that the
+/// domain has no guest agent. Without the pause a guest whose control
+/// channel is down (while it boots) is asked again every round, and rounds
+/// run whenever any other guest sends a record: dozens of calls a second.
+const ABSENT_AGENT_RETRY: Duration = Duration::from_secs(30);
+const ABSENT_AGENT: &str = "guest agent is not configured";
+
 pub fn publication_copy_path(vm_name: &str) -> PathBuf {
     Path::new(PUBLICATION_COPY_DIRECTORY).join(format!("{vm_name}.publication.json"))
 }
@@ -71,6 +78,9 @@ pub struct GuestChannel<Q, T = SystemUnixClock> {
     /// Where to keep the latest validated publication for host tools.
     copy: Option<PathBuf>,
     copy_failed: std::cell::Cell<bool>,
+    /// The domain has no guest agent: until this instant, the agent's
+    /// answer is repeated instead of asked again.
+    agent_absent: std::cell::RefCell<Option<(Instant, String)>>,
 }
 
 impl<Q> GuestChannel<Q, SystemUnixClock> {
@@ -187,7 +197,26 @@ impl<Q, T> GuestChannel<Q, T> {
             last_write: std::cell::Cell::new(None),
             copy: None,
             copy_failed: std::cell::Cell::new(false),
+            agent_absent: std::cell::RefCell::new(None),
         }
+    }
+
+    /// Runs a control-file call unless the domain recently had no guest
+    /// agent, remembering that answer for `ABSENT_AGENT_RETRY`.
+    fn through_agent<V>(&self, call: impl FnOnce() -> Result<V, String>) -> Result<V, String> {
+        if let Some((until, error)) = self.agent_absent.borrow().as_ref() {
+            if Instant::now() < *until {
+                return Err(error.clone());
+            }
+        }
+        let result = call();
+        *self.agent_absent.borrow_mut() = match &result {
+            Err(error) if error.contains(ABSENT_AGENT) => Instant::now()
+                .checked_add(ABSENT_AGENT_RETRY)
+                .map(|until| (until, error.clone())),
+            _ => None,
+        };
+        result
     }
 }
 
@@ -218,8 +247,10 @@ impl<Q: GuestFileReader, T: UnixClock> GuestChannel<Q, T> {
         self.via_control.set(false);
         let waiting_on_channel = self.channel_connected();
         let bytes = self
-            .files
-            .read_file(&self.publication_path, MAX_RAW_TELEMETRY_FILE_BYTES)
+            .through_agent(|| {
+                self.files
+                    .read_file(&self.publication_path, MAX_RAW_TELEMETRY_FILE_BYTES)
+            })
             .map_err(|error| {
                 if waiting_on_channel {
                     format!(
@@ -292,9 +323,10 @@ impl<Q: GuestFileReader + GuestFileWriter, T: UnixClock> GuestLink for GuestChan
         if !changed && !refresh_due {
             return Ok(());
         }
-        let written = self
-            .files
-            .write_file(&host_status_path(&self.publication_path), &bytes);
+        let written = self.through_agent(|| {
+            self.files
+                .write_file(&host_status_path(&self.publication_path), &bytes)
+        });
         #[cfg(unix)]
         let written = written.map_err(|error| {
             if sent_on_channel {
@@ -575,6 +607,59 @@ mod tests {
         ] {
             assert!(qga(contents.into_bytes()).read().is_err(), "{name}");
         }
+    }
+
+    #[test]
+    fn a_domain_without_a_guest_agent_is_not_asked_every_round() {
+        struct NoAgent(std::cell::Cell<u32>);
+        const ERROR: &str = "virsh failed with status libvirt error: error: argument unsupported: QEMU guest agent is not configured";
+        impl GuestFileReader for NoAgent {
+            fn read_file(&self, _path: &str, _maximum: usize) -> Result<Vec<u8>, String> {
+                self.0.set(self.0.get() + 1);
+                Err(ERROR.to_owned())
+            }
+        }
+        impl GuestFileWriter for NoAgent {
+            fn write_file(&self, _path: &str, _contents: &[u8]) -> Result<(), String> {
+                self.0.set(self.0.get() + 1);
+                Err(ERROR.to_owned())
+            }
+        }
+        let channel = GuestChannel::with_clock(
+            NoAgent(std::cell::Cell::new(0)),
+            "/var/lib/virtio-mem/telemetry.json",
+            "guest",
+            "virtio-mem-guest",
+            Duration::from_secs(60),
+            Duration::from_secs(5),
+            FixedClock(1_000_000),
+        );
+        let status = HostMemoryStatus {
+            version: MEMORY_REQUEST_VERSION,
+            vm_name: "guest".to_owned(),
+            service_name: "virtio-mem-guest".to_owned(),
+            device_alias: "memory0".to_owned(),
+            observed_unix_millis: 1_000_000,
+            device_size_bytes: 8 << 30,
+            block_size_bytes: 2 << 20,
+            requested_bytes: 0,
+            current_bytes: 0,
+            result: None,
+            guest_settings: None,
+        };
+        for _ in 0..50 {
+            assert!(channel.read().unwrap_err().contains(ABSENT_AGENT));
+            assert!(channel
+                .publish_status(&status)
+                .unwrap_err()
+                .contains(ABSENT_AGENT));
+        }
+        assert_eq!(channel.files.0.get(), 1, "asked once, then paused");
+
+        // Any other failure is retried on the next round.
+        let other = qga(vec![b'x'; MAX_RAW_TELEMETRY_FILE_BYTES + 1]);
+        assert!(other.read().is_err());
+        assert!(other.agent_absent.borrow().is_none());
     }
 
     #[cfg(unix)]
