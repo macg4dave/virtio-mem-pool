@@ -876,15 +876,23 @@ fn vm_add(cli: &Cli, options: &AddOptions) -> Result<ExitCode, String> {
     }
     println!("wrote {}", settings_path.display());
 
-    if restart_needed {
-        println!(
-            "{name}'s definition changed: run rampire vm attest {name} --restart to cold-restart, attest and apply"
-        );
-        return Ok(ExitCode::SUCCESS);
-    }
-    if libvirt.state(name)? != "running" {
-        println!("start {name}, then run rampire apply: a VM is attested while it runs");
-        return Ok(ExitCode::SUCCESS);
+    // A VM is attested while it runs, on the definition it was started
+    // with: a changed definition needs a cold restart first.
+    let running = libvirt.state(name)? == "running";
+    let question = match (running, restart_needed) {
+        (true, false) => None,
+        (true, true) => Some(format!(
+            "{name}'s definition changed. Shut it down and start it now, then apply?"
+        )),
+        (false, _) => Some(format!("{name} is not running. Start it now, then apply?")),
+    };
+    if let Some(question) = question {
+        if !confirm(cli, &question)? {
+            println!("when {name} runs its saved definition, run rampire apply");
+            return Ok(ExitCode::SUCCESS);
+        }
+        rampire_ops::attest::cold_restart(name, &libvirt, std::time::Duration::from_secs(300))?;
+        println!("{name} started");
     }
     apply(cli, false)
 }

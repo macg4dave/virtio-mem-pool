@@ -385,18 +385,18 @@ family.
 
 ### O3 — Adding and removing VMs
 
-- [ ] **O3.1** `vm add NAME` reads the domain and reports a missing or
+- [x] **O3.1** `vm add NAME` reads the domain and reports a missing or
   wrongly configured virtio-mem device or control channel. With
   `--fix-xml` it shows the exact change, applies it only after
   confirmation (or `--yes`), keeps the old definition, and says when a
   cold restart is needed (decision D4).
-- [ ] **O3.2** The review is filled in from the domain XML wherever the
+- [x] **O3.2** The review is filled in from the domain XML wherever the
   XML can show it: `hostdev`, vDPA and vhost-user interfaces,
   `launchSecurity`, `memoryBacking/locked`, `memballoon`. The user is
   asked only what the host can't see.
-- [ ] **O3.3** `vm add NAME --review PROFILE` reuses a reviewed profile
+- [x] **O3.3** `vm add NAME --review PROFILE` reuses a reviewed profile
   for every VM of a kind.
-- [ ] **O3.4** Default settings from the domain:
+- [x] **O3.4** Default settings from the domain:
   - `min_ram` from boot RAM;
   - `max_ram` from the lower of the device ceiling and, for Linux, about
     four times boot RAM;
@@ -409,7 +409,7 @@ family.
   (decision D11).
 - [x] **O3.6** `vm attest NAME [--restart]`, and `vm attest --drifted`
   for every VM whose live evidence no longer matches.
-- [ ] **O3.7** `vm remove NAME` stops managing the VM at once. The VM
+- [x] **O3.7** `vm remove NAME` stops managing the VM at once. The VM
   keeps the memory it has until its next cold start, which begins on boot
   RAM alone (decision D18).
 - [x] **O3.8** A managed VM that libvirt no longer knows fails `check`,
@@ -418,6 +418,16 @@ family.
 Exit: a VM with no virtio-mem device goes from `vm add` to managed in one
 guided command, and a fleet adds a VM by writing one file and running
 `apply`.
+
+Status, 2026-11-14: built and tested against fixtures and pc101's
+domains (read-only). Judgment calls: `--fix-xml` adds the control
+channel, a saved `requested` of 0 and a virtio-mem device of three times
+boot RAM when the domain already has NUMA and a free `maxMemory` slot; a
+missing NUMA cell or `maxMemory` is reported with the XML to add, not
+edited. The kernel release (`--kernel`) is asked when a new review is
+written. Attestations stay in the draft's `attestations/`, which every
+applied copy carries, rather than a separate `/var/lib/rampire`
+folder. Not yet tried end to end on a VM with no device.
 
 ### O4 — Fleets
 
