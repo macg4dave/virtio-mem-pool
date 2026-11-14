@@ -1,5 +1,5 @@
-# The gate on every push and pull request; release artefacts on a v* tag
-# (roadmap O2.1).
+# The gate and the packages on every push and pull request; on a v* tag
+# the packages are also signed and published (roadmap O2.1).
 name: CI
 
 on:
@@ -36,12 +36,12 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked -p rampire-core -p rampire-guest -p rampire-guest-windows --all-targets -- -D warnings
 
-  release:
-    name: Release artefacts
-    if: startsWith(github.ref, 'refs/tags/v')
+  packages:
+    name: Packages
     needs: [linux-gate, windows-guest]
     runs-on: ubuntu-24.04
     permissions:
+      # Publishing a tagged release, and cosign's keyless signature.
       contents: write
       id-token: write
     env:
@@ -54,17 +54,22 @@ jobs:
       - name: Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools
+          sudo apt-get install -y musl-tools rpm
           curl -sSfL -o nfpm.deb \
             "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_amd64.deb"
           sudo dpkg -i nfpm.deb
-      - name: The tag matches the crate version
+      - name: Version
         run: |
-          version=${GITHUB_REF_NAME#v}
           crate=$(cargo metadata --no-deps --format-version 1 \
             | jq -r '.packages[] | select(.name == "rampire") | .version')
-          test "$version" = "$crate" || { echo "tag $version but rampire is $crate" >&2; exit 1; }
-          echo "VERSION=$version" >> "$GITHUB_ENV"
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then
+            test "${GITHUB_REF_NAME#v}" = "$crate" \
+              || { echo "tag $GITHUB_REF_NAME but rampire is $crate" >&2; exit 1; }
+            echo "VERSION=$crate" >> "$GITHUB_ENV"
+          else
+            # Untagged builds sort before the release they lead to.
+            echo "VERSION=$crate~dev.${GITHUB_SHA::12}" >> "$GITHUB_ENV"
+          fi
       - name: Build
         run: |
           export RAMPIRE_BUILD_ID=${GITHUB_SHA::12}
@@ -72,10 +77,21 @@ jobs:
           cargo build --release --locked --target x86_64-unknown-linux-musl -p rampire -p rampire-guest-linux
       - name: Package
         run: packaging/build.sh "$VERSION" dist
+      - name: Package contents
+        run: |
+          for package in dist/*.deb; do dpkg-deb --contents "$package"; done
+          for package in dist/*.rpm; do rpm -qlp "$package"; done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: dist/
       - uses: sigstore/cosign-installer@v3
+        if: startsWith(github.ref, 'refs/tags/v')
       - name: Sign the checksums
+        if: startsWith(github.ref, 'refs/tags/v')
         run: cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS
       - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
         with:
           files: dist/*
           body_path: CHANGELOG.md
