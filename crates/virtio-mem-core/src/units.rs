@@ -13,6 +13,8 @@ pub fn bytes_to_kibibytes(value_bytes: u64) -> Option<u64> {
         .then_some(value_bytes / BYTES_PER_KIB)
 }
 
+const SIZE_EXAMPLES: &str = "write a size such as \"512MB\", \"128MiB\" or \"3GB\"";
+
 /// Parse a human-written size such as `"8GB"`, `"8.5 GiB"`, `"1024MB"` or
 /// `"512"` (bytes). Units are binary whatever their spelling (`GB` = `GiB` =
 /// 2^30) because device sizes are block multiples, and the result must be a
@@ -29,11 +31,7 @@ pub fn parse_byte_size(text: &str) -> Result<u64, String> {
         "m" | "mb" | "mib" => 20,
         "g" | "gb" | "gib" => 30,
         "t" | "tb" | "tib" => 40,
-        _ => {
-            return Err(format!(
-                "unknown size unit in {text:?}; use B, KB, MB, GB or TB"
-            ))
-        }
+        _ => return Err(format!("unknown size unit in {text:?}; {SIZE_EXAMPLES}")),
     };
     let (whole, fraction) = number.split_once('.').unwrap_or((number, ""));
     if whole.is_empty() && fraction.is_empty()
@@ -117,6 +115,13 @@ mod tests {
         assert_eq!(parse_byte_size("0"), Ok(0));
         assert_eq!(parse_byte_size("4096"), Ok(4096));
         assert_eq!(parse_byte_size(".5K"), Ok(512));
+        // The spellings people write in the settings files.
+        assert_eq!(parse_byte_size("512MB"), Ok(512 << 20));
+        assert_eq!(parse_byte_size("128MiB"), Ok(128 << 20));
+        assert_eq!(parse_byte_size("3GB"), Ok(3 * GIB));
+        assert_eq!(parse_byte_size("3 GiB"), Ok(3 * GIB));
+        assert_eq!(parse_byte_size("1.5 gb"), Ok(GIB + GIB / 2));
+        assert_eq!(parse_byte_size("1TB"), Ok(1024 * GIB));
         for bad in [
             "",
             "GB",

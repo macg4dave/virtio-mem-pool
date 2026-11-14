@@ -29,15 +29,15 @@ Run one controller per host: separate controllers cannot share a pool.
 | Unit | `/etc/systemd/system/virtio-mem-host@.service` |
 | libvirt access rule | `/etc/polkit-1/rules.d/50-virtio-mem-host.rules` |
 | Configuration | `/etc/virtio-mem-host/` (`global-settings.toml`, `host_list.toml`, `<vm_name>_settings.toml`) |
-| Attestations | `/etc/virtio-mem-host/<vm_name>.attestation.json`, beside the host list |
+| Attestations | `/etc/virtio-mem-host/attestations/<vm_name>.attestation.json`, apart from the settings |
 | Durable request state | `/var/lib/virtio-mem-host/state/<vm_name>-requests.json` (the unit's `StateDirectory`) |
 | Guest publications for tools | `/run/virtio-mem-host/<vm_name>.publication.json` |
 | Deployment backups | `/var/lib/virtio-mem-host/deployment-backups/` |
 
 A site with another layout overrides `ExecStart` in a drop-in
 (`systemctl edit virtio-mem-host@.service`). The controller takes its
-attestations from the host list's directory and its state from the unit's
-`StateDirectory`, so they follow.
+attestations from the `attestations/` folder beside the host list and its
+state from the unit's `StateDirectory`, so they follow.
 
 ## Installing the controller
 
@@ -60,7 +60,7 @@ QEMU, `virsh` on the path, polkit, and Rust to build the controller.
 4. Build and install from a checkout:
 
    ```bash
-   deploy/scripts/install-host.sh CONFIG_DIR INSTANCE VM=ATTESTATION [VM=ATTESTATION ...]
+   deploy/scripts/install-host.sh CONFIG_DIR INSTANCE [VM=ATTESTATION ...]
    ```
 
    It builds the release controller, stops the unit, then runs
@@ -69,16 +69,32 @@ QEMU, `virsh` on the path, polkit, and Rust to build the controller.
    configuration and attestations, keeping a backup of what it replaces,
    and writes JSON evidence under `.artifacts/deploy/`. The script then
    enables and starts the unit. Every VM in the host list needs exactly one
-   attestation.
+   attestation: `CONFIG_DIR/attestations/<vm_name>.attestation.json`,
+   unless a `VM=ATTESTATION` argument names another file.
 
-A controller that is running does not reload its configuration. Install
-again to change it.
+   The settings files are installed byte for byte, so their comments and
+   sizes such as `"3GB"` stay as written. An install from before this
+   kept attestations beside the settings; the next install moves them
+   into `attestations/`, keeping the old copies in the deployment backup.
+
+A controller that is running does not reload its configuration. To
+change it, edit the installed files and install from them:
+
+```bash
+sudo nano /etc/virtio-mem-host/VM_settings.toml
+deploy/scripts/install-host.sh /etc/virtio-mem-host INSTANCE
+```
+
+[Usage](usage.md) walks through this for people new to the program.
 
 ## Configuration
 
-Three kinds of file, in one directory. Unknown or misspelt keys are
-rejected. Memory sizes are binary (`"1GB"` is 2^30 bytes); plain byte counts
-and fractional sizes such as `"8.5GB"` are accepted.
+Three kinds of file, in one directory, with each VM's review and
+attestation in its `attestations/` folder. Comments (`#`) are kept when
+installed. Unknown or misspelt keys are rejected. Memory sizes are binary
+whatever the spelling (`"1GB"` = `"1GiB"` = 2^30 bytes, `"128MB"` =
+`"128MiB"`); fractional sizes such as `"8.5GB"` and plain byte counts are
+accepted.
 
 ### `global-settings.toml`
 
@@ -176,8 +192,9 @@ VM's settings needs only a controller install, never a guest change.
    XML. Without the channel the guest agent must run in the guest with file
    commands allowed (RHEL-family guests block them by default).
 
-3. **Review.** Write the compatibility review for the VM, a JSON file that
-   records what you checked:
+3. **Review.** Write the compatibility review for the VM,
+   `CONFIG_DIR/attestations/VM.review.json`, a JSON file that records what
+   you checked:
 
    ```json
    {
@@ -202,7 +219,8 @@ VM's settings needs only a controller install, never a guest change.
 4. **Attest.** With the VM running in its final configuration:
 
    ```bash
-   cargo xtask attestation VM ALIAS REVIEW --output VM.attestation.json --command-timeout-seconds 60
+   cargo xtask attestation VM ALIAS CONFIG_DIR/attestations/VM.review.json \
+     --output CONFIG_DIR/attestations/VM.attestation.json --command-timeout-seconds 60
    ```
 
    The attestation binds the review to hashes of the live domain XML, QEMU's
@@ -216,8 +234,9 @@ VM's settings needs only a controller install, never a guest change.
    installs the controller in one step.
 
 5. **Settings.** Add the VM to `host_list.toml`, write its
-   `<vm_name>_settings.toml` and install the controller with every VM's
-   attestation.
+   `<vm_name>_settings.toml` and install the controller
+   (`install-host.sh CONFIG_DIR INSTANCE`), which takes every VM's
+   attestation from `CONFIG_DIR/attestations/`.
 
 6. **Guest service.** Install it in the guest (below). It waits, saying so
    in its log, until the controller has published its settings.

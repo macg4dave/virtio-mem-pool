@@ -5,7 +5,9 @@
 # Usage: restart-vm-attest.sh CONFIG_DIR INSTANCE VM ALIAS REVIEW
 # CONFIG_DIR is the site configuration passed to install-host.sh; INSTANCE
 # names the systemd controller; REVIEW is the VM's reviewed
-# compatibility review (e.g. .artifacts/install/VM.review.json).
+# compatibility review (e.g. CONFIG_DIR/attestations/VM.review.json). The
+# new attestation replaces CONFIG_DIR/attestations/VM.attestation.json; the
+# one it replaces is kept under .artifacts/block-size/.
 set -euo pipefail
 if (( $# != 5 )); then
   echo 'usage: restart-vm-attest.sh CONFIG_DIR INSTANCE VM ALIAS REVIEW' >&2
@@ -57,5 +59,11 @@ fi
 
 cargo xtask attestation "$vm" "$alias" "$review" \
   --output "$attestation" --command-timeout-seconds 60
-echo "attestation: $attestation"
-"$scripts_dir/install-host.sh" "$config_dir" "$instance" "$vm=$(pwd)/$attestation"
+mkdir -p "$config_dir/attestations"
+current=$config_dir/attestations/$vm.attestation.json
+if [[ -f $current ]]; then
+  cp -- "$current" "$out_dir/$vm.attestation.replaced.$(date +%Y%m%dT%H%M%S).json"
+fi
+cp -- "$attestation" "$current"
+echo "attestation: $current"
+"$scripts_dir/install-host.sh" "$config_dir" "$instance"

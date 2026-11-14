@@ -1,20 +1,30 @@
-# Example settings for a Windows guest. The filename is exactly
-# <vm_name>_settings.toml and vm_name must match host_list.toml and the
-# libvirt domain name (lower-case ASCII letters, digits, - or _).
+# Memory limits for one Windows VM.
 #
-# Total guest RAM limits, including the VM's fixed boot RAM. Sizes are binary
-# ("1GB" = 2^30 bytes) and must be multiples of the live device block size,
-# which the libvirt XML sets. The VM's memory geometry must be able to reach
-# both limits.
+# This file must be named <VM name>_settings.toml, here windows-vm_settings.toml.
+# Lines starting with # are notes: the program ignores them.
+#
+# Write sizes in quotes, for example "512MB", "128MiB", "3GB" or "1.5GB".
+# MB and MiB mean the same here (1 GB = 1024 MB). Use whole GB, or multiples
+# of 16 MB. A size that can't be used is reported when you install.
+#
+# After changing this file, install it (see docs/usage.md). The running
+# program does not notice changes on its own.
+
+# The VM's name, exactly as `virsh list` shows it. Don't change it.
+vm_name = "windows-vm"
+
+# The smallest this VM is ever made. Memory below this is never taken back.
+# Usually the memory the VM starts with.
 min_ram = "4GB"
+
+# The largest this VM may ever grow.
 max_ram = "16GB"
 
-# Memory the guest keeps free above what it is using. It asks for more when
-# free memory falls below this and returns memory when it has more than this
-# spare. Use a multiple of eight device blocks.
+# Spare memory the VM keeps ready. It asks for more when its spare falls
+# below this, and gives memory back when it has more spare than this.
 free_ram = "2GB"
 
-vm_name = "windows-vm"
 # Where the Windows service is installed, and the account it runs as.
+# Don't change these.
 install_path = 'C:\Program Files\VirtioMemService\virtio-mem-service.exe'
 service_account = 'NT AUTHORITY\LocalService'

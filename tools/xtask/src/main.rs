@@ -25,7 +25,7 @@ Usage:
   cargo xtask doctor host
   cargo xtask controller-status INSTANCE [OPTIONS]
   cargo xtask attestation VM_NAME ALIAS REVIEW --output PATH [OPTIONS]
-  cargo xtask host-deploy INSTANCE --config PATH --attestation VM=PATH... [OPTIONS]
+  cargo xtask host-deploy INSTANCE --config PATH (--attestation-dir DIR | --attestation VM=PATH...) [OPTIONS]
   cargo xtask host-run --config PATH --max-run-seconds N [OPTIONS]
   cargo xtask preflight VM_NAME ALIAS [OPTIONS]
   cargo xtask linux build
@@ -51,9 +51,12 @@ Attestation options:
   --connect URI                 Libvirt URI; default qemu:///system.
 
 Host deployment options (INSTANCE names the unit; settings install under /etc/virtio-mem-host/):
-  --config PATH                 Reviewed host_list.toml with sibling global/VM settings.
-  --attestation VM=PATH         Required per VM; installed as
-                                /etc/virtio-mem-host/<vm_name>.attestation.json.
+  --config PATH                 Reviewed host_list.toml with sibling global/VM settings,
+                                installed exactly as written (comments and sizes kept).
+  --attestation-dir DIR         Folder holding <vm_name>.attestation.json for each VM.
+  --attestation VM=PATH         One VM's attestation, overriding --attestation-dir.
+                                Every VM needs one; installed as
+                                /etc/virtio-mem-host/attestations/<vm_name>.attestation.json.
   --output PATH                 Required structured JSON evidence path.
   --command-timeout-seconds N   Required external-command bound.
   --apply                       Install; otherwise validate only.

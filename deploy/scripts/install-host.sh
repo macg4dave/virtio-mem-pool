@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # Build the host controller from this checkout and install it with a site's
 # configuration and explicit, current attestations.
-# Usage: install-host.sh CONFIG_DIR INSTANCE VM=ATTESTATION [VM=ATTESTATION ...]
+# Usage: install-host.sh CONFIG_DIR INSTANCE [VM=ATTESTATION ...]
 # CONFIG_DIR holds host_list.toml, global-settings.toml and each
-# <vm_name>_settings.toml (see deploy/examples). INSTANCE names the systemd
-# controller; each VM needs its own reviewed evidence.
+# <vm_name>_settings.toml (see deploy/examples), installed exactly as
+# written. Each VM's attestation is CONFIG_DIR/attestations/<vm_name>.attestation.json
+# unless VM=ATTESTATION names another file. INSTANCE names the systemd
+# controller.
 set -euo pipefail
-if (( $# < 3 )); then
-  echo 'usage: install-host.sh CONFIG_DIR INSTANCE VM=ATTESTATION [VM=ATTESTATION ...]' >&2
+if (( $# < 2 )); then
+  echo 'usage: install-host.sh CONFIG_DIR INSTANCE [VM=ATTESTATION ...]' >&2
   exit 1
 fi
 config_dir=$(cd -- "$1" && pwd)
@@ -22,6 +24,9 @@ if [[ ! $instance =~ ^[[:alnum:]][[:alnum:]_.-]*$ ]]; then
   exit 1
 fi
 attestations=()
+if [[ -d $config_dir/attestations ]]; then
+  attestations+=(--attestation-dir "$config_dir/attestations")
+fi
 for binding in "$@"; do
   if [[ $binding != *=* || -z ${binding%%=*} || ! -f ${binding#*=} ]]; then
     echo "expected VM=ATTESTATION with an existing file: $binding" >&2

@@ -39,13 +39,6 @@ is short.
 | **Priority** | A number you give each VM. When there isn't enough memory for everyone, the VM with the higher number is served first |
 | **Instance name** | The name the controller was installed under. You need it for some commands ([how to find it](#find-your-instance-name)) |
 
-### How sizes are written
-
-Sizes are written in quotes, for example `"8GB"` or `"512MB"`. Here, 1 GB
-is 1024 MB. Use whole numbers of GB, or multiples of 16 MB (`"512MB"`,
-`"768MB"`, `"1536MB"`). If a size can't be used, the program tells you
-when you install the change.
-
 ## Before you start
 
 You need:
@@ -86,8 +79,7 @@ these names.
 
 ## Where the settings are
 
-The settings are plain text files. The controller reads them from this
-folder on the host:
+The settings are plain text files in this folder on the host:
 
 ```text
 /etc/virtio-mem-host/
@@ -98,72 +90,63 @@ folder on the host:
 | `global-settings.toml` | Settings for the whole host: the pool size and how much memory the host keeps for itself |
 | `host_list.toml` | Which VMs the program manages, and each VM's **priority** |
 | `<vm name>_settings.toml` | One file per VM: the smallest and largest that VM may be, and how much spare memory it keeps. For a VM called `webserver`, the file is `webserver_settings.toml` |
-| `<vm name>.attestation.json` | One per VM, made by the program. It records that the VM was checked as safe to resize. **Don't edit it** |
+| `attestations/` | A folder the program manages. It holds a record for each VM showing it was checked as safe to resize. **Don't change anything in it** |
 
-To see what's there, type:
+Each settings file has notes in it explaining its settings. To see what's
+there, type:
 
 ```bash
 ls /etc/virtio-mem-host/
 ```
 
-To read a file without changing it, type `cat` and the file's name:
+To read a file without changing it, type `sudo cat` and the file's name:
 
 ```bash
-cat /etc/virtio-mem-host/host_list.toml
+sudo cat /etc/virtio-mem-host/host_list.toml
 ```
 
-**Don't edit the files in `/etc/virtio-mem-host/` directly.** The
-controller reads them only when it starts. To change a setting, edit
-your own copy of the files, then install the copy. The next two sections
-show how. Installing checks your changes, so a mistake is caught before
-it can reach the controller.
+## How to edit a settings file
 
-## One-time setup: your own copy of the settings
-
-Do this once. It makes a folder called `virtio-mem-config` in your home
-folder, holding a copy of every settings file.
+Open the file with the `nano` text editor. The files belong to the
+administrator, so start the command with `sudo`:
 
 ```bash
-mkdir -p ~/virtio-mem-config
-sudo cp /etc/virtio-mem-host/*.toml /etc/virtio-mem-host/*.attestation.json ~/virtio-mem-config/
-sudo chown "$USER" ~/virtio-mem-config/*
-ls ~/virtio-mem-config
-```
-
-The last command lists the copied files. From now on, `~/virtio-mem-config`
-is where you change settings.
-
-## The settings explained
-
-Edit a file with the `nano` text editor, for example:
-
-```bash
-nano ~/virtio-mem-config/host_list.toml
+sudo nano /etc/virtio-mem-host/host_list.toml
 ```
 
 In `nano`, move around with the arrow keys and type to change text.
 Press **Ctrl+O** then **Enter** to save, and **Ctrl+X** to leave.
 
-Lines that start with `#` are notes for people. The program ignores them.
-Each setting is a name, `=`, and a value. Change only the value.
+- Lines that start with `#` are notes for people. The program ignores
+  them. You can add notes of your own the same way, and they are kept.
+- Each setting is a name, `=`, and a value. Change only the value.
+- Write sizes in quotes, with a unit: `"512MB"`, `"128MiB"`, `"3GB"`
+  ([more about sizes](#writing-sizes)).
+
+Saving the file does **not** change anything yet. The program keeps
+using the old settings until you apply the change
+([How to change a setting](#how-to-change-a-setting)). Applying checks
+the file first, so a mistake is caught before it can take effect.
+
+## The settings explained
 
 ### Pool size and host reserve: `global-settings.toml`
 
 ```toml
 pool_bytes = "16GB"
 host_min_headroom_bytes = "4GB"
+observe_only = false
 ```
 
 | Setting | What it means | How to choose |
 |---|---|---|
 | `pool_bytes` | The total extra memory all the VMs may share, on top of the small amount each one starts with | The host's memory, minus what the host needs for itself, minus each VM's starting memory |
 | `host_min_headroom_bytes` | Memory the host always keeps free for itself. The program never gives VMs memory that would take the host below this | `"4GB"` suits most hosts. Raise it if the host runs other programs |
+| `observe_only` | Trial mode. `true`: the program decides and logs everything but changes no VM's memory | `false` for normal use |
 
-Other settings may appear in this file too. Leave them alone unless the
-[administration guide](administration.md#global-settingstoml) tells you
-otherwise. One of them, `observe_only`, is useful for a trial run: set to
-`true`, the program decides and logs everything but changes no VM's
-memory. Set it back to `false` for normal use.
+The file has a few more settings, marked as technical. Leave them alone
+unless the [administration guide](administration.md#global-settingstoml)
+tells you otherwise.
 
 ### Which VMs, and their priority: `host_list.toml`
 
@@ -228,34 +211,47 @@ free_ram = "512MB"
 All three sizes cover the VM's total memory, including what it starts
 with.
 
+### Writing sizes
+
+| You can write | Meaning |
+|---|---|
+| `"512MB"` or `"512MiB"` | 512 megabytes |
+| `"3GB"` or `"3GiB"` | 3 gigabytes |
+| `"1.5GB"` | 1.5 gigabytes (1536 MB) |
+| `"3 GB"` or `"3gb"` | Also fine: spaces and lower case are allowed |
+
+Here, MB and MiB mean the same thing, and 1 GB is 1024 MB. Use whole
+gigabytes, or multiples of 16 MB (`"512MB"`, `"768MB"`, `"1536MB"`). If a
+size can't be used, applying the change tells you which one.
+
+Always include the unit. A number on its own, such as `max_ram = 8`,
+means 8 **bytes**, and is refused.
+
 ## How to change a setting
 
-The steps are always the same: edit your copy, install it, check it.
+The steps are always the same: edit the file, apply the change, check it.
 
 **Example: make `backup` more important than `webserver`.**
 
 1. Open the host list:
 
    ```bash
-   nano ~/virtio-mem-config/host_list.toml
+   sudo nano /etc/virtio-mem-host/host_list.toml
    ```
 
 2. Find the `backup` block and change `priority = 50` to
    `priority = 150`. Save with **Ctrl+O**, **Enter**, then leave with
    **Ctrl+X**.
 
-3. Install the change. Use your own instance name in place of `main`,
-   and add one `name=file` pair for **every** VM in `host_list.toml`:
+3. Apply the change. Use your own instance name in place of `main`:
 
    ```bash
    cd ~/virtio-mem-pool
-   deploy/scripts/install-host.sh ~/virtio-mem-config main \
-     webserver=$HOME/virtio-mem-config/webserver.attestation.json \
-     backup=$HOME/virtio-mem-config/backup.attestation.json
+   deploy/scripts/install-host.sh /etc/virtio-mem-host main
    ```
 
-   It asks for your `sudo` password. It can take a few minutes the first
-   time. It then:
+   It asks for your `sudo` password, and can take a few minutes the
+   first time. It then:
    1. briefly stops the controller,
    2. checks all your settings,
    3. installs them, keeping a backup of the old ones,
@@ -267,23 +263,19 @@ The steps are always the same: edit your copy, install it, check it.
    state, which should say **`active (running)`** in green. Then look at
    the pool ([Checking that it's working](#checking-that-its-working)).
 
-**Example: let `webserver` grow to 12 GB.** Open
-`~/virtio-mem-config/webserver_settings.toml`, change `max_ram = "8GB"`
-to `max_ram = "12GB"`, save, and install exactly as in step 3 above.
+**Example: let `webserver` grow to 12 GB.** Run
+`sudo nano /etc/virtio-mem-host/webserver_settings.toml`, change
+`max_ram = "8GB"` to `max_ram = "12GB"`, save, and apply exactly as in
+step 3 above.
 
-### If the install reports an error
+### If applying reports an error
 
-The error message says which file and setting is wrong, for example a
-misspelt setting name or a size that can't be used. Your old settings are
-still in place, but **the controller is left stopped**. Either:
+The message says which file and setting is wrong, for example a misspelt
+setting name or a size that can't be used. **The controller is left
+stopped** until a change is applied. Your VMs keep running with the
+memory they have, but they don't grow or shrink in the meantime.
 
-- fix the mistake in `~/virtio-mem-config` and run the install command
-  again, or
-- go back to your old settings for now by starting the controller:
-
-  ```bash
-  sudo systemctl start virtio-mem-host@main
-  ```
+Open the file again, fix the mistake, save, and apply again (step 3).
 
 ## Checking that it's working
 
@@ -363,8 +355,8 @@ starts.
 | A VM's line in the pool view says **stale** | The VM's guest service hasn't reported in | Check that the VM is running. Inside the VM, `systemctl status virtio-mem-guest` should say `active (running)` |
 
 **Never delete files under `/var/lib/virtio-mem-host/` or
-`/var/lib/virtio-mem-guest/`.** They hold the requests in progress, and
-deleting them can leave a VM in the wrong state.
+`/var/lib/virtio-mem-guest/`, or in `/etc/virtio-mem-host/attestations/`.**
+The program needs them to keep each VM in the right state.
 
 ## Going further
 

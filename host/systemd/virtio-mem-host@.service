@@ -16,8 +16,9 @@ SupplementaryGroups=qemu
 Environment=HOME=/run/virtio-mem-host
 Environment=XDG_CACHE_HOME=/run/virtio-mem-host/.cache
 # A site with another layout overrides ExecStart in a drop-in
-# (systemctl edit virtio-mem-host@.service). Attestations sit beside the
-# host list; durable state goes in the StateDirectory below.
+# (systemctl edit virtio-mem-host@.service). Attestations sit in the
+# attestations/ folder beside the host list; durable state goes in the
+# StateDirectory below.
 ExecStart=/usr/local/libexec/virtio-mem-host --config /etc/virtio-mem-host/host_list.toml
 # Failure is fail-stop. Deployment monitoring decides when a reviewed restart
 # is appropriate; the unit does not create an automatic restart loop.

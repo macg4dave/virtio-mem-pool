@@ -17,6 +17,9 @@ pub struct Command {
     config: PathBuf,
     /// One reviewed source attestation per configured VM.
     attestations: BTreeMap<String, PathBuf>,
+    /// A folder holding `<vm_name>.attestation.json` for each configured VM
+    /// that `attestations` does not name.
+    attestation_dir: Option<PathBuf>,
     output: PathBuf,
     timeout: Duration,
     apply: bool,
@@ -50,8 +53,8 @@ struct AttestationEvidence {
     sha256: String,
 }
 
-/// Where host-deploy installs the configuration and attestations; the unit's
-/// ExecStart names the host list in it.
+/// Where host-deploy installs the configuration, with the attestations in
+/// their own folder inside it; the unit's ExecStart names the host list in it.
 const CONFIG_DIRECTORY: &str = "/etc/virtio-mem-host";
 
 /// The deployment layout: unit `virtio-mem-host@INSTANCE.service` runs the
@@ -105,6 +108,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
     validate_identity(instance)?;
     let mut config = None;
     let mut attestations = BTreeMap::new();
+    let mut attestation_dir = None;
     let mut output = None;
     let mut timeout = None;
     let mut apply = false;
@@ -116,7 +120,11 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
             "--apply" if !apply => apply = true,
             "--elevate" if !elevate => elevate = true,
             "--elevated-child" if !elevated_child => elevated_child = true,
-            option @ ("--config" | "--attestation" | "--output" | "--command-timeout-seconds") => {
+            option @ ("--config"
+            | "--attestation"
+            | "--attestation-dir"
+            | "--output"
+            | "--command-timeout-seconds") => {
                 index += 1;
                 let value = args
                     .get(index)
@@ -134,6 +142,9 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
                         {
                             return Err(format!("duplicate --attestation for VM {vm}"));
                         }
+                    }
+                    "--attestation-dir" if attestation_dir.is_none() => {
+                        attestation_dir = Some(PathBuf::from(value))
                     }
                     "--output" if output.is_none() => output = Some(PathBuf::from(value)),
                     "--command-timeout-seconds" if timeout.is_none() => {
@@ -162,6 +173,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         instance: instance.clone(),
         config: config.ok_or_else(|| "host-deploy requires --config".to_owned())?,
         attestations,
+        attestation_dir,
         output: output.ok_or_else(|| "host-deploy requires --output".to_owned())?,
         timeout: timeout
             .ok_or_else(|| "host-deploy requires --command-timeout-seconds".to_owned())?,
@@ -197,25 +209,32 @@ pub fn run(command: &Command, repo: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Copies the configuration files byte for byte, so what is installed is what
+/// the administrator wrote: their comments and sizes such as `"3GB"` stay as
+/// they are. The caller validates the copy, not the source.
 fn snapshot_configuration(source: &Path, directory: &Path) -> Result<PathBuf, String> {
     use virtio_mem_core::settings::{self, GLOBAL_FILE, HOST_LIST_FILE};
-    let (globals, list, vms) = settings::load_configuration(source)?;
-    let serialize = |result: Result<String, toml::ser::Error>| {
-        result.map_err(|error| format!("serialize configuration: {error}"))
+    let (_, _, vms) = settings::load_configuration(source)?;
+    let from = source.parent().unwrap_or(Path::new("."));
+    let copy = |name: &str| -> Result<(), String> {
+        let bytes = std::fs::read(from.join(name))
+            .map_err(|error| format!("read {}: {error}", from.join(name).display()))?;
+        persist(&directory.join(name), &bytes)
     };
-    persist(
-        &directory.join(GLOBAL_FILE),
-        serialize(toml::to_string(&globals))?.as_bytes(),
-    )?;
+    if from.join(GLOBAL_FILE).exists() {
+        copy(GLOBAL_FILE)?;
+    } else {
+        persist(
+            &directory.join(GLOBAL_FILE),
+            b"# Every server-wide setting is at its built-in default.\n",
+        )?;
+    }
     persist(
         &directory.join(HOST_LIST_FILE),
-        serialize(toml::to_string(&list))?.as_bytes(),
+        &std::fs::read(source).map_err(|error| format!("read {}: {error}", source.display()))?,
     )?;
     for vm in &vms {
-        persist(
-            &directory.join(settings::vm_filename(&vm.vm_name)?),
-            serialize(toml::to_string(vm))?.as_bytes(),
-        )?;
+        copy(&settings::vm_filename(&vm.vm_name)?)?;
     }
     Ok(directory.join(HOST_LIST_FILE))
 }
@@ -259,7 +278,27 @@ fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
     )?;
     let settings = HostSettings::load(&config_source)
         .map_err(|error| format!("validate host configuration: {error}"))?;
-    let attestations = pair_attestations(&command.attestations, repo, &settings.vms)?;
+    let mut attestations = pair_attestations(
+        &command.attestations,
+        command.attestation_dir.as_deref(),
+        repo,
+        &settings.vms,
+    )?;
+    // Snapshot the attestations with the settings, so an install from the
+    // installed directory itself never copies a file onto itself.
+    let attestation_snapshot =
+        config_source.with_file_name(virtio_mem_host::config::ATTESTATION_DIRECTORY);
+    for attestation in &mut attestations {
+        let bytes = std::fs::read(&attestation.source).map_err(|error| {
+            format!(
+                "read compatibility attestation {}: {error}",
+                attestation.source.display()
+            )
+        })?;
+        let copy = attestation_snapshot.join(format!("{}.attestation.json", attestation.vm_name));
+        persist(&copy, &bytes)?;
+        attestation.source = copy;
+    }
     for (attestation, config) in attestations.iter().zip(&settings.vms) {
         let text = std::fs::read_to_string(&attestation.source)
             .map_err(|error| format!("read compatibility attestation: {error}"))?;
@@ -355,9 +394,11 @@ struct DeployedAttestation {
 }
 
 /// Pairs every configured VM with exactly one reviewed source attestation and
-/// the path its config names, before anything is read or validated live.
+/// the path its config names, before anything is read or validated live. A VM
+/// not named explicitly takes `<vm_name>.attestation.json` from `directory`.
 fn pair_attestations(
     attestations: &BTreeMap<String, PathBuf>,
+    directory: Option<&Path>,
     repo: &Path,
     vms: &[HostConfig],
 ) -> Result<Vec<DeployedAttestation>, String> {
@@ -371,12 +412,29 @@ fn pair_attestations(
     }
     vms.iter()
         .map(|config| {
-            let source = attestations
-                .get(&config.vm_name)
-                .map(|path| resolve(repo, path))
-                .ok_or_else(|| {
-                    format!("host-deploy requires --attestation {}=FILE", config.vm_name)
-                })?;
+            let source = match (attestations.get(&config.vm_name), directory) {
+                (Some(path), _) => resolve(repo, path),
+                (None, Some(directory)) => {
+                    let path = resolve(
+                        repo,
+                        &directory.join(format!("{}.attestation.json", config.vm_name)),
+                    );
+                    if !path.is_file() {
+                        return Err(format!(
+                            "no attestation for VM {}: expected {}",
+                            config.vm_name,
+                            path.display()
+                        ));
+                    }
+                    path
+                }
+                (None, None) => {
+                    return Err(format!(
+                        "host-deploy requires --attestation {}=FILE or --attestation-dir DIR",
+                        config.vm_name
+                    ))
+                }
+            };
             let target = virtio_mem_host::config::attestation_path(
                 Path::new(CONFIG_DIRECTORY),
                 &config.vm_name,
@@ -465,6 +523,36 @@ fn install(
                 .map_err(|error| format!("backup {}: {error}", target.display()))?;
         }
     }
+    // Earlier installs put attestations beside the settings files. Keep a
+    // copy, then remove them once the new ones are in their own folder.
+    let legacy = legacy_attestations(Path::new(CONFIG_DIRECTORY))?;
+    for path in &legacy {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or("invalid legacy attestation filename")?;
+        std::fs::copy(path, backup.join(format!("legacy-{name}")))
+            .map_err(|error| format!("backup {}: {error}", path.display()))?;
+    }
+    install_directory(
+        CONFIG_DIRECTORY,
+        "root",
+        "root",
+        "0755",
+        repo,
+        command.timeout,
+    )?;
+    install_directory(
+        &Path::new(CONFIG_DIRECTORY)
+            .join(virtio_mem_host::config::ATTESTATION_DIRECTORY)
+            .display()
+            .to_string(),
+        "root",
+        "virtio-mem-host",
+        "0750",
+        repo,
+        command.timeout,
+    )?;
     install_file(
         candidate,
         "/usr/local/libexec/virtio-mem-host",
@@ -521,6 +609,10 @@ fn install(
             command.timeout,
         )?;
     }
+    for path in &legacy {
+        std::fs::remove_file(path)
+            .map_err(|error| format!("remove {}: {error}", path.display()))?;
+    }
     process::bounded_text(
         "systemctl",
         &[process::os("daemon-reload")],
@@ -541,6 +633,30 @@ fn install(
             .map_err(|error| format!("record prior enablement: {error}"))?;
     }
     Ok(backup.display().to_string())
+}
+
+/// Attestations left directly in the configuration directory by an install
+/// from before they had their own folder.
+fn legacy_attestations(directory: &Path) -> Result<Vec<PathBuf>, String> {
+    let entries = match std::fs::read_dir(directory) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        result => result.map_err(|error| format!("read {}: {error}", directory.display()))?,
+    };
+    let mut found = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("read {}: {error}", directory.display()))?;
+        let path = entry.path();
+        if path.is_file()
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".attestation.json"))
+        {
+            found.push(path);
+        }
+    }
+    found.sort();
+    Ok(found)
 }
 
 fn install_file(
@@ -707,6 +823,10 @@ fn elevated_arguments(command: &Command) -> Vec<OsString> {
         arguments.push(process::os("--attestation"));
         arguments.push(value);
     }
+    if let Some(directory) = &command.attestation_dir {
+        arguments.push(process::os("--attestation-dir"));
+        arguments.push(directory.as_os_str().to_owned());
+    }
     arguments.extend([
         process::os("--output"),
         command.output.as_os_str().to_owned(),
@@ -790,6 +910,24 @@ mod tests {
         let mut duplicate = args.to_vec();
         duplicate[6] = "guest=again.json".to_owned();
         assert!(parse(&duplicate).is_err());
+
+        let mut with_folder = args.to_vec();
+        with_folder.splice(
+            3..7,
+            [
+                "--attestation-dir".to_owned(),
+                "site/attestations".to_owned(),
+            ],
+        );
+        let command = parse(&with_folder).expect("folder");
+        assert_eq!(
+            command.attestation_dir,
+            Some(PathBuf::from("site/attestations"))
+        );
+        let forwarded = elevated_arguments(&command);
+        assert!(forwarded
+            .windows(2)
+            .any(|pair| pair[0] == "--attestation-dir" && pair[1] == "site/attestations"));
     }
 
     #[test]
@@ -803,11 +941,8 @@ mod tests {
         let original = HostSettings::load(&snapshot).expect("settings");
         let mut settings = original;
         settings.vms[0].vm_name = "a".to_owned();
-        settings.vms[0].compatibility_attestation_path =
-            "/etc/virtio-mem-host/a.attestation.json".to_owned();
         let mut other = settings.vms[0].clone();
         other.vm_name = "b".to_owned();
-        other.compatibility_attestation_path = "/etc/virtio-mem-host/b.attestation.json".to_owned();
         settings.vms.push(other);
         std::fs::remove_dir_all(directory).expect("remove fixture");
         let repo = Path::new("/repo");
@@ -815,19 +950,95 @@ mod tests {
             ("a".to_owned(), PathBuf::from("a.json")),
             ("b".to_owned(), PathBuf::from("/abs/b.json")),
         ]);
-        let paired = pair_attestations(&both, repo, &settings.vms).expect("paired");
+        let paired = pair_attestations(&both, None, repo, &settings.vms).expect("paired");
         assert_eq!(paired[0].source, Path::new("/repo/a.json"));
+        // Installed in their own folder, apart from the settings files.
         assert_eq!(
             paired[1].target,
-            Path::new("/etc/virtio-mem-host/b.attestation.json")
+            Path::new("/etc/virtio-mem-host/attestations/b.attestation.json")
         );
 
         let mut missing = both.clone();
         missing.remove("b");
-        assert!(pair_attestations(&missing, repo, &settings.vms).is_err());
+        assert!(pair_attestations(&missing, None, repo, &settings.vms).is_err());
         let mut extra = both.clone();
         extra.insert("c".to_owned(), PathBuf::from("c.json"));
-        assert!(pair_attestations(&extra, repo, &settings.vms).is_err());
+        assert!(pair_attestations(&extra, None, repo, &settings.vms).is_err());
+    }
+
+    #[test]
+    fn an_attestation_folder_supplies_each_vm_not_named_explicitly() {
+        let directory =
+            std::env::temp_dir().join(format!("virtio-mem-deploy-dir-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("folder");
+        std::fs::write(directory.join("a.attestation.json"), b"{}").expect("a");
+        let source = crate::repo_root()
+            .expect("root")
+            .join("fixtures/config/host_list.toml");
+        let mut vms = HostSettings::load(&source).expect("settings").vms;
+        vms[0].vm_name = "a".to_owned();
+        let mut other = vms[0].clone();
+        other.vm_name = "b".to_owned();
+        vms.push(other);
+        let repo = Path::new("/repo");
+        let named = BTreeMap::from([("b".to_owned(), PathBuf::from("/abs/b.json"))]);
+        let paired = pair_attestations(&named, Some(&directory), repo, &vms);
+        let missing = pair_attestations(&BTreeMap::new(), Some(&directory), repo, &vms);
+        std::fs::remove_dir_all(&directory).expect("remove folder");
+        let paired = paired.expect("paired");
+        assert_eq!(paired[0].source, directory.join("a.attestation.json"));
+        assert_eq!(paired[1].source, Path::new("/abs/b.json"));
+        // b is in neither the folder nor the explicit list.
+        assert!(missing.is_err_and(|error| error.contains("no attestation for VM b")));
+    }
+
+    #[test]
+    fn the_installed_configuration_keeps_comments_and_written_sizes() {
+        let root =
+            std::env::temp_dir().join(format!("virtio-mem-deploy-copy-{}", std::process::id()));
+        let source = root.join("source");
+        std::fs::create_dir_all(&source).expect("source");
+        let globals = "# The pool every VM shares.\npool_bytes = \"3GB\"\n";
+        let list =
+            "# Web first.\n[[vm]]\nvm_name = \"web\"\nalias = \"ua-virtiomem0\"\npriority = 100\n";
+        let vm = "# Small at idle.\nvm_name = \"web\"\nguest_os = \"linux\"\nmin_ram = \"512MB\"\nmax_ram = \"2GiB\"\nfree_ram = \"128MiB\"\n";
+        std::fs::write(source.join("global-settings.toml"), globals).expect("globals");
+        std::fs::write(source.join("host_list.toml"), list).expect("list");
+        std::fs::write(source.join("web_settings.toml"), vm).expect("vm");
+        let snapshot = snapshot_configuration(&source.join("host_list.toml"), &root.join("copy"));
+        let read = |name: &str| std::fs::read_to_string(root.join("copy").join(name));
+        let copied = (
+            read("global-settings.toml"),
+            read("host_list.toml"),
+            read("web_settings.toml"),
+        );
+        let loaded = snapshot.as_ref().map(|path| HostSettings::load(path));
+        std::fs::remove_dir_all(&root).expect("remove");
+        assert!(snapshot.is_ok(), "{snapshot:?}");
+        assert_eq!(copied.0.expect("globals"), globals);
+        assert_eq!(copied.1.expect("list"), list);
+        assert_eq!(copied.2.expect("vm"), vm);
+        let vms = loaded.expect("snapshot path").expect("valid copy").vms;
+        assert_eq!(vms[0].max_ram, 2 << 30);
+    }
+
+    #[test]
+    fn only_top_level_attestations_are_legacy() {
+        let root =
+            std::env::temp_dir().join(format!("virtio-mem-deploy-legacy-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("attestations")).expect("folders");
+        for name in [
+            "web.attestation.json",
+            "web_settings.toml",
+            "attestations/web.attestation.json",
+        ] {
+            std::fs::write(root.join(name), b"{}").expect("file");
+        }
+        let found = legacy_attestations(&root);
+        let absent = legacy_attestations(&root.join("absent"));
+        std::fs::remove_dir_all(&root).expect("remove");
+        assert_eq!(found, Ok(vec![root.join("web.attestation.json")]));
+        assert_eq!(absent, Ok(Vec::new()));
     }
 
     #[test]

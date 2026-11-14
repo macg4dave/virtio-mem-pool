@@ -1,15 +1,23 @@
-# Example: the VMs one host controller manages together. Copy this directory
-# to a site location (for example /etc/virtio-mem-host on the host, or an
-# untracked site/ folder in a checkout) and edit the copy.
+# The VMs this host shares memory between, and which come first.
 #
-# Higher priority receives free pool RAM first; equal priorities are served
-# first come, first served (the earlier request), then in entry order.
-# `alias` is the virtio-mem device's alias in the libvirt domain XML.
-# Each vm_name loads <vm_name>_settings.toml from this directory.
-# Optional telemetry_path names a diagnostic file on the Linux host; omit it
-# to disable host telemetry output. It never names a guest file.
+# Lines starting with # are notes: the program ignores them.
+# Each VM has a block starting with [[vm]]. Each VM also needs its own
+# <VM name>_settings.toml in this folder.
+#
+# After changing this file, install it (see docs/usage.md). The running
+# program does not notice changes on its own.
+#
+# Priority: a whole number above zero. A higher number is more important.
+# - With plenty of free memory, priority makes no difference.
+# - When memory is short, the VM with the higher number is served first.
+# - Equal numbers are served in the order the VMs asked.
+# - Memory is never taken away from one VM to give to another.
+# Spacing the numbers out (100, 50, 10) leaves room for VMs in between.
+
 [[vm]]
+# The VM's name, exactly as `virsh list` shows it.
 vm_name = "linux-vm"
+# The name of the VM's memory device. Don't change it.
 alias = "ua-virtiomem0"
 priority = 100
 

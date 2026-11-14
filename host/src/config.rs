@@ -76,9 +76,17 @@ fn state_directory() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(DEFAULT_STATE_DIRECTORY))
 }
 
-/// A VM's compatibility attestation sits beside the host list that names it.
+/// The folder, inside the configuration directory, that holds the VMs'
+/// compatibility attestations. They are generated evidence, not settings, so
+/// they are kept apart from the settings files people edit.
+pub const ATTESTATION_DIRECTORY: &str = "attestations";
+
+/// A VM's compatibility attestation, in the attestation folder beside the host
+/// list that names it.
 pub fn attestation_path(config_directory: &Path, vm_name: &str) -> PathBuf {
-    config_directory.join(format!("{vm_name}.attestation.json"))
+    config_directory
+        .join(ATTESTATION_DIRECTORY)
+        .join(format!("{vm_name}.attestation.json"))
 }
 
 impl HostSettings {
@@ -177,7 +185,7 @@ mod tests {
         );
         assert_eq!(
             Path::new(&settings.vms[0].compatibility_attestation_path),
-            path.with_file_name("windows-guest.attestation.json")
+            path.with_file_name("attestations/windows-guest.attestation.json")
         );
         assert!(settings.vms[0]
             .policy_state_path

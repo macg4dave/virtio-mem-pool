@@ -7,8 +7,9 @@
 #
 # Usage: add-linux-vm.sh [--apply] CONFIG_DIR INSTANCE TEMPLATE_VM NEW_VM SSH_DESTINATION
 #   CONFIG_DIR       the site configuration install-host.sh takes; it must hold
-#                    TEMPLATE_VM_settings.toml, TEMPLATE_VM.review.json and an
-#                    attestation for every VM in host_list.toml
+#                    TEMPLATE_VM_settings.toml, and in its attestations/ folder
+#                    TEMPLATE_VM.review.json and an attestation for every VM in
+#                    host_list.toml
 #   SSH_DESTINATION  the copy, for an account with passwordless sudo
 # Without --apply it only checks the inputs and prints the plan.
 set -euo pipefail
@@ -32,7 +33,8 @@ virsh=(virsh -c qemu:///system)
 ssh_guest=(ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -- "$destination")
 
 [[ $name =~ ^[a-z0-9][a-z0-9_-]*$ ]] || { echo "invalid VM name: $name" >&2; exit 1; }
-for file in host_list.toml "${template}_settings.toml" "$template.review.json"; do
+evidence=$config_dir/attestations
+for file in host_list.toml "${template}_settings.toml" "attestations/$template.review.json"; do
   [[ -f $config_dir/$file ]] || { echo "missing $config_dir/$file" >&2; exit 1; }
 done
 "${virsh[@]}" dominfo "$name" >/dev/null
@@ -77,18 +79,14 @@ kernel=$("${ssh_guest[@]}" uname -r)
 sed "s/^vm_name = .*/vm_name = \"$name\"/" "$config_dir/${template}_settings.toml" \
   > "$config_dir/${name}_settings.toml"
 sed "s/\"guest_driver_version\": \"[^\"]*\"/\"guest_driver_version\": \"linux $kernel\"/" \
-  "$config_dir/$template.review.json" > "$config_dir/$name.review.json"
+  "$evidence/$template.review.json" > "$evidence/$name.review.json"
 if ! $listed; then
   printf '\n[[vm]]\nvm_name = "%s"\nalias = "%s"\npriority = %s\n' \
     "$name" "$alias" "$priority" >> "$config_dir/host_list.toml"
 fi
 "${virsh[@]}" update-memory-device "$name" --alias "$alias" --requested-size 0 --config
-cargo xtask attestation "$name" "$alias" "$config_dir/$name.review.json" \
-  --output "$config_dir/$name.attestation.json" --command-timeout-seconds 60
+cargo xtask attestation "$name" "$alias" "$evidence/$name.review.json" \
+  --output "$evidence/$name.attestation.json" --command-timeout-seconds 60
 
-bindings=()
-while read -r vm; do
-  [[ -f $config_dir/$vm.attestation.json ]] || { echo "no attestation for $vm in $config_dir" >&2; exit 1; }
-  bindings+=("$vm=$config_dir/$vm.attestation.json")
-done < <(sed -n 's/^vm_name = "\(.*\)"$/\1/p' "$config_dir/host_list.toml")
-"$scripts_dir/install-host.sh" "$config_dir" "$instance" "${bindings[@]}"
+# install-host.sh takes every VM's attestation from $evidence.
+"$scripts_dir/install-host.sh" "$config_dir" "$instance"
