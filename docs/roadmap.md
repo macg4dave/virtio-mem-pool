@@ -436,7 +436,10 @@ folder. Not yet tried end to end on a VM with no device.
 - [x] **O4.2** Metrics as a Prometheus textfile
   (`/run/rampire/metrics.prom`), so there's no listening socket and the
   sandbox doesn't change.
-- [ ] **O4.3** Stable, named journal fields for every decision.
+- [x] **O4.3** Stable, named journal fields for every decision. Done
+  as the existing `key=value` lines, now catalogued in
+  [journal](journal.md) and held to it by a test (judgment call: native
+  journald fields would need journald's socket protocol, for little gain).
 - [ ] **O4.4** An example Ansible role (`rampire check`, then
   `rampire apply --yes --detailed-exitcode`) and a cloud-init snippet for
   guests.

@@ -58,6 +58,7 @@ See [development](docs/development.md) for setup and platform details.
 | [docs/development.md](docs/development.md) | Building, the gate, which checks need which platform |
 | [docs/tools.md](docs/tools.md) | `watch`, `metrics` and `qualification` |
 | [docs/roadmap.md](docs/roadmap.md) | Goals, open work, decisions and the rule for importing third-party code |
+| [docs/journal.md](docs/journal.md) | Every journal event the controller logs, and its keys |
 | [docs/json.md](docs/json.md) | Every JSON document and `--json` output, with its schema and version |
 | [docs/names.md](docs/names.md) | Every name RAMpire uses, and what it replaced |
 
