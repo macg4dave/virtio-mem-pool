@@ -76,7 +76,7 @@ jobs:
           cargo build --release --locked -p rampire -p rampire-guest-linux
           cargo build --release --locked --target x86_64-unknown-linux-musl -p rampire -p rampire-guest-linux
       - name: Package
-        run: packaging/build.sh "$VERSION" dist
+        run: bash packaging/build.sh "$VERSION" dist
       - name: Package contents
         run: |
           for package in dist/*.deb; do dpkg-deb --contents "$package"; done
