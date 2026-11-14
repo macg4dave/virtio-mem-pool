@@ -357,7 +357,7 @@ unit; it wasn't tried on the shared host.
   The unit's libvirt socket group is the RHEL family's `qemu`.
 - [ ] **O2.3** A host `.deb` with the same contents, with the
   `libvirt-qemu` group (decision D3, X8).
-- [ ] **O2.4** The unit is ordered after libvirt whichever daemon runs
+- [x] **O2.4** The unit is ordered after libvirt whichever daemon runs
   it: `libvirtd.service`, or `virtqemud.service` and its socket (X16).
 - [ ] **O2.5** Removing the host package (X15):
   - it stops the controller, and each VM keeps the memory it has;

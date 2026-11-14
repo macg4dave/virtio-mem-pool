@@ -1,7 +1,10 @@
 [Unit]
 Description=RAMpire memory controller
 Documentation=https://github.com/macg4dave/rampire
-After=network-online.target libvirtd.service
+# libvirt runs as one daemon (libvirtd) or as split daemons (virtqemud,
+# usually socket-activated): order after whichever this host has. After=
+# a unit that isn't installed is ignored.
+After=network-online.target libvirtd.service virtqemud.service virtqemud.socket
 Wants=network-online.target
 
 [Service]
