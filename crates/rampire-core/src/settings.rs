@@ -72,10 +72,10 @@ impl GuestOs {
     }
 }
 
-/// The Linux driver's first busy-removal retry, `RAMPIRE_RETRY_TIMER_MIN_MS`
+/// The Linux driver's first busy-removal retry, `VIRTIO_MEM_RETRY_TIMER_MIN_MS`
 /// in `drivers/virtio/virtio_mem.c`.
 const LINUX_REMOVAL_RETRY_MIN_SECONDS: u64 = 50;
-/// The longest wait between Linux retries, `RAMPIRE_RETRY_TIMER_MAX_MS`.
+/// The longest wait between Linux retries, `VIRTIO_MEM_RETRY_TIMER_MAX_MS`.
 const LINUX_REMOVAL_RETRY_MAX_SECONDS: u64 = 300;
 /// Busy-removal retries a Linux guest gets before its removal is settled.
 const LINUX_REMOVAL_RETRIES_AWAITED: u32 = 3;
