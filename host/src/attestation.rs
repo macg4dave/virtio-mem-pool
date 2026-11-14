@@ -26,52 +26,98 @@ rampire_core::schema_name! {
 }
 const MAX_ATTESTATION_BYTES: u64 = 64 * 1024;
 
+/// The review profile's version: `version` in `reviews/NAME.toml`.
+pub const REVIEW_VERSION: u32 = 1;
+
+/// Where a review answer came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnswerSource {
+    /// Read from the domain's definition by tooling.
+    Detected,
+    /// Confirmed by a person.
+    Confirmed,
+}
+
+/// One review answer and its source, written in TOML as
+/// `no_vdpa = { value = true, source = "confirmed" }`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Answer<T> {
+    pub value: T,
+    pub source: AnswerSource,
+}
+
+impl<T> Answer<T> {
+    pub fn confirmed(value: T) -> Self {
+        Self {
+            value,
+            source: AnswerSource::Confirmed,
+        }
+    }
+}
+
+/// A review profile, `reviews/NAME.toml`: the answers attestation needs that
+/// the host can't prove from live evidence. One profile serves every VM of
+/// a kind.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CompatibilityReview {
+    pub version: u32,
     /// The guest operating system reviewed. It must match the VM's settings,
     /// because the driver behaviour the host relies on differs between them.
     pub guest_os: GuestOs,
-    pub workload_reviewed: bool,
-    pub no_vdpa: bool,
-    pub no_rdma_migration: bool,
-    pub no_vfio_nvme: bool,
-    pub no_mlock: bool,
-    pub no_secure_virtualization: bool,
-    pub no_unsupported_vhost_user: bool,
-    pub balloon_resize_inactive: bool,
-    pub memory_slot_budget: u32,
-    pub vfio_mapping_budget: u32,
+    /// The guest's workload tolerates memory being added and removed. Only a
+    /// person can answer this.
+    pub workload_reviewed: Answer<bool>,
+    pub no_vdpa: Answer<bool>,
+    pub no_rdma_migration: Answer<bool>,
+    pub no_vfio_nvme: Answer<bool>,
+    pub no_mlock: Answer<bool>,
+    pub no_secure_virtualization: Answer<bool>,
+    pub no_unsupported_vhost_user: Answer<bool>,
+    pub balloon_resize_inactive: Answer<bool>,
+    pub memory_slot_budget: Answer<u32>,
+    pub vfio_mapping_budget: Answer<u32>,
     /// The guest's virtio-mem driver as reviewed: the `viomem` driver
     /// version on Windows (that path is PAUSED until the viomem driver bug is
-    /// repaired), the kernel release on Linux. Reviews written
-    /// before Linux guests name it `windows_driver_version`.
-    #[serde(alias = "windows_driver_version")]
-    pub guest_driver_version: String,
+    /// repaired), the kernel release on Linux.
+    pub guest_driver_version: Answer<String>,
 }
 
 impl CompatibilityReview {
     fn validate(&self) -> Result<(), String> {
+        if self.version != REVIEW_VERSION {
+            return Err(format!(
+                "unsupported review profile version {} (expected {REVIEW_VERSION})",
+                self.version
+            ));
+        }
+        if self.workload_reviewed.source != AnswerSource::Confirmed {
+            return Err(
+                "workload_reviewed can only be confirmed by a person, not detected".to_owned(),
+            );
+        }
         let confirmations = [
-            (self.workload_reviewed, "workload_reviewed"),
-            (self.no_vdpa, "no_vdpa"),
-            (self.no_rdma_migration, "no_rdma_migration"),
-            (self.no_vfio_nvme, "no_vfio_nvme"),
-            (self.no_mlock, "no_mlock"),
-            (self.no_secure_virtualization, "no_secure_virtualization"),
-            (self.no_unsupported_vhost_user, "no_unsupported_vhost_user"),
-            (self.balloon_resize_inactive, "balloon_resize_inactive"),
+            (&self.workload_reviewed, "workload_reviewed"),
+            (&self.no_vdpa, "no_vdpa"),
+            (&self.no_rdma_migration, "no_rdma_migration"),
+            (&self.no_vfio_nvme, "no_vfio_nvme"),
+            (&self.no_mlock, "no_mlock"),
+            (&self.no_secure_virtualization, "no_secure_virtualization"),
+            (&self.no_unsupported_vhost_user, "no_unsupported_vhost_user"),
+            (&self.balloon_resize_inactive, "balloon_resize_inactive"),
         ];
-        if let Some((_, name)) = confirmations.iter().find(|(value, _)| !value) {
+        if let Some((_, name)) = confirmations.iter().find(|(answer, _)| !answer.value) {
             return Err(format!("compatibility review does not confirm {name}"));
         }
-        if self.memory_slot_budget == 0 {
+        if self.memory_slot_budget.value == 0 {
             return Err("compatibility review memory_slot_budget must be positive".to_owned());
         }
-        if self.vfio_mapping_budget == 0 {
+        if self.vfio_mapping_budget.value == 0 {
             return Err("compatibility review vfio_mapping_budget must be positive".to_owned());
         }
-        if self.guest_driver_version.trim().is_empty() {
+        if self.guest_driver_version.value.trim().is_empty() {
             return Err("compatibility review guest_driver_version must be non-empty".to_owned());
         }
         Ok(())
@@ -464,14 +510,12 @@ pub fn read_attestation(path: &Path) -> Result<CompatibilityAttestation, String>
     CompatibilityAttestation::parse(&read_bounded_json(path, "compatibility attestation")?)
 }
 
+/// A review profile, `reviews/NAME.toml`.
 pub fn read_review(path: &Path) -> Result<CompatibilityReview, String> {
-    let json = read_bounded_json(path, "compatibility review")?;
-    let review: CompatibilityReview = serde_json::from_str(&json).map_err(|error| {
-        format!(
-            "parse compatibility review: {error} (reviews now name guest_os, \"windows\" or \"linux\", and no longer carry trusted_development_guest)"
-        )
-    })?;
-    review.validate()?;
+    let review: CompatibilityReview = rampire_core::settings::read_toml(path)?;
+    review
+        .validate()
+        .map_err(|error| format!("{}: {error}", path.display()))?;
     Ok(review)
 }
 
@@ -865,37 +909,80 @@ mod tests {
     }
 
     fn review() -> CompatibilityReview {
+        let detected = |value| Answer {
+            value,
+            source: AnswerSource::Detected,
+        };
         CompatibilityReview {
+            version: REVIEW_VERSION,
             guest_os: GuestOs::Windows,
-            workload_reviewed: true,
-            no_vdpa: true,
-            no_rdma_migration: true,
-            no_vfio_nvme: true,
-            no_mlock: true,
-            no_secure_virtualization: true,
-            no_unsupported_vhost_user: true,
-            balloon_resize_inactive: true,
-            memory_slot_budget: 32,
-            vfio_mapping_budget: 8,
-            guest_driver_version: "100.101.104.20800".to_owned(),
+            workload_reviewed: Answer::confirmed(true),
+            no_vdpa: detected(true),
+            no_rdma_migration: Answer::confirmed(true),
+            no_vfio_nvme: detected(true),
+            no_mlock: detected(true),
+            no_secure_virtualization: detected(true),
+            no_unsupported_vhost_user: detected(true),
+            balloon_resize_inactive: detected(true),
+            memory_slot_budget: Answer::confirmed(32),
+            vfio_mapping_budget: Answer::confirmed(8),
+            guest_driver_version: Answer::confirmed("100.101.104.20800".to_owned()),
         }
     }
 
     #[test]
-    fn a_review_written_for_windows_only_is_still_read() {
-        let current = serde_json::to_value(review()).unwrap();
-        assert!(current.get("windows_driver_version").is_none());
-        let mut earlier = current.clone();
-        let fields = earlier.as_object_mut().unwrap();
-        let version = fields.remove("guest_driver_version").unwrap();
-        fields.insert("windows_driver_version".to_owned(), version);
-        assert_eq!(
-            serde_json::from_value::<CompatibilityReview>(earlier).unwrap(),
-            review()
-        );
-        let mut both = current;
-        both["windows_driver_version"] = serde_json::json!("1");
-        assert!(serde_json::from_value::<CompatibilityReview>(both).is_err());
+    fn the_documented_review_profile_loads() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../deploy/examples/reviews/linux-standard.toml");
+        let review = read_review(&path).expect("example profile");
+        assert_eq!(review.guest_os, GuestOs::Linux);
+    }
+
+    #[test]
+    fn a_review_profile_is_toml_with_a_source_for_every_answer() {
+        let directory = std::env::temp_dir().join(format!("rampire-review-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("linux-standard.toml");
+        let text = r#"version = 1
+guest_os = "linux"
+workload_reviewed = { value = true, source = "confirmed" }
+no_vdpa = { value = true, source = "detected" }
+no_rdma_migration = { value = true, source = "confirmed" }
+no_vfio_nvme = { value = true, source = "detected" }
+no_mlock = { value = true, source = "detected" }
+no_secure_virtualization = { value = true, source = "detected" }
+no_unsupported_vhost_user = { value = true, source = "detected" }
+balloon_resize_inactive = { value = true, source = "detected" }
+memory_slot_budget = { value = 1, source = "confirmed" }
+vfio_mapping_budget = { value = 1, source = "confirmed" }
+guest_driver_version = { value = "linux 6.12", source = "confirmed" }
+"#;
+        std::fs::write(&path, text).unwrap();
+        let read = read_review(&path);
+        std::fs::write(
+            &path,
+            text.replace(
+                "no_vdpa = { value = true, source = \"detected\" }",
+                "no_vdpa = true",
+            ),
+        )
+        .unwrap();
+        let bare = read_review(&path);
+        std::fs::write(
+            &path,
+            text.replace(
+                "value = true, source = \"confirmed\" }\nno_vdpa",
+                "value = true, source = \"detected\" }\nno_vdpa",
+            ),
+        )
+        .unwrap();
+        let detected_workload = read_review(&path);
+        std::fs::remove_dir_all(&directory).unwrap();
+        let review = read.expect("valid profile");
+        assert_eq!(review.guest_os, GuestOs::Linux);
+        assert_eq!(review.no_vdpa.source, AnswerSource::Detected);
+        assert!(bare.is_err(), "every answer names its source");
+        assert!(detected_workload.unwrap_err().contains("workload_reviewed"));
     }
 
     fn live() -> LiveCompatibilityEvidence {
@@ -951,11 +1038,11 @@ mod tests {
         assert!(document.validate_live(&live(), GuestOs::Linux).is_err());
 
         let mut tampered = document;
-        tampered.review.vfio_mapping_budget += 1;
+        tampered.review.vfio_mapping_budget.value += 1;
         assert!(tampered.validate_integrity().is_err());
 
         let mut unreviewed = review();
-        unreviewed.no_vfio_nvme = false;
+        unreviewed.no_vfio_nvme.value = false;
         assert!(CompatibilityAttestation::new(live(), unreviewed).is_err());
 
         let mut unsupported = CompatibilityAttestation::new(live(), review())

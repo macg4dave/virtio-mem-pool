@@ -23,6 +23,9 @@ alias = "ua-virtiomem0"
 # Spacing the numbers out (100, 50, 10) leaves room for VMs in between.
 priority = 100
 
+# The review profile this VM is attested with: reviews/linux-standard.toml.
+review = "linux-standard"
+
 # The VM's operating system. Don't change it.
 guest_os = "linux"
 

@@ -114,7 +114,7 @@ mod tests {
         let args = [
             "guest",
             "alias",
-            "review.json",
+            "review.toml",
             "--output",
             "attestation.json",
             "--command-timeout-seconds",

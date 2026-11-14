@@ -212,13 +212,17 @@ happens here, once, before the command is built on top of it.
   are VM settings, so editor backups and `.rpmnew` files are ignored.
   Attestations stay in `/etc/rampire/attestations/` until the applied
   copy in O1.4 gives them their place under `/var/lib/rampire`.
-- [ ] **R5** The review profile format: `reviews/NAME.toml`, replacing the
+- [x] **R5** The review profile format: `reviews/NAME.toml`, replacing the
   JSON review. Each answer records its source, detected from the domain
-  or confirmed by a person, so O3.2 can fill it in.
+  or confirmed by a person, so O3.2 can fill it in. Done: each answer is
+  `{ value = ..., source = "detected" | "confirmed" }`, and
+  `workload_reviewed` must be confirmed. `guest_driver_version` is still
+  per guest, so until O3.2 detects it a Linux profile serves VMs on one
+  kernel release.
 - [ ] **R6** Delete the compatibility code the clean break leaves unused:
   - ~~`host-deploy`'s move of attestations from the old layout~~ (done in R4);
   - ~~readers for publication versions older than current~~ (done in R3);
-  - the `windows_driver_version` review alias;
+  - ~~the `windows_driver_version` review alias~~ (done in R5);
   - the compatibility tables in [administration](administration.md).
 - [ ] **R7** The README, documentation and repository name. Remove the
   links to the deleted `prior-art.md`. Renaming the GitHub repository is

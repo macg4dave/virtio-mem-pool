@@ -4,8 +4,8 @@
 # install the host controller with that attestation.
 # Usage: restart-vm-attest.sh CONFIG_DIR INSTANCE VM ALIAS REVIEW
 # CONFIG_DIR is the site configuration passed to install-host.sh; INSTANCE
-# names the systemd controller; REVIEW is the VM's reviewed
-# compatibility review (e.g. CONFIG_DIR/attestations/VM.review.json). The
+# names the systemd controller; REVIEW is the VM's review profile
+# (e.g. CONFIG_DIR/reviews/VM.toml). The
 # new attestation replaces CONFIG_DIR/attestations/VM.attestation.json; the
 # one it replaces is kept under .artifacts/block-size/.
 set -euo pipefail

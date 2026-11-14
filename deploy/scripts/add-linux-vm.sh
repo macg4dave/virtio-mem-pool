@@ -7,9 +7,10 @@
 #
 # Usage: add-linux-vm.sh [--apply] CONFIG_DIR INSTANCE TEMPLATE_VM NEW_VM SSH_DESTINATION
 #   CONFIG_DIR       the site configuration install-host.sh takes; it must hold
-#                    vms.d/TEMPLATE_VM.toml, and in its attestations/ folder
-#                    TEMPLATE_VM.review.json and an attestation for every VM in
-#                    vms.d
+#                    vms.d/TEMPLATE_VM.toml naming a review profile in
+#                    reviews/, and an attestation in attestations/ for every
+#                    VM in vms.d. The copy gets its own profile, the
+#                    template's with the copy's kernel release.
 #   SSH_DESTINATION  the copy, for an account with passwordless sudo
 # Without --apply it only checks the inputs and prints the plan.
 set -euo pipefail
@@ -34,9 +35,10 @@ ssh_guest=(ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=ac
 
 [[ $name =~ ^[a-z0-9][a-z0-9_-]*$ ]] || { echo "invalid VM name: $name" >&2; exit 1; }
 evidence=$config_dir/attestations
-for file in "vms.d/$template.toml" "attestations/$template.review.json"; do
-  [[ -f $config_dir/$file ]] || { echo "missing $config_dir/$file" >&2; exit 1; }
-done
+[[ -f $config_dir/vms.d/$template.toml ]] || { echo "missing $config_dir/vms.d/$template.toml" >&2; exit 1; }
+profile=$(sed -n 's/^review = "\(.*\)"$/\1/p' "$config_dir/vms.d/$template.toml")
+[[ -n $profile && -f $config_dir/reviews/$profile.toml ]] \
+  || { echo "vms.d/$template.toml names no review profile in $config_dir/reviews" >&2; exit 1; }
 "${virsh[@]}" dominfo "$name" >/dev/null
 alias=$("${virsh[@]}" dumpxml "$name" \
   | sed -n "/<memory model='virtio-mem'>/,/<\/memory>/s/.*<alias name='\([^']*\)'.*/\1/p")
@@ -73,14 +75,14 @@ mkdir -p ".artifacts/clones"
 cargo xtask linux deploy "$destination" --output ".artifacts/clones/$name.guest-deploy.json" --apply
 
 kernel=$("${ssh_guest[@]}" uname -r)
-sed "s/\"guest_driver_version\": \"[^\"]*\"/\"guest_driver_version\": \"linux $kernel\"/" \
-  "$evidence/$template.review.json" > "$evidence/$name.review.json"
+sed "s/^guest_driver_version = .*/guest_driver_version = { value = \"linux $kernel\", source = \"confirmed\" }/" \
+  "$config_dir/reviews/$profile.toml" > "$config_dir/reviews/$name.toml"
 if ! $listed; then
-  sed "s/^alias = .*/alias = \"$alias\"/" "$config_dir/vms.d/$template.toml" \
-    > "$config_dir/vms.d/$name.toml"
+  sed "s/^alias = .*/alias = \"$alias\"/; s/^review = .*/review = \"$name\"/" \
+    "$config_dir/vms.d/$template.toml" > "$config_dir/vms.d/$name.toml"
 fi
 "${virsh[@]}" update-memory-device "$name" --alias "$alias" --requested-size 0 --config
-cargo xtask attestation "$name" "$alias" "$evidence/$name.review.json" \
+cargo xtask attestation "$name" "$alias" "$config_dir/reviews/$name.toml" \
   --output "$evidence/$name.attestation.json" --command-timeout-seconds 60
 
 # install-host.sh takes every VM's attestation from $evidence.

@@ -1,0 +1,44 @@
+# A review profile: the answers RAMpire needs before it may resize a VM, that
+# it can't prove from the running VM itself. One profile can serve every VM
+# of a kind. A VM names its profile with review = "NAME" in vms.d/VM.toml;
+# this file is reviews/linux-standard.toml, so its name is linux-standard.
+#
+# Every answer says where it came from:
+#   source = "detected"   read from the VM's libvirt definition by tooling
+#   source = "confirmed"  checked and confirmed by a person
+# Only a person can answer workload_reviewed.
+
+version = 1
+
+# The guest's operating system: "linux" or "windows".
+guest_os = "linux"
+
+# The programs in the VM cope with memory being added and taken away.
+workload_reviewed = { value = true, source = "confirmed" }
+
+# None of the following is used by the VM. Each can hold on to guest
+# memory, which conflicts with memory being taken back:
+# vDPA network devices,
+no_vdpa = { value = true, source = "confirmed" }
+# RDMA live migration,
+no_rdma_migration = { value = true, source = "confirmed" }
+# NVMe drives passed through with VFIO,
+no_vfio_nvme = { value = true, source = "confirmed" }
+# locked (mlock'd) guest memory,
+no_mlock = { value = true, source = "confirmed" }
+# secure virtualization such as AMD SEV or Intel TDX,
+no_secure_virtualization = { value = true, source = "confirmed" }
+# vhost-user devices that don't support memory being added and removed.
+no_unsupported_vhost_user = { value = true, source = "confirmed" }
+
+# The memory balloon isn't used to resize the VM at the same time.
+balloon_resize_inactive = { value = true, source = "confirmed" }
+
+# The memory slot and VFIO mapping budgets reviewed for the VM's
+# virtio-mem device. 1 suits a VM with one device and no VFIO.
+memory_slot_budget = { value = 1, source = "confirmed" }
+vfio_mapping_budget = { value = 1, source = "confirmed" }
+
+# The guest's virtio-mem driver as reviewed. On Linux the driver is part of
+# the kernel, so this is the kernel release (`uname -r`) with "linux " first.
+guest_driver_version = { value = "linux 6.12.0", source = "confirmed" }
