@@ -35,9 +35,11 @@ pub struct ApplyEvidence {
     pub files: Vec<FileDigest>,
     /// Each VM `check` passed.
     pub checked_vms: Vec<String>,
-    /// The controller unit, and whether it was restarted on the new copy.
+    /// The controller unit, and whether it was restarted or reloaded onto
+    /// the new copy; neither when it wasn't running.
     pub unit: String,
     pub restarted: bool,
+    pub reloaded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -126,6 +128,7 @@ mod tests {
             checked_vms: vec![],
             unit: "rampire.service".to_owned(),
             restarted: false,
+            reloaded: false,
         }
     }
 

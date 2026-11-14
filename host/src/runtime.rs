@@ -99,6 +99,12 @@ struct Ready {
     admission: RequestAdmission,
 }
 
+/// A reload request and how to load the configuration it asks for.
+struct Reload {
+    requested: std::sync::Arc<AtomicBool>,
+    load: Box<dyn FnMut() -> Result<crate::config::HostSettings, String>>,
+}
+
 /// The metrics file and what it needs between rounds.
 struct MetricsFile {
     path: std::path::PathBuf,
@@ -187,6 +193,8 @@ pub struct HostRuntime<G, S, R, H> {
     poll_interval: Duration,
     /// Where each round's metrics go, if anywhere.
     metrics: Option<MetricsFile>,
+    /// Set by SIGHUP: load the applied configuration again (O4.5).
+    reload: Option<Reload>,
     #[cfg(unix)]
     controls: Vec<std::sync::Arc<crate::control_channel::ControlChannel>>,
     #[cfg(unix)]
@@ -216,6 +224,7 @@ where
             pool_bytes,
             poll_interval,
             metrics: None,
+            reload: None,
             #[cfg(unix)]
             controls: Vec::new(),
             #[cfg(unix)]
@@ -236,6 +245,7 @@ where
 
     pub fn run(&mut self, stop: &AtomicBool) -> Result<(), HostRuntimeError> {
         while !stop.load(Ordering::Acquire) {
+            self.reload_if_requested();
             if let Step::Stop(error) = self.round(stop)? {
                 return Err(error);
             }
@@ -251,6 +261,55 @@ where
             }
             wait_interruptibly(stop, self.poll_interval);
         }
+        Ok(())
+    }
+
+    /// Reload when `requested` is set, from what `load` returns (O4.5).
+    pub fn with_reload(
+        mut self,
+        requested: std::sync::Arc<AtomicBool>,
+        load: Box<dyn FnMut() -> Result<crate::config::HostSettings, String>>,
+    ) -> Self {
+        self.reload = Some(Reload { requested, load });
+        self
+    }
+
+    fn reload_if_requested(&mut self) {
+        let Some(reload) = self.reload.as_mut() else {
+            return;
+        };
+        if !reload.requested.swap(false, Ordering::AcqRel) {
+            return;
+        }
+        match (reload.load)().and_then(|settings| self.reload(settings)) {
+            Ok(()) => eprintln!("rampire: event=config_reloaded"),
+            Err(error) => eprintln!(
+                "rampire: event=reload_refused reason={error}; the controller keeps its configuration, restart it to take the new one"
+            ),
+        }
+    }
+
+    /// Take a new configuration without a restart, when it changes only
+    /// what can change while running: priorities, limits, the pool, the
+    /// host reserve. Each VM keeps the attestation file it started with,
+    /// whose bytes are checked to be the same.
+    pub fn reload(&mut self, settings: crate::config::HostSettings) -> Result<(), String> {
+        let names: Vec<_> = self.vms.iter().map(|vm| &vm.config.vm_name).collect();
+        let new_names: Vec<_> = settings.vms.iter().map(|vm| &vm.vm_name).collect();
+        if names != new_names {
+            return Err("VMs were added or removed".to_owned());
+        }
+        for (vm, new) in self.vms.iter().zip(&settings.vms) {
+            crate::config::reloadable(&vm.config, new)?;
+        }
+        for (vm, new) in self.vms.iter_mut().zip(settings.vms) {
+            let attestation = std::mem::take(&mut vm.config.compatibility_attestation_path);
+            vm.config = crate::config::HostConfig {
+                compatibility_attestation_path: attestation,
+                ..new
+            };
+        }
+        self.pool_bytes = settings.pool_bytes;
         Ok(())
     }
 

@@ -1032,7 +1032,7 @@ fn stage_and_apply(cli: &Cli, root: &Path, staged: &Path) -> Result<bool, String
     let millis = process::unix_millis()?;
     let applied = rampire_ops::applied::install(root, staged, millis)?;
     println!("applied {}", applied.display());
-    let restarted = restart_if_running(&unit)?;
+    let refreshed = refresh_controller(&unit, current.as_deref(), &applied)?;
     keep_evidence(Change {
         action: "apply",
         unix_millis: millis,
@@ -1041,7 +1041,7 @@ fn stage_and_apply(cli: &Cli, root: &Path, staged: &Path) -> Result<bool, String
         to: &applied,
         report: &report,
         unit: &unit,
-        restarted,
+        refreshed,
     })?;
     Ok(true)
 }
@@ -1077,7 +1077,7 @@ fn rollback(cli: &Cli) -> Result<ExitCode, String> {
     }
     rampire_ops::applied::make_current(root, &previous)?;
     println!("rolled back to {}", previous.display());
-    let restarted = restart_if_running(&unit)?;
+    let refreshed = refresh_controller(&unit, Some(&current), &previous)?;
     keep_evidence(Change {
         action: "rollback",
         unix_millis: process::unix_millis()?,
@@ -1086,7 +1086,7 @@ fn rollback(cli: &Cli) -> Result<ExitCode, String> {
         to: &previous,
         report: &report,
         unit: &unit,
-        restarted,
+        refreshed,
     })?;
     Ok(ExitCode::SUCCESS)
 }
@@ -1100,7 +1100,7 @@ struct Change<'a> {
     to: &'a Path,
     report: &'a rampire_ops::check::Report,
     unit: &'a str,
-    restarted: bool,
+    refreshed: Refreshed,
 }
 
 /// Record what the change did, then prune applied copies and records to
@@ -1127,12 +1127,13 @@ fn keep_evidence(change: Change) -> Result<(), String> {
                 .map(|vm| vm.vm_name.clone())
                 .collect(),
             unit: change.unit.to_owned(),
-            restarted: change.restarted,
+            restarted: change.refreshed == Refreshed::Restarted,
+            reloaded: change.refreshed == Refreshed::Reloaded,
         },
     )?;
     println!("recorded {}", record.display());
     let keep = rampire_core::settings::load_globals(change.to)?.retention as usize;
-    rampire_ops::applied::prune(applied_root(), keep)?;
+    rampire_ops::applied::prune(applied_root(), keep, running_copy().as_deref())?;
     evidence::prune(evidence_root, keep)?;
     Ok(())
 }
@@ -1152,10 +1153,19 @@ fn secure(copy: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Restart a running controller on the new copy. One that isn't running is
-/// left alone: it starts on the new copy whenever it starts. Returns
-/// whether it restarted.
-fn restart_if_running(unit: &str) -> Result<bool, String> {
+/// What became of a running controller after the applied copy changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Refreshed {
+    Restarted,
+    Reloaded,
+    NotRunning,
+}
+
+/// Move a running controller onto the new copy `to`: by reloading when
+/// only what a reload can change differs from `from` (roadmap O4.5), by a
+/// restart otherwise. One that isn't running is left alone: it starts on
+/// the new copy whenever it starts.
+fn refresh_controller(unit: &str, from: Option<&Path>, to: &Path) -> Result<Refreshed, String> {
     let active = process::bounded_text(
         "systemctl",
         &[process::os("is-active"), process::os(unit)],
@@ -1163,13 +1173,35 @@ fn restart_if_running(unit: &str) -> Result<bool, String> {
         std::time::Duration::from_secs(10),
     )
     .is_ok_and(|state| state.trim() == "active");
-    if active {
-        systemctl("restart", unit)?;
-        println!("{unit} restarted");
-    } else {
+    if !active {
         println!("{unit} is not running; it will use the new copy when it starts");
+        return Ok(Refreshed::NotRunning);
     }
-    Ok(active)
+    let reload = from
+        .ok_or_else(|| "nothing was applied before".to_owned())
+        .and_then(|from| {
+            let load = |path: &Path| HostSettings::load(path).map_err(|error| error.to_string());
+            load(from)?.reloadable_to(&load(to)?)
+        });
+    match reload {
+        Ok(()) => {
+            systemctl("reload", unit)?;
+            println!("{unit} reloaded");
+            Ok(Refreshed::Reloaded)
+        }
+        Err(why) => {
+            systemctl("restart", unit)?;
+            println!("{unit} restarted: {why}");
+            Ok(Refreshed::Restarted)
+        }
+    }
+}
+
+/// The copy the running controller started on, if it says.
+fn running_copy() -> Option<PathBuf> {
+    std::fs::read_to_string(daemon::RUNNING_COPY)
+        .ok()
+        .map(|text| PathBuf::from(text.trim()))
 }
 
 fn doctor(cli: &Cli) -> Result<ExitCode, String> {

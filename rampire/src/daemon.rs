@@ -18,12 +18,17 @@ use rampire_host::resize_sink::VirshResizeSink;
 use rampire_host::runtime::{HostRuntime, VmController};
 use rampire_host::virsh::Virsh;
 use rampire_host::xml_source::VirshXmlSource;
-use signal_hook::consts::signal::{SIGINT, SIGTERM};
+use signal_hook::consts::signal::{SIGHUP, SIGINT, SIGTERM};
 use signal_hook::flag;
 
+/// The copy the running controller started on, which `rampire apply` keeps
+/// while it runs.
+pub const RUNNING_COPY: &str = "/run/rampire/running-copy";
+
 /// `rampire daemon`: run the controller on the configuration in
-/// `config_path` until SIGTERM or SIGINT.
+/// `config_path` until SIGTERM or SIGINT. SIGHUP reloads it.
 pub fn run(config_path: &Path) -> ExitCode {
+    let link = config_path.to_path_buf();
     // Resolve the applied copy's `current` link once: a later apply then
     // can't change the files under a running controller, which keeps the
     // copy it started on until it restarts.
@@ -38,6 +43,7 @@ pub fn run(config_path: &Path) -> ExitCode {
         }
     };
     let config_path = config_path.as_path();
+    let _ = std::fs::write(RUNNING_COPY, format!("{}\n", config_path.display()));
     let settings = match HostSettings::load(config_path) {
         Ok(settings) => settings,
         Err(error) => {
@@ -111,10 +117,25 @@ pub fn run(config_path: &Path) -> ExitCode {
             None
         }
     };
-    runtime = runtime.with_wake(controls, events).with_metrics(
-        std::path::PathBuf::from(rampire_host::metrics::METRICS_PATH),
-        crate::version(),
-    );
+    let reload = Arc::new(AtomicBool::new(false));
+    if let Err(error) = flag::register(SIGHUP, Arc::clone(&reload)) {
+        eprintln!("rampire signal setup error: {error}");
+        return ExitCode::FAILURE;
+    }
+    // A reload resolves the applied copy's link again.
+    let load = Box::new(move || {
+        let path = link
+            .canonicalize()
+            .map_err(|error| format!("{}: {error}", link.display()))?;
+        HostSettings::load(&path).map_err(|error| error.to_string())
+    });
+    runtime = runtime
+        .with_reload(reload, load)
+        .with_wake(controls, events)
+        .with_metrics(
+            std::path::PathBuf::from(rampire_host::metrics::METRICS_PATH),
+            crate::version(),
+        );
     let result = runtime.run(&stop);
     drop(owners);
     match result {

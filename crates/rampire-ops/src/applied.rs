@@ -150,12 +150,13 @@ fn is_copy_name(name: &str) -> bool {
 }
 
 /// Remove the oldest applied copies until at most `keep` remain, never the
-/// current copy or the one before it, which `rollback` returns to. Returns
-/// what was removed.
-pub fn prune(root: &Path, keep: usize) -> Result<Vec<PathBuf>, String> {
+/// current copy, the one before it, which `rollback` returns to, or
+/// `running`, the one a reloaded controller still started on. Returns what
+/// was removed.
+pub fn prune(root: &Path, keep: usize, running: Option<&Path>) -> Result<Vec<PathBuf>, String> {
     let copies = copies(root)?;
     let current = current(root)?;
-    let mut protected = Vec::new();
+    let mut protected: Vec<PathBuf> = running.map(Path::to_path_buf).into_iter().collect();
     if let Some(index) = copies
         .iter()
         .position(|copy| Some(copy) == current.as_ref())
@@ -360,7 +361,12 @@ mod tests {
         snapshot(&draft, &third).unwrap();
         let third = install(&applied, &third, 2_000).unwrap();
         make_current(&applied, &second).unwrap();
-        assert_eq!(prune(&applied, 1).unwrap(), [third]);
+        assert_eq!(
+            prune(&applied, 1, Some(&third)).unwrap(),
+            Vec::<PathBuf>::new(),
+            "the running copy stays"
+        );
+        assert_eq!(prune(&applied, 1, None).unwrap(), [third]);
         assert_eq!(copies(&applied).unwrap(), [first, second]);
         std::fs::remove_dir_all(root).unwrap();
     }

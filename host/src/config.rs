@@ -122,6 +122,62 @@ impl HostSettings {
     }
 }
 
+impl HostSettings {
+    /// Whether a running controller on `self` can take `new` by reloading
+    /// (roadmap O4.5): the same VMs on the same connection, each with the
+    /// same device, guest and attestation. Priorities, limits, the pool, the
+    /// host reserve, observe-only and the convergence timeout may change.
+    pub fn reloadable_to(&self, new: &HostSettings) -> Result<(), String> {
+        if (&self.virsh_binary, &self.libvirt_uri, self.command_timeout)
+            != (&new.virsh_binary, &new.libvirt_uri, new.command_timeout)
+        {
+            return Err("the libvirt connection or command timeout changed".to_owned());
+        }
+        let names = |settings: &HostSettings| {
+            settings
+                .vms
+                .iter()
+                .map(|vm| vm.vm_name.clone())
+                .collect::<Vec<_>>()
+        };
+        if names(self) != names(new) {
+            return Err("VMs were added or removed".to_owned());
+        }
+        self.vms
+            .iter()
+            .zip(&new.vms)
+            .try_for_each(|(old, new)| reloadable(old, new))
+    }
+}
+
+/// Whether one VM's configuration can change without a restart.
+pub fn reloadable(old: &HostConfig, new: &HostConfig) -> Result<(), String> {
+    let fixed = |config: &HostConfig| HostConfig {
+        priority: 0,
+        min_ram: 0,
+        max_ram: 0,
+        guest_settings: None,
+        host_min_headroom_bytes: 0,
+        observe_only: false,
+        telemetry_path: None,
+        convergence_timeout: Duration::ZERO,
+        removal_settle: Duration::ZERO,
+        compatibility_attestation_path: String::new(),
+        ..config.clone()
+    };
+    if fixed(old) != fixed(new) {
+        return Err(format!(
+            "{}: a change beyond its priority, limits and free_ram",
+            old.vm_name
+        ));
+    }
+    let read = |path: &str| std::fs::read(path).map_err(|error| format!("read {path}: {error}"));
+    if read(&old.compatibility_attestation_path)? != read(&new.compatibility_attestation_path)? {
+        return Err(format!("{}: its attestation changed", old.vm_name));
+    }
+    Ok(())
+}
+
 struct Paths {
     config: PathBuf,
     state: PathBuf,
@@ -203,6 +259,44 @@ mod tests {
             .ends_with("/windows-guest-requests.json"));
         assert_eq!(settings.vms[0].libvirt_uri, "qemu:///system");
         assert!(HostConfig::load_vm(&path, Some("absent")).is_err());
+    }
+
+    #[test]
+    fn priorities_and_limits_reload_but_new_vms_need_a_restart() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/config");
+        let old = HostSettings::load(&path).expect("fixture");
+        let root = std::env::temp_dir().join(format!("rampire-reload-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("attestations")).unwrap();
+        let attestation = root.join("attestations/windows-guest.attestation.json");
+        std::fs::write(&attestation, "{}").unwrap();
+        let mut old = old;
+        old.vms[0].compatibility_attestation_path = attestation.display().to_string();
+
+        let mut new = old.clone();
+        new.vms[0].priority += 50;
+        new.vms[0].max_ram += 1 << 30;
+        new.pool_bytes = Some(1 << 40);
+        let reloads = old.reloadable_to(&new);
+
+        let mut moved = new.clone();
+        moved.vms[0].alias = "other".to_owned();
+        let alias = old.reloadable_to(&moved);
+        let mut grown = new.clone();
+        grown.vms.push(grown.vms[0].clone());
+        grown.vms[1].vm_name = "second".to_owned();
+        let added = old.reloadable_to(&grown);
+        let copy = root.join("attestations/copy.json");
+        std::fs::write(&copy, "{\"changed\": true}").unwrap();
+        let mut attested = new.clone();
+        attested.vms[0].compatibility_attestation_path = copy.display().to_string();
+        let reattested = old.reloadable_to(&attested);
+        std::fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(reloads, Ok(()));
+        assert!(alias.is_err());
+        assert!(added.unwrap_err().contains("added or removed"));
+        assert!(reattested.unwrap_err().contains("attestation"));
     }
 
     #[test]

@@ -78,7 +78,7 @@ The exit code is 0 when `passed` is true and 1 otherwise.
 `rampire.apply-evidence` records the `action`, `unix_millis`, the `build`
 that made the change, the `draft` applied, the copies switched `from` and
 `to`, every file of the new copy with its `sha256`, the `checked_vms` and
-whether the `unit` was `restarted`.
+whether the `unit` was `restarted` or `reloaded` onto it.
 
 ## Between the controller and a guest
 

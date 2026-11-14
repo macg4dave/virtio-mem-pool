@@ -24,6 +24,10 @@ Environment=XDG_CACHE_HOME=/run/rampire/.cache
 # a restart or a reboot. The copy holds global.toml, vms.d/ and
 # attestations/; durable state goes in the StateDirectory below.
 ExecStart=/usr/bin/rampire daemon --config /var/lib/rampire/applied/current
+# `systemctl reload rampire` takes a new applied copy without a restart
+# when only priorities, limits and the pool changed; otherwise the
+# controller logs reload_refused and keeps running what it has.
+ExecReload=/bin/kill -HUP $MAINPID
 # Failure is fail-stop. Deployment monitoring decides when a reviewed restart
 # is appropriate; the unit does not create an automatic restart loop.
 Restart=no
