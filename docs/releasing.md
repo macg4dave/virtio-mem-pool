@@ -14,11 +14,12 @@ Pushing a tag `vX.Y.Z` that matches the `rampire` crate's version:
 | apt repository | `https://macg4dave.github.io/RAMpire/apt`, suite `stable`, holding this release's `.deb`s; its `Release` file is signed with the project key |
 | COPR | `macg4dave/rampire` builds the host and guest RPMs from the source RPM, for each chroot the project enables; COPR signs them with its own key |
 
-The RPMs on the release are signed with the project key. Every build that
-isn't a tag signs with a throwaway key instead, so the signing, the apt
-repository and an `apt-get install` from it are tested on every push. CI
-also builds the RPMs from the source RPM and checks they hold the same
-files as the nfpm RPMs.
+The RPMs on the release are signed with the project key. CI runs only on
+a tag or when started by hand (the Actions tab, or `gh workflow run CI`),
+not on every commit. A run by hand signs with a throwaway key, so it still
+tests the signing, the apt repository and an `apt-get install` from it,
+and checks that the RPMs built from the source RPM hold the same files as
+the nfpm RPMs. Run it by hand before tagging.
 
 ## One-time setup
 
@@ -52,7 +53,8 @@ A tag fails, before publishing anything, if either secret is missing.
 
 1. Set the version in `rampire/Cargo.toml` (and the other crates), and
    add its entry to `CHANGELOG.md`.
-2. Commit, then tag and push:
+2. Commit and push, run CI by hand (`gh workflow run CI`) and wait for it
+   to pass, then tag and push the tag:
 
    ```bash
    git tag v0.1.0

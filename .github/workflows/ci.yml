@@ -1,5 +1,6 @@
-# The gate and the packages on every push and pull request; on a v* tag
-# the packages are also signed and published (roadmap O2.1, O2.7): a
+# The gate and the packages, run only on a v* tag or by hand (Actions tab,
+# or `gh workflow run CI`), not on every commit. On a tag the packages are
+# also signed and published (roadmap O2.1, O2.7): a
 # GitHub release, the apt repository on GitHub Pages, and a COPR build.
 #
 # A tag needs these repository secrets (docs/releasing.md):
@@ -9,9 +10,8 @@ name: CI
 
 on:
   push:
-    branches: [main]
     tags: ["v*"]
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -80,9 +80,8 @@ jobs:
           export RAMPIRE_BUILD_ID=${GITHUB_SHA::12}
           cargo build --release --locked -p rampire -p rampire-guest-linux
           cargo build --release --locked --target x86_64-unknown-linux-musl -p rampire -p rampire-guest-linux
-      # A release signs with the project key. Every other build signs with a
-      # throwaway key, so the signing and the apt repository are tested on
-      # every push.
+      # A release signs with the project key. A run by hand signs with a
+      # throwaway key, so it tests the signing and the apt repository too.
       - name: Signing key
         env:
           RAMPIRE_SIGNING_KEY: ${{ secrets.RAMPIRE_SIGNING_KEY }}

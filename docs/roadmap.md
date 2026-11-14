@@ -346,8 +346,9 @@ unit; it wasn't tried on the shared host.
 
 ### O2 — Packages and releases
 
-- [x] **O2.1** A CI workflow that runs the Linux gate on every push and,
-  on a tag, builds signed release artefacts with checksums.
+- [x] **O2.1** A CI workflow that runs the Linux gate and, on a tag,
+  builds signed release artefacts with checksums. Since 2026-11-14 it runs
+  only on a tag or by hand, not on every commit (owner's call).
 - [x] **O2.2** A host RPM containing:
   - the binary, in `/usr/bin`;
   - the unit and the polkit rule;
@@ -376,7 +377,7 @@ manager and `rampire init`. A guest installs with one package command.
 
 Status, 2026-11-14: everything but O2.7 is built. Packages are made with
 nfpm from `packaging/` by `packaging/build.sh`; CI builds and lists them
-on every push and, on a `v*` tag, signs `SHA256SUMS` with cosign (keyless)
+when run and, on a `v*` tag, signs `SHA256SUMS` with cosign (keyless)
 and publishes a GitHub release. The binary is `/usr/bin/rampire` for
 development installs too. Left for the owner: O2.7 (a COPR project, an
 apt repository and their signing keys), signing the packages themselves
