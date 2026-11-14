@@ -1,10 +1,10 @@
 [package]
-name = "virtio-mem-host"
+name = "rampire"
 version = "0.1.0"
 edition = "2021"
 authors = ["macg4dave"]
 license = "GPL-3.0-or-later"
-description = "RHEL systemd controller executing guest virtio-mem requests from a shared pool"
+description = "RAMpire host controller: resizes libvirt guests from a shared memory pool with virtio-mem"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -13,10 +13,10 @@ sha2 = "0.10"
 thiserror = "2.0.20"
 signal-hook = "0.3"
 quick-xml = "0.41.0"
-virtio-mem-core = { path = "../crates/virtio-mem-core" }
+rampire-core = { path = "../crates/rampire-core" }
 
 [[bin]]
-name = "virtio-mem-host"
+name = "rampire"
 path = "src/main.rs"
 
 [target.'cfg(unix)'.dependencies]

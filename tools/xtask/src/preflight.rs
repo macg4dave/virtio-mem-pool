@@ -1,17 +1,17 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
-use serde_json::Value;
-use virtio_mem_core::settings::GuestOs;
-use virtio_mem_core::{
+use rampire::attestation::AttestedCompatibilitySource;
+use rampire::compatibility_source::CompatibilitySource;
+use rampire::guest_channel::{GuestChannel, GuestLink};
+use rampire::qga::VirshGuestFiles;
+use rampire::virsh::Virsh;
+use rampire_core::settings::GuestOs;
+use rampire_core::{
     parse_virtio_mem_xml_for_alias, MemoryRequest, RawTelemetryEnvelope, VirtioMemState,
 };
-use virtio_mem_host::attestation::AttestedCompatibilitySource;
-use virtio_mem_host::compatibility_source::CompatibilitySource;
-use virtio_mem_host::guest_channel::{GuestChannel, GuestLink};
-use virtio_mem_host::qga::VirshGuestFiles;
-use virtio_mem_host::virsh::Virsh;
+use serde::Serialize;
+use serde_json::Value;
 
 use crate::{process, windows};
 
@@ -335,7 +335,7 @@ fn controller_state(command: &Command, repo: &Path) -> Result<(String, String), 
 }
 
 fn host_mem_available() -> Result<u64, String> {
-    use virtio_mem_host::host_memory::{HostMemorySource, ProcMeminfoSource};
+    use rampire::host_memory::{HostMemorySource, ProcMeminfoSource};
     ProcMeminfoSource::new().available_bytes()
 }
 

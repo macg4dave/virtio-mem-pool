@@ -6,7 +6,7 @@
 #
 #   deploy/scripts/recover-latch.sh INSTANCE "reason recorded in the checkpoint"
 #
-# VIRTIO_MEM_HOST_BIN, VIRTIO_MEM_HOST_CONFIG and VIRTIO_MEM_CONNECT override
+# RAMPIRE_HOST_BIN, RAMPIRE_HOST_CONFIG and RAMPIRE_CONNECT override
 # the installed binary, host list and libvirt URI.
 set -euo pipefail
 if (( $# != 2 )); then
@@ -18,11 +18,11 @@ if [[ ! $instance =~ ^[[:alnum:]][[:alnum:]_.-]*$ ]]; then
   echo 'invalid controller instance name' >&2
   exit 1
 fi
-unit=virtio-mem-host@$instance.service
-config=${VIRTIO_MEM_HOST_CONFIG:-/etc/virtio-mem-host/host_list.toml}
-binary=${VIRTIO_MEM_HOST_BIN:-/usr/local/libexec/virtio-mem-host}
-connect=${VIRTIO_MEM_CONNECT:-qemu:///system}
-host=(sudo -u virtio-mem-host "$binary")
+unit=rampire@$instance.service
+config=${RAMPIRE_HOST_CONFIG:-/etc/rampire/host_list.toml}
+binary=${RAMPIRE_HOST_BIN:-/usr/local/bin/rampire}
+connect=${RAMPIRE_CONNECT:-qemu:///system}
+host=(sudo -u rampire "$binary")
 
 sudo systemctl stop "$unit"
 # Start it again however recovery ends; a still-latched controller only

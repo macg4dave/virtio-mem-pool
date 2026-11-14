@@ -13,9 +13,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use virtio_mem_core::VirtioMemState;
-use virtio_mem_host::config::HostSettings;
-use virtio_mem_host::virsh::Virsh;
+use rampire::config::HostSettings;
+use rampire::virsh::Virsh;
+use rampire_core::VirtioMemState;
 
 use super::{compact_utc, iso_utc, unix_millis, COMMAND_TIMEOUT};
 use crate::watch;

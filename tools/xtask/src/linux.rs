@@ -16,21 +16,21 @@ use serde::Serialize;
 
 use crate::process;
 
-const GUEST_PACKAGE: &str = "virtio-mem-guest-linux";
-const GUEST_BINARY: &str = "virtio-mem-guest";
-const UNIT_SOURCE: &str = "guest-linux/systemd/virtio-mem-guest.service";
+const GUEST_PACKAGE: &str = "rampire-guest-linux";
+const GUEST_BINARY: &str = "rampire-guest";
+const UNIT_SOURCE: &str = "guest-linux/systemd/rampire-guest.service";
 const MONITOR_SOURCE: &str = "tools/linux/watch-ram.sh";
 
-const REMOTE_BINARY: &str = "/usr/local/libexec/virtio-mem-guest";
-const REMOTE_UNIT: &str = "/etc/systemd/system/virtio-mem-guest.service";
-const REMOTE_MONITOR: &str = "/usr/local/bin/virtio-mem-watch-ram";
-const WORKLOAD_BINARY: &str = "virtio-mem-workload";
-const REMOTE_WORKLOAD: &str = "/usr/local/bin/virtio-mem-workload";
-const UNIT_NAME: &str = "virtio-mem-guest.service";
+const REMOTE_BINARY: &str = "/usr/local/libexec/rampire-guest";
+const REMOTE_UNIT: &str = "/etc/systemd/system/rampire-guest.service";
+const REMOTE_MONITOR: &str = "/usr/local/bin/rampire-watch-ram";
+const WORKLOAD_BINARY: &str = "rampire-workload";
+const REMOTE_WORKLOAD: &str = "/usr/local/bin/rampire-workload";
+const UNIT_NAME: &str = "rampire-guest.service";
 /// The service's state directory; with `DynamicUser=` systemd keeps it under
 /// `/var/lib/private` and links it here.
-const REMOTE_STATE: &str = "/var/lib/virtio-mem-guest";
-const REMOTE_PRIVATE_STATE: &str = "/var/lib/private/virtio-mem-guest";
+const REMOTE_STATE: &str = "/var/lib/rampire-guest";
+const REMOTE_PRIVATE_STATE: &str = "/var/lib/private/rampire-guest";
 const EVIDENCE_SCHEMA_VERSION: u32 = 1;
 
 const HELP: &str = "linux requires one of:
@@ -149,13 +149,13 @@ pub fn run(arguments: &[String], repo: &Path) -> Result<(), String> {
 }
 
 /// Release-build the guest service with the checkout's build identity
-/// compiled in, so `virtio-mem-guest version` and every publication name the
+/// compiled in, so `rampire-guest version` and every publication name the
 /// exact source that produced the binary. Returns that build identity.
 fn build(repo: &Path) -> Result<String, String> {
     let identity = crate::windows::checkout_identity(repo)?;
     let status = Command::new("cargo")
         .args(["build", "--release", "--locked", "-p", GUEST_PACKAGE])
-        .env("VIRTIO_MEM_BUILD_ID", &identity.build_id)
+        .env("RAMPIRE_BUILD_ID", &identity.build_id)
         .current_dir(repo)
         .status()
         .map_err(|error| format!("run cargo: {error}"))?;
@@ -312,7 +312,7 @@ fn install_file(
     mode: &str,
     repo: &Path,
 ) -> Result<(), String> {
-    let staged = format!("/tmp/.virtio-mem-deploy-{}", std::process::id());
+    let staged = format!("/tmp/.rampire-deploy-{}", std::process::id());
     remote_with_input(
         target,
         bytes,

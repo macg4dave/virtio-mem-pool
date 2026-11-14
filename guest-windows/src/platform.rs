@@ -7,12 +7,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use virtio_mem_core::settings::{CONTROL_PATH, SERVICE_NAME};
-use virtio_mem_core::{MemoryResourceNotificationState, MemoryTelemetrySnapshot};
-use virtio_mem_guest::requests::GuestIdentity;
-use virtio_mem_guest::serve::{serve, Platform, Sources};
-use virtio_mem_guest::transport::{FileTransport, Transport};
-use virtio_mem_guest::worker::{Clock, MemorySource, PressureSource};
+use rampire_core::settings::{CONTROL_PATH, SERVICE_NAME};
+use rampire_core::{MemoryResourceNotificationState, MemoryTelemetrySnapshot};
+use rampire_guest::requests::GuestIdentity;
+use rampire_guest::serve::{serve, Platform, Sources};
+use rampire_guest::transport::{FileTransport, Transport};
+use rampire_guest::worker::{Clock, MemorySource, PressureSource};
 
 use crate::demand::{
     MemoryResourceNotificationTelemetry, MemoryTelemetry, SystemTelemetryClock, TelemetryClock,
@@ -89,7 +89,7 @@ impl Clock for WindowsClock {
 #[cfg(windows)]
 fn transport() -> Box<dyn Transport> {
     match crate::port::ControlPort::open() {
-        Ok(port) => Box::new(virtio_mem_guest::transport::StreamTransport::new(port)),
+        Ok(port) => Box::new(rampire_guest::transport::StreamTransport::new(port)),
         Err(error) => {
             eprintln!("control channel unavailable ({error}); using the control files");
             Box::new(FileTransport::new(CONTROL_PATH))

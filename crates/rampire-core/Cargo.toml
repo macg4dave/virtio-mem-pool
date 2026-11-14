@@ -1,10 +1,10 @@
 [package]
-name = "virtio-mem-core"
+name = "rampire-core"
 version = "0.1.0"
 edition = "2021"
 authors = ["macg4dave"]
 license = "GPL-3.0-or-later"
-description = "Platform-neutral virtio-mem policy, state validation, and protocol parsing"
+description = "RAMpire shared core: settings, pool policy, virtio-mem state and the guest protocol"
 
 [dependencies]
 toml = "1.1.8"

@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use rampire_core::settings::{self, GlobalSettings, GuestOs, HostVm, VmSettings};
 use thiserror::Error;
-use virtio_mem_core::settings::{self, GlobalSettings, GuestOs, HostVm, VmSettings};
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum HostConfigError {
@@ -46,8 +46,8 @@ pub struct HostConfig {
     pub max_ram: u64,
     /// Published with the host status: every current guest takes its limits
     /// and policy from the host. Guests built before that are never sent it
-    /// (see `virtio_mem_core::sends_guest_settings_to`).
-    pub guest_settings: Option<virtio_mem_core::GuestSettings>,
+    /// (see `rampire_core::sends_guest_settings_to`).
+    pub guest_settings: Option<rampire_core::GuestSettings>,
     pub telemetry_path: Option<String>,
 }
 
@@ -61,7 +61,7 @@ pub struct HostSettings {
 
 /// Where the controller keeps durable state when systemd does not say: the
 /// unit's `StateDirectory`, which systemd passes as `STATE_DIRECTORY`.
-pub const DEFAULT_STATE_DIRECTORY: &str = "/var/lib/virtio-mem-host/state";
+pub const DEFAULT_STATE_DIRECTORY: &str = "/var/lib/rampire/state";
 
 fn state_directory() -> PathBuf {
     std::env::var_os("STATE_DIRECTORY")

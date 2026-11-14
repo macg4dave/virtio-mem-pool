@@ -1,7 +1,7 @@
 use crate::service_host::StopSignal;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-pub use virtio_mem_core::{
+pub use rampire_core::{
     DemandError, MemoryResourceNotificationState, MemoryTelemetrySnapshot, RawTelemetryEnvelope,
 };
 

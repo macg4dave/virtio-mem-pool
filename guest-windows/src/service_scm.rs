@@ -234,16 +234,16 @@ fn provision_program_data_acl(config: &ServiceConfig) -> Result<(), String> {
             "automatic ACL provisioning supports only NT AUTHORITY\\LocalService".to_owned(),
         );
     }
-    let report = std::path::Path::new(virtio_mem_core::settings::CONTROL_PATH);
+    let report = std::path::Path::new(rampire_core::settings::CONTROL_PATH);
     let config_path = std::path::Path::new(&config.config_path);
     let root = config_path
         .parent()
         .ok_or("configuration path has no parent")?;
     let report_parent = report.parent().ok_or("telemetry path has no parent")?;
-    if virtio_mem_core::windows_service_config::normalize_windows_path(
+    if rampire_core::windows_service_config::normalize_windows_path(
         root.to_str()
             .ok_or("configuration directory is not Unicode")?,
-    )? != virtio_mem_core::windows_service_config::normalize_windows_path(
+    )? != rampire_core::windows_service_config::normalize_windows_path(
         report_parent
             .to_str()
             .ok_or("telemetry directory is not Unicode")?,
@@ -717,15 +717,15 @@ mod tests {
 
     #[test]
     fn service_main_uses_the_scm_supplied_service_identity() {
-        let mut encoded = to_wide("ConfiguredVirtioMemService").unwrap();
+        let mut encoded = to_wide("ConfiguredRampireGuest").unwrap();
         let mut argument = encoded.as_mut_ptr();
 
         let service_name = unsafe { service_name_from_main_args(1, &mut argument) };
 
-        assert_eq!(service_name.as_deref(), Ok("ConfiguredVirtioMemService"));
+        assert_eq!(service_name.as_deref(), Ok("ConfiguredRampireGuest"));
         assert_eq!(
             validate_configured_service_identity(
-                "ConfiguredVirtioMemService",
+                "ConfiguredRampireGuest",
                 service_name.as_deref().expect("service identity")
             ),
             Ok(())

@@ -30,12 +30,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+use rampire::config::HostConfig;
+use rampire::guest_channel::PublicationCopyFirst;
+use rampire::qga::{GuestFileReader, VirshGuestFiles};
+use rampire::virsh::Virsh;
+use rampire_core::{MemoryResourceNotificationState, RawTelemetryEnvelope, VirtioMemState};
 use serde_json::{json, Map, Value};
-use virtio_mem_core::{MemoryResourceNotificationState, RawTelemetryEnvelope, VirtioMemState};
-use virtio_mem_host::config::HostConfig;
-use virtio_mem_host::guest_channel::PublicationCopyFirst;
-use virtio_mem_host::qga::{GuestFileReader, VirshGuestFiles};
-use virtio_mem_host::virsh::Virsh;
 
 use self::health::{BundleContext, CpuMeter, Incident, Lifecycle, UnitStatus};
 use crate::process;
@@ -59,7 +59,7 @@ pub const HELP: &str = "Metrics options (read-only stress-test recorder):
                                 per VM in DIR/<vm>/, plus DIR/pool.csv with
                                 every device, the pool and host memory per
                                 interval (plain output only).
-  --instance NAME               Controller unit virtio-mem-host@NAME.service;
+  --instance NAME               Controller unit rampire@NAME.service;
                                 default the one installed controller unit,
                                 else the VM name.
   --connect URI                 Libvirt URI; default qemu:///system.
@@ -163,7 +163,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
     let config = HostConfig::load_vm(&config_path, vm.as_deref())
         .map_err(|error| format!("{}: {error}", config_path.display()))?;
     command.unit = format!(
-        "virtio-mem-host@{}.service",
+        "rampire@{}.service",
         instance.as_deref().unwrap_or(&config.vm_name)
     );
     command.unit_named = instance.is_some();
@@ -1215,7 +1215,7 @@ struct Summary {
     issue_to_completion_seconds: Stat,
     grant_latency_by_operation: BTreeMap<String, Stat>,
     issue_latency_by_operation: BTreeMap<String, Stat>,
-    pending_request: Option<virtio_mem_core::MemoryRequest>,
+    pending_request: Option<rampire_core::MemoryRequest>,
     host_below_reserve_samples: u64,
     pressure_stats: [Stat; 5],
     collection_ms: Stat,
@@ -1738,7 +1738,7 @@ mod tests {
         assert_eq!(defaults.host_floor_bytes, expected.host_min_headroom_bytes);
         assert_eq!(
             defaults.telemetry_path,
-            virtio_mem_core::settings::CONTROL_PATH
+            rampire_core::settings::CONTROL_PATH
         );
         assert_eq!(defaults.telemetry_max_age, expected.raw_telemetry_max_age);
         assert_eq!(defaults.interval, Duration::from_secs(1));
@@ -1759,7 +1759,7 @@ mod tests {
         .expect("options");
         assert_eq!(command.output, Some(PathBuf::from("/tmp/run")));
         assert_eq!(command.duration, Some(Duration::from_secs(3600)));
-        assert_eq!(command.unit, "virtio-mem-host@other.service");
+        assert_eq!(command.unit, "rampire@other.service");
         for bad in [
             vec![],
             vec!["--config", &config, "--interval-seconds", "0.1"],
@@ -1772,7 +1772,7 @@ mod tests {
 
     #[test]
     fn consolidated_settings_record_control_data_with_or_without_diagnostics() {
-        use virtio_mem_core::settings::{CONTROL_PATH, SERVICE_NAME};
+        use rampire_core::settings::{CONTROL_PATH, SERVICE_NAME};
 
         struct ControlFile(Result<Vec<u8>, String>);
         impl GuestFileReader for ControlFile {
@@ -1787,7 +1787,7 @@ mod tests {
         }
 
         let root =
-            std::env::temp_dir().join(format!("virtio-mem-metrics-config-{}", std::process::id()));
+            std::env::temp_dir().join(format!("rampire-metrics-config-{}", std::process::id()));
         std::fs::create_dir_all(&root).expect("fixture directory");
         let config_path = root.join("host_list.toml");
         std::fs::write(
@@ -1807,7 +1807,7 @@ vm_name='{name}'
 min_ram='4GB'
 max_ram='16GB'
 free_ram='2GB'
-install_path='C:\Program Files\VirtioMemService\virtio-mem-service.exe'
+install_path='C:\Program Files\RampireGuest\rampire-guest.exe'
 service_account='NT AUTHORITY\LocalService'
 "#
                 );
@@ -1838,7 +1838,7 @@ service_account='NT AUTHORITY\LocalService'
                 1000,
                 1,
                 0,
-                virtio_mem_core::MemoryTelemetrySnapshot {
+                rampire_core::MemoryTelemetrySnapshot {
                     physical_total_bytes: 14 << 30,
                     physical_available_bytes: 3 << 30,
                     memory_load_percent: 79,
@@ -1920,7 +1920,7 @@ service_account='NT AUTHORITY\LocalService'
             "__CURSOR": "s=1;i=2",
             "__REALTIME_TIMESTAMP": "1793115605123456",
             "_PID": "988126",
-            "MESSAGE": "virtio-mem-host: vm=w alias=a event=resize_settled_short operation_id=9 kept_bytes=1130364928 command_result=Err(Rejected(\"live evidence drifted: qemu_argv (attested a, live b)\"))",
+            "MESSAGE": "rampire: vm=w alias=a event=resize_settled_short operation_id=9 kept_bytes=1130364928 command_result=Err(Rejected(\"live evidence drifted: qemu_argv (attested a, live b)\"))",
         })
         .to_string();
         let (event, cursor) = JournalEvent::from_json(&line).expect("event");
@@ -1938,7 +1938,7 @@ service_account='NT AUTHORITY\LocalService'
                 "__CURSOR": "c",
                 "__REALTIME_TIMESTAMP": "1",
                 "_PID": "1",
-                "MESSAGE": "Started virtio-mem-host@w.service.",
+                "MESSAGE": "Started rampire@w.service.",
             })
             .to_string(),
         )

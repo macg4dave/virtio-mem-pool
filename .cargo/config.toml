@@ -1,2 +1,2 @@
 [alias]
-xtask = "run --package virtio-mem-xtask --"
+xtask = "run --package xtask --"

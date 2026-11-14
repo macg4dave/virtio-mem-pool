@@ -2,7 +2,7 @@
 
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use virtio_mem_guest::worker::Clock;
+use rampire_guest::worker::Clock;
 
 #[derive(Debug)]
 pub struct SystemClock {
@@ -32,9 +32,8 @@ impl Clock for SystemClock {
     }
 
     fn boot_uptime_millis(&self) -> Option<u64> {
-        let bytes =
-            virtio_mem_guest::files::read_bounded(std::path::Path::new("/proc/uptime"), 256)
-                .ok()??;
+        let bytes = rampire_guest::files::read_bounded(std::path::Path::new("/proc/uptime"), 256)
+            .ok()??;
         let text = String::from_utf8(bytes).ok()?;
         let (seconds, fraction) = text.split_ascii_whitespace().next()?.split_once('.')?;
         let centiseconds = fraction.get(..2)?.parse::<u64>().ok()?;

@@ -1,18 +1,18 @@
 # Give LocalService read/write access to one named virtio-serial port, and
-# nothing else. Run elevated while VirtioMemService is stopped. The QEMU
+# nothing else. Run elevated while RampireGuest is stopped. The QEMU
 # guest-agent port is never modified.
-function Set-VirtioMemPortAccess {
+function Set-RampirePortAccess {
     param(
         [Parameter(Mandatory=$true)][string] $PortName,
         [Parameter(Mandatory=$true)][string] $BackupDirectory
     )
-    if (-not ('VirtioMemPortAccess' -as [type])) {
+    if (-not ('RampirePortAccess' -as [type])) {
         Add-Type -TypeDefinition @'
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
-public static class VirtioMemPortAccess {
+public static class RampirePortAccess {
     [StructLayout(LayoutKind.Sequential)] struct DeviceInfo {
         public uint Size; public Guid ClassGuid; public uint DevInst; public UIntPtr Reserved;
     }
@@ -75,12 +75,12 @@ public static class VirtioMemPortAccess {
 }
 '@
     }
-    $result = [VirtioMemPortAccess]::Configure($PortName, $false, $null)
+    $result = [RampirePortAccess]::Configure($PortName, $false, $null)
     if ($null -eq $result) { return 'absent; control files fallback' }
     [ordered]@{port=$PortName; instance_id=$result[0]; previous_security=$result[1]; action=$result[2]} |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $BackupDirectory ($PortName + '-security.json'))
     if ($result[2] -eq 'changed') {
-        $applied = [VirtioMemPortAccess]::Configure($PortName, $true, $result[0])
+        $applied = [RampirePortAccess]::Configure($PortName, $true, $result[0])
         if ($null -eq $applied) { throw 'port device disappeared during provisioning' }
         & pnputil.exe /restart-device $result[0] | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "port device restart failed: $LASTEXITCODE" }

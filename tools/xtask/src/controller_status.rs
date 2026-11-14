@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use virtio_mem_host::config::HostConfig;
+use rampire::config::HostConfig;
 
 use crate::process;
 
@@ -34,7 +34,7 @@ struct Evidence {
     active_state: String,
     sub_state: String,
     unit_file_state: String,
-    status: virtio_mem_core::ControllerStatusSnapshot,
+    status: rampire_core::ControllerStatusSnapshot,
 }
 
 pub fn parse(arguments: &[String]) -> Result<Command, String> {
@@ -149,7 +149,7 @@ pub fn run(command: &Command, repo: &Path) -> Result<(), String> {
 
 fn validate_command(command: &Command, repo: &Path) -> Result<(), String> {
     let candidate = &command.host_cli;
-    let expected = repo.join("target/release/virtio-mem-host");
+    let expected = repo.join("target/release/rampire");
     if candidate != &expected {
         return Err(format!(
             "controller-status --host-cli must select the current prebuilt candidate {}",
@@ -168,7 +168,7 @@ fn validate_command(command: &Command, repo: &Path) -> Result<(), String> {
 }
 
 fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
-    let unit = format!("virtio-mem-host@{}.service", command.instance);
+    let unit = format!("rampire@{}.service", command.instance);
     let properties = process::bounded_text(
         "systemctl",
         &[
@@ -181,13 +181,13 @@ fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
         command.timeout,
     )?;
     let properties = parse_properties(&properties)?;
-    let config_path = PathBuf::from("/etc/virtio-mem-host/host_list.toml");
+    let config_path = PathBuf::from("/etc/rampire/host_list.toml");
     let configured = HostConfig::load_vm(&config_path, command.vm.as_deref())
         .map_err(|error| format!("protected host instance configuration: {error}"))?;
     let environment = [
         ("LIBVIRT_DEFAULT_URI", command.connection.as_str()),
-        ("HOME", "/run/virtio-mem-host"),
-        ("XDG_CACHE_HOME", "/run/virtio-mem-host/.cache"),
+        ("HOME", "/run/rampire"),
+        ("XDG_CACHE_HOME", "/run/rampire/.cache"),
     ];
     let output = process::bounded_output_with_env(
         &command.host_cli,
@@ -211,7 +211,7 @@ fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-    let status = virtio_mem_core::parse_controller_status(&output.stdout)
+    let status = rampire_core::parse_controller_status(&output.stdout)
         .map_err(|error| format!("candidate controller status is invalid: {error}"))?;
     if status.vm_name != configured.vm_name {
         return Err("controller status returned the wrong VM identity".to_owned());
@@ -365,7 +365,7 @@ mod tests {
             "--vm",
             "guest",
             "--host-cli",
-            "/workspace/target/release/virtio-mem-host",
+            "/workspace/target/release/rampire",
             "--output",
             ".artifacts/status.json",
             "--command-timeout-seconds",

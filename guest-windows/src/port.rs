@@ -82,7 +82,7 @@ mod native {
         pub fn open() -> io::Result<Self> {
             let path: Vec<u16> = format!(
                 "\\\\.\\Global\\{}\0",
-                virtio_mem_core::MEMORY_CONTROL_CHANNEL_NAME
+                rampire_core::MEMORY_CONTROL_CHANNEL_NAME
             )
             .encode_utf16()
             .collect();

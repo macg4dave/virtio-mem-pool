@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use virtio_mem_core::GuestSettings;
+use rampire_core::GuestSettings;
 
 use crate::requests::{published_settings, GuestIdentity, GuestRequests};
 use crate::transport::{FileTransport, Transport};
@@ -141,8 +141,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use virtio_mem_core::settings::GlobalSettings;
-    use virtio_mem_core::{host_status_path, HostMemoryStatus, MEMORY_REQUEST_VERSION};
+    use rampire_core::settings::GlobalSettings;
+    use rampire_core::{host_status_path, HostMemoryStatus, MEMORY_REQUEST_VERSION};
 
     const GIB: u64 = 1 << 30;
 
@@ -159,11 +159,11 @@ mod tests {
     #[test]
     fn a_guest_on_the_channel_uses_files_only_with_fresh_settings_in_them() {
         let directory =
-            std::env::temp_dir().join(format!("virtio-mem-guest-serve-{}", std::process::id()));
+            std::env::temp_dir().join(format!("rampire-guest-serve-{}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
         let control = directory.join("control.json").display().to_string();
         let platform = Platform {
-            service_name: "virtio-mem-guest",
+            service_name: "rampire-guest",
             control_path: &control,
             identity: GuestIdentity {
                 build_id: "test".to_owned(),
@@ -175,7 +175,7 @@ mod tests {
             let status = HostMemoryStatus {
                 version: MEMORY_REQUEST_VERSION,
                 vm_name: "debian".to_owned(),
-                service_name: "virtio-mem-guest".to_owned(),
+                service_name: "rampire-guest".to_owned(),
                 device_alias: "ua-virtiomem0".to_owned(),
                 observed_unix_millis: observed,
                 device_size_bytes: 4 * GIB,

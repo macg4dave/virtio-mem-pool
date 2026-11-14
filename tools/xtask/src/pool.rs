@@ -4,7 +4,7 @@
 //! VMs.
 //!
 //! It reads `virsh --readonly dumpxml` per VM, the controller's copy of each
-//! guest's publication (`/run/virtio-mem-host/<vm>.publication.json`, so no
+//! guest's publication (`/run/rampire/<vm>.publication.json`, so no
 //! guest-agent traffic) and `journalctl`. It never resizes or changes
 //! anything.
 
@@ -16,10 +16,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use virtio_mem_core::{RawTelemetryEnvelope, VirtioMemState};
-use virtio_mem_host::config::HostSettings;
-use virtio_mem_host::guest_channel::publication_copy_path;
-use virtio_mem_host::virsh::Virsh;
+use rampire::config::HostSettings;
+use rampire::guest_channel::publication_copy_path;
+use rampire::virsh::Virsh;
+use rampire_core::{RawTelemetryEnvelope, VirtioMemState};
 
 use crate::dashboard::{
     clock, gib, host_name, load_colour, mib, terminal_columns, Frame, BACKGROUND, CYAN, DIM, GIB,
@@ -31,7 +31,7 @@ use crate::watch::{self, HostMemory, COMMAND_TIMEOUT, MAX_TELEMETRY_BYTES};
 pub const HELP: &str = "Pool options (read-only live dashboard of every VM):
   --config PATH                 Required host list; the VMs, pool size and
                                 host floor come from it.
-  --instance NAME               Controller unit virtio-mem-host@NAME.service;
+  --instance NAME               Controller unit rampire@NAME.service;
                                 default the one installed controller unit.
   --connect URI                 Libvirt URI; default qemu:///system.
   --interval-seconds N          Refresh period; default 1.
@@ -140,7 +140,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         .collect();
     let first = command.vms.first().ok_or("the host list names no VM")?;
     command.unit = format!(
-        "virtio-mem-host@{}.service",
+        "rampire@{}.service",
         instance.as_deref().unwrap_or(&first.name)
     );
     command.unit_named = instance.is_some();
@@ -865,7 +865,7 @@ mod tests {
             vms: vec![vm("alpha"), vm("a-very-long-vm-name")],
             pool_bytes: Some(15 * GIB),
             host_floor_bytes: 4 * GIB,
-            unit: "virtio-mem-host@main.service".to_owned(),
+            unit: "rampire@main.service".to_owned(),
             unit_named: true,
             connect: "qemu:///system".to_owned(),
             interval: Duration::from_secs(1),
@@ -893,7 +893,7 @@ mod tests {
         assert_eq!(command.pool_bytes, settings.pool_bytes);
         assert_eq!(
             command.unit,
-            format!("virtio-mem-host@{}.service", settings.vms[0].vm_name)
+            format!("rampire@{}.service", settings.vms[0].vm_name)
         );
         assert!(!command.unit_named);
         let command = parse(&strings(&[
@@ -908,7 +908,7 @@ mod tests {
             "--once",
         ]))
         .expect("options");
-        assert_eq!(command.unit, "virtio-mem-host@main.service");
+        assert_eq!(command.unit, "rampire@main.service");
         assert!(command.unit_named && command.once);
         assert_eq!(command.interval, Duration::from_millis(500));
         assert_eq!(command.events, 3);
@@ -935,11 +935,11 @@ mod tests {
     #[test]
     fn pool_events_cover_every_vm_newest_first() {
         let journal = "\
-2026-11-13T10:00:00+00:00 h virtio-mem-host[1]: virtio-mem-host: vm=alpha alias=m0 event=control_health direction=Grow
-2026-11-13T10:00:01+00:00 h virtio-mem-host[1]: virtio-mem-host: vm=alpha alias=m0 event=controller_decision action=grant session_id=s sequence=1 operation=Add bytes=1073741824 grant_bytes=536870912 pool_ceiling_bytes=None requested_bytes=0 current_bytes=0
-2026-11-13T10:00:02+00:00 h virtio-mem-host[1]: virtio-mem-host: vm=beta alias=m0 event=request_completed operation_id=none session_id=s sequence=4 operation=Add bytes=1073741824 outcome=PoolEmpty actual_bytes=0 reason=the pool is fully charged
-2026-11-13T10:00:03+00:00 h virtio-mem-host[1]: virtio-mem-host: vm=beta alias=m0 event=request_completed operation_id=none session_id=s sequence=4 operation=Add bytes=1073741824 outcome=PoolEmpty actual_bytes=0 reason=the pool is fully charged
-2026-11-13T10:00:04+00:00 h virtio-mem-host[1]: virtio-mem-host: vm=alpha alias=m0 event=request_completed operation_id=7 session_id=s sequence=1 operation=Add bytes=1073741824 outcome=Partial actual_bytes=536870912
+2026-11-13T10:00:00+00:00 h rampire[1]: rampire: vm=alpha alias=m0 event=control_health direction=Grow
+2026-11-13T10:00:01+00:00 h rampire[1]: rampire: vm=alpha alias=m0 event=controller_decision action=grant session_id=s sequence=1 operation=Add bytes=1073741824 grant_bytes=536870912 pool_ceiling_bytes=None requested_bytes=0 current_bytes=0
+2026-11-13T10:00:02+00:00 h rampire[1]: rampire: vm=beta alias=m0 event=request_completed operation_id=none session_id=s sequence=4 operation=Add bytes=1073741824 outcome=PoolEmpty actual_bytes=0 reason=the pool is fully charged
+2026-11-13T10:00:03+00:00 h rampire[1]: rampire: vm=beta alias=m0 event=request_completed operation_id=none session_id=s sequence=4 operation=Add bytes=1073741824 outcome=PoolEmpty actual_bytes=0 reason=the pool is fully charged
+2026-11-13T10:00:04+00:00 h rampire[1]: rampire: vm=alpha alias=m0 event=request_completed operation_id=7 session_id=s sequence=1 operation=Add bytes=1073741824 outcome=Partial actual_bytes=536870912
 ";
         let events = parse_events(journal, 8);
         assert_eq!(

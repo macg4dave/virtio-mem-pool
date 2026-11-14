@@ -35,18 +35,18 @@ for binding in "$@"; do
   attestations+=(--attestation "${binding%%=*}=$(cd -- "$(dirname -- "${binding#*=}")" && pwd)/$(basename -- "${binding#*=}")")
 done
 cd "$(dirname -- "$0")/../.."
-unit=virtio-mem-host@${instance}.service
-if pgrep -f 'target/release/virtio-mem-host' >/dev/null; then
-  echo 'a foreground virtio-mem-host is running; stop it first' >&2
+unit=rampire@${instance}.service
+if pgrep -f 'target/release/rampire' >/dev/null; then
+  echo 'a foreground rampire is running; stop it first' >&2
   exit 1
 fi
 mkdir -p .artifacts/deploy
-cargo build --release --locked -p virtio-mem-host -p virtio-mem-xtask
+cargo build --release --locked -p rampire -p xtask
 # host-deploy validates exclusive ownership and requires this unit inactive;
 # a unit left `failed` (for example by a polkit outage) is not inactive.
 sudo systemctl stop "$unit"
 sudo systemctl reset-failed "$unit" 2>/dev/null || true
-target/release/virtio-mem-xtask host-deploy "$instance" \
+target/release/xtask host-deploy "$instance" \
   --config "$config_dir/host_list.toml" \
   "${attestations[@]}" \
   --output ".artifacts/deploy/host-deploy-$(date +%Y%m%dT%H%M%S).json" \

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
-const USAGE: &str = "Usage: virtio-mem-workload \
+const USAGE: &str = "Usage: rampire-workload \
     --workload-id ID \
     --mode committed|resident \
     --peak-bytes BYTES \
@@ -297,7 +297,7 @@ mod native {
             let released = unsafe { VirtualFree(self.address, 0, MEM_RELEASE) };
             if released == FALSE {
                 eprintln!(
-                    "virtio-mem-workload: VirtualFree failed during cleanup: {}",
+                    "rampire-workload: VirtualFree failed during cleanup: {}",
                     std::io::Error::last_os_error()
                 );
             }
@@ -385,7 +385,7 @@ fn run(config: &Config) -> Result<(), String> {
 
 #[cfg(not(windows))]
 fn run(_config: &Config) -> Result<(), String> {
-    Err("virtio-mem-workload is supported only on Windows".to_owned())
+    Err("rampire-workload is supported only on Windows".to_owned())
 }
 
 fn main() -> ExitCode {
@@ -400,7 +400,7 @@ fn main() -> ExitCode {
     match Config::parse(&arguments).and_then(|config| run(&config)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("virtio-mem-workload: {error}");
+            eprintln!("rampire-workload: {error}");
             ExitCode::FAILURE
         }
     }

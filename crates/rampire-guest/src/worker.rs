@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use virtio_mem_core::{
+use rampire_core::{
     MemoryResourceNotificationState, MemoryTelemetrySnapshot, RawTelemetryEnvelope, TargetSample,
 };
 
@@ -251,14 +251,14 @@ impl<M: MemorySource, P: PressureSource, C: Clock> GuestWorker<M, P, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
-    use std::path::PathBuf;
-    use virtio_mem_core::settings::GlobalSettings;
-    use virtio_mem_core::{
+    use rampire_core::settings::GlobalSettings;
+    use rampire_core::{
         host_status_path, request_state_path, GuestRequestState, GuestSettings, HostMemoryStatus,
         MemoryOperation, MemoryOutcome, MemoryResourceNotificationState, MemoryResult,
         MemoryTelemetrySnapshot, MEMORY_REQUEST_VERSION,
     };
+    use std::cell::Cell;
+    use std::path::PathBuf;
 
     const MIB: u64 = 1024 * 1024;
     const GIB: u64 = 1024 * MIB;
@@ -330,7 +330,7 @@ mod tests {
     impl Fixture {
         fn new(name: &str) -> Self {
             let directory = std::env::temp_dir().join(format!(
-                "virtio-mem-guest-worker-{name}-{}",
+                "rampire-guest-worker-{name}-{}",
                 std::process::id()
             ));
             // A previous run may have left fixtures behind.
@@ -349,7 +349,7 @@ mod tests {
             let requests = GuestRequests::open(
                 settings(),
                 "debian",
-                "virtio-mem-guest",
+                "rampire-guest",
                 session,
                 &self.control,
                 crate::requests::GuestIdentity {
@@ -377,7 +377,7 @@ mod tests {
             let status = HostMemoryStatus {
                 version: MEMORY_REQUEST_VERSION,
                 vm_name: "debian".to_owned(),
-                service_name: "virtio-mem-guest".to_owned(),
+                service_name: "rampire-guest".to_owned(),
                 device_alias: "ua-virtiomem0".to_owned(),
                 observed_unix_millis: 1_000_000 + second * 1000,
                 device_size_bytes: 4 * GIB,
@@ -509,7 +509,7 @@ mod tests {
         use crate::requests::published_settings;
         use crate::transport::{FileTransport, Transport};
         let fixture = Fixture::new("settings");
-        let service = "virtio-mem-guest";
+        let service = "rampire-guest";
         let mut files = FileTransport::new(&fixture.control);
         let mut published = || {
             files

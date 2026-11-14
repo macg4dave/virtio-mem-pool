@@ -162,7 +162,7 @@ mod tests {
     fn configuration_cannot_alias_any_derived_publication_file() {
         let config = WindowsServiceConfigFile {
             schema_version: WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION,
-            service_name: "VirtioMemService".to_owned(),
+            service_name: "RampireGuest".to_owned(),
             display_name: "Virtio memory".to_owned(),
             description: "Virtio memory".to_owned(),
             service_account: r"NT AUTHORITY\LocalService".to_owned(),
@@ -170,7 +170,7 @@ mod tests {
         };
         config.validate().unwrap();
         config
-            .validate_paths(r"C:\ProgramData\VirtioMemService\config.json")
+            .validate_paths(r"C:\ProgramData\RampireGuest\config.json")
             .unwrap();
         let control = crate::settings::CONTROL_PATH;
         for path in [

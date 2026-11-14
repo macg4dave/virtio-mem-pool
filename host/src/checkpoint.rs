@@ -7,12 +7,12 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
-use virtio_mem_core::{
+use rampire_core::{
     CommandDirection, CommandOwnership, ControlHealth, ControllerCommandStatus,
     ControllerStatusSnapshot, GuestInputStatus, MemoryOperation, MemoryOutcome,
     MemoryRequestJournal, MemoryResult, RecoveryState, VirtioMemState, CONTROLLER_STATUS_VERSION,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::config::HostConfig;
 use crate::ownership::CheckpointOwner;
@@ -446,17 +446,15 @@ fn persist(path: &Path, file: &CheckpointFile) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rampire_core::{MemoryRequest, RequestIdentity, MEMORY_REQUEST_VERSION};
     use std::time::Duration;
-    use virtio_mem_core::{MemoryRequest, RequestIdentity, MEMORY_REQUEST_VERSION};
 
     const GIB: u64 = 1024 * 1024 * 1024;
     const MIB: u64 = 1024 * 1024;
 
     fn config(name: &str) -> HostConfig {
-        let base = std::env::temp_dir().join(format!(
-            "virtio-mem-checkpoint-{name}-{}",
-            std::process::id()
-        ));
+        let base =
+            std::env::temp_dir().join(format!("rampire-checkpoint-{name}-{}", std::process::id()));
         HostConfig {
             vm_name: "guest".to_owned(),
             alias: "memory0".to_owned(),
@@ -469,8 +467,8 @@ mod tests {
             virsh_binary: "virsh".to_owned(),
             libvirt_uri: "qemu:///system".to_owned(),
             raw_telemetry_path: "telemetry.jsonl".to_owned(),
-            raw_telemetry_service_name: "VirtioMemService".to_owned(),
-            guest_os: virtio_mem_core::settings::GuestOs::Windows,
+            raw_telemetry_service_name: "RampireGuest".to_owned(),
+            guest_os: rampire_core::settings::GuestOs::Windows,
             raw_telemetry_max_age: Duration::from_secs(60),
             raw_telemetry_future_tolerance: Duration::from_secs(5),
             host_min_headroom_bytes: 4 * GIB,
@@ -503,7 +501,7 @@ mod tests {
                     version: MEMORY_REQUEST_VERSION,
                     identity: RequestIdentity {
                         vm_name: "guest".to_owned(),
-                        service_name: "VirtioMemService".to_owned(),
+                        service_name: "RampireGuest".to_owned(),
                         session_id: "session".to_owned(),
                         sequence: 1,
                     },
@@ -513,7 +511,7 @@ mod tests {
                     expires_unix_millis: 200,
                 },
                 "guest",
-                "VirtioMemService",
+                "RampireGuest",
                 150,
                 0,
             )

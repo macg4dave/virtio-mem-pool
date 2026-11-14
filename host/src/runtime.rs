@@ -9,13 +9,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use thiserror::Error;
-use virtio_mem_core::{
+use rampire_core::{
     allocate_pool, bounded_reason, service_order, CommandDirection, CommandOwnership,
     HostMemoryStatus, MemoryOperation, MemoryOutcome, MemoryRequest,
     MemoryResourceNotificationState, MemoryResult, PoolMember, RequestAdmission, VirtioMemState,
     MEMORY_REQUEST_VERSION, MIN_BLOCK_SIZE_BYTES,
 };
+use thiserror::Error;
 
 use crate::checkpoint::{
     command_ownership, movement_result, Checkpoint, CommandIntent, DurableControlState,
@@ -133,7 +133,7 @@ pub struct VmController<G, S, R> {
     /// every poll must not re-arm the read-failure report.
     status_unpublished_reported: bool,
     health_report: Option<(Instant, u64, u64)>,
-    last_observed_request: Option<virtio_mem_core::RequestIdentity>,
+    last_observed_request: Option<rampire_core::RequestIdentity>,
     /// The publication version of the guest's last valid record.
     guest_version: Option<u16>,
 }
@@ -1072,7 +1072,7 @@ where
                 guest_settings: self
                     .config
                     .guest_settings
-                    .filter(|_| virtio_mem_core::sends_guest_settings_to(self.guest_version)),
+                    .filter(|_| rampire_core::sends_guest_settings_to(self.guest_version)),
             })
         });
         match published {
@@ -1150,7 +1150,7 @@ where
 
     fn log(&self, message: &str) {
         eprintln!(
-            "virtio-mem-host: vm={} alias={} {message}",
+            "rampire: vm={} alias={} {message}",
             self.config.vm_name, self.config.alias
         );
     }
@@ -1181,10 +1181,10 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use virtio_mem_core::{MemoryTelemetrySnapshot, RawTelemetryEnvelope, RequestIdentity};
+    use rampire_core::{MemoryTelemetrySnapshot, RawTelemetryEnvelope, RequestIdentity};
 
     use super::*;
-    use virtio_mem_core::settings::GuestOs;
+    use rampire_core::settings::GuestOs;
 
     const MIB: u64 = 1024 * 1024;
     const GIB: u64 = 1024 * MIB;
@@ -1332,7 +1332,7 @@ mod tests {
             }
             let mut envelope = RawTelemetryEnvelope::new(
                 "guest",
-                "VirtioMemService",
+                "RampireGuest",
                 "session",
                 now(),
                 1,
@@ -1361,7 +1361,7 @@ mod tests {
         }
 
         fn publish_status(&self, status: &HostMemoryStatus) -> Result<(), String> {
-            status.validate_for("guest", "VirtioMemService")?;
+            status.validate_for("guest", "RampireGuest")?;
             self.0.borrow_mut().statuses.push(status.clone());
             Ok(())
         }
@@ -1385,7 +1385,7 @@ mod tests {
             version: MEMORY_REQUEST_VERSION,
             identity: RequestIdentity {
                 vm_name: "guest".to_owned(),
-                service_name: "VirtioMemService".to_owned(),
+                service_name: "RampireGuest".to_owned(),
                 session_id: "session".to_owned(),
                 sequence,
             },
@@ -1398,7 +1398,7 @@ mod tests {
 
     fn config(test: &str, priority: u32) -> HostConfig {
         let path = std::env::temp_dir().join(format!(
-            "virtio-mem-runtime-{test}-{priority}-{}.json",
+            "rampire-runtime-{test}-{priority}-{}.json",
             std::process::id()
         ));
         // A previous failed run may have left state behind.
@@ -1415,7 +1415,7 @@ mod tests {
             virsh_binary: "virsh".to_owned(),
             libvirt_uri: "qemu:///system".to_owned(),
             raw_telemetry_path: "telemetry.json".to_owned(),
-            raw_telemetry_service_name: "VirtioMemService".to_owned(),
+            raw_telemetry_service_name: "RampireGuest".to_owned(),
             guest_os: GuestOs::Windows,
             raw_telemetry_max_age: Duration::from_secs(60),
             raw_telemetry_future_tolerance: Duration::from_secs(5),
@@ -1516,9 +1516,8 @@ mod tests {
 
     #[test]
     fn guest_settings_reach_only_guests_that_can_read_them() {
-        let settings =
-            virtio_mem_core::settings::GlobalSettings::default().guest_policy(GIB, 8 * GIB);
-        let published = virtio_mem_core::GuestSettings {
+        let settings = rampire_core::settings::GlobalSettings::default().guest_policy(GIB, 8 * GIB);
+        let published = rampire_core::GuestSettings {
             policy: settings,
             min_ram: 4 * GIB,
             max_ram: 16 * GIB,
@@ -1919,7 +1918,7 @@ mod tests {
                 Checkpoint::open(&fixture.config, "a".repeat(64)).expect("checkpoint");
             control
                 .journal
-                .admit(add.clone(), "guest", "VirtioMemService", now(), 0)
+                .admit(add.clone(), "guest", "RampireGuest", now(), 0)
                 .expect("admit");
             control.intent = Some(CommandIntent {
                 operation_id: "earlier".to_owned(),

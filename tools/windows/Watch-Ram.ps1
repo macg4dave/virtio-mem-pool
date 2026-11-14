@@ -38,12 +38,12 @@ if ($env:OS -ne 'Windows_NT') {
     throw 'This script requires Windows.'
 }
 
-if (-not ('VirtioMemTools.RamSnapshot' -as [type])) {
+if (-not ('RampireTools.RamSnapshot' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
-namespace VirtioMemTools {
+namespace RampireTools {
     public static class RamSnapshot {
         [StructLayout(LayoutKind.Sequential)]
         public struct PerformanceInformation {
@@ -243,7 +243,7 @@ function Restore-Console {
 try {
     while ($Samples -eq 0 -or $sampleNumber -lt $Samples) {
         # Never cache physical total: hot-add/removal can change it between ticks.
-        $native = [VirtioMemTools.RamSnapshot]::Read()
+        $native = [RampireTools.RamSnapshot]::Read()
         $pageSize = [decimal] $native.PageSize.ToUInt64()
         $total = [uint64] ([decimal] $native.PhysicalTotal.ToUInt64() * $pageSize)
         $available = [uint64] ([decimal] $native.PhysicalAvailable.ToUInt64() * $pageSize)

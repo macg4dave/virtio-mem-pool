@@ -3,7 +3,7 @@
 // This grants connection-level management access, not a per-VM ACL.
 polkit.addRule(function(action, subject) {
     if (action.id == "org.libvirt.unix.manage" &&
-        subject.user == "virtio-mem-host") {
+        subject.user == "rampire") {
         return polkit.Result.YES;
     }
 });

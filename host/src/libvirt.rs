@@ -214,7 +214,7 @@ impl Worker {
             if connection.is_null() {
                 return Err(format!("connect to libvirt: {}", self.api.last_error()));
             }
-            eprintln!("virtio-mem-host: event=libvirt_connected");
+            eprintln!("rampire: event=libvirt_connected");
             self.connection = connection;
         }
         Ok(self.connection)
@@ -559,11 +559,11 @@ mod tests {
     }
 
     /// Live check against a running VM with a guest agent:
-    /// `VIRTIO_MEM_LIVE_VM=<domain> cargo test -p virtio-mem-host live_ -- --ignored`
+    /// `RAMPIRE_LIVE_VM=<domain> cargo test -p rampire live_ -- --ignored`
     #[test]
     #[ignore]
     fn live_session_matches_virsh_on_a_running_vm() {
-        let vm = std::env::var("VIRTIO_MEM_LIVE_VM").expect("VIRTIO_MEM_LIVE_VM");
+        let vm = std::env::var("RAMPIRE_LIVE_VM").expect("RAMPIRE_LIVE_VM");
         let session = LibvirtSession::new("qemu:///system", Duration::from_secs(10));
         let xml = session
             .run(&arguments(&["dumpxml", &vm]))

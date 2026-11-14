@@ -12,7 +12,7 @@ use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use virtio_mem_core::{RecordReader, RecordWriter, MEMORY_CONTROL_CHANNEL_NAME};
+use rampire_core::{RecordReader, RecordWriter, MEMORY_CONTROL_CHANNEL_NAME};
 
 use crate::virsh::{Virsh, VirshCommand};
 
@@ -96,10 +96,7 @@ impl ControlChannel {
         let mut state = self.state();
         match result {
             Ok(stream) => {
-                eprintln!(
-                    "virtio-mem-host: vm={} event=control_channel_connected",
-                    self.vm
-                );
+                eprintln!("rampire: vm={} event=control_channel_connected", self.vm);
                 state.stream = Some(stream);
                 state.reader.disconnected();
                 state.writer.reconnected();
@@ -109,7 +106,7 @@ impl ControlChannel {
             Err(error) => {
                 if !std::mem::replace(&mut state.reported, true) {
                     eprintln!(
-                        "virtio-mem-host: vm={} event=control_channel_unavailable reason={error}",
+                        "rampire: vm={} event=control_channel_unavailable reason={error}",
                         self.vm
                     );
                 }
@@ -190,7 +187,7 @@ impl ControlChannel {
             writer.reconnected();
             // Reconnect promptly: the socket stays while the domain runs.
             state.retry_after = None;
-            eprintln!("virtio-mem-host: vm={} event=control_channel_lost", self.vm);
+            eprintln!("rampire: vm={} event=control_channel_lost", self.vm);
         }
     }
 

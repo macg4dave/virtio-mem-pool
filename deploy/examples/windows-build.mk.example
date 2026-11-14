@@ -6,7 +6,7 @@
 # SSH alias in ~/.ssh/config (address, user, identity and host key live there).
 WINDOWS_SSH ?= windows-build-vm
 # Checkout inside the guest that sources are synced to and built in.
-WINDOWS_DIR ?= C:\build\virtio-mem-pool
+WINDOWS_DIR ?= C:\build\rampire
 # Local folder for fetched binaries, build records and deploy evidence.
 WINDOWS_ARTIFACTS ?= .artifacts/windows/windows-vm
 # Seconds to wait for SSH to connect, and for each remote step to finish.
@@ -15,4 +15,4 @@ WINDOWS_OPERATION_TIMEOUT_SECONDS ?= 1200
 # The VM settings file deployed by make windows-deploy.
 WINDOWS_MANIFEST ?= site/windows-vm_settings.toml
 # Installed Windows service name.
-WINDOWS_SERVICE ?= VirtioMemService
+WINDOWS_SERVICE ?= RampireGuest

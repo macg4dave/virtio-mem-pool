@@ -2,30 +2,30 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::sync::{atomic::AtomicBool, Arc};
 
+use rampire::attestation::{read_attestation, AttestedCompatibilitySource};
+use rampire::cli::CliCommand;
+use rampire::config::{HostConfig, HostSettings};
+use rampire::control_channel::ControlChannel;
+use rampire::guest_channel::{publication_copy_path, GuestChannel};
+use rampire::host_memory::ProcMeminfoSource;
+use rampire::ownership::DeviceOwner;
+use rampire::qga::VirshGuestFiles;
+use rampire::resize_sink::VirshResizeSink;
+use rampire::runtime::{HostRuntime, VmController};
+use rampire::virsh::Virsh;
+use rampire::xml_source::VirshXmlSource;
 use signal_hook::consts::signal::{SIGINT, SIGTERM};
 use signal_hook::flag;
-use virtio_mem_host::attestation::{read_attestation, AttestedCompatibilitySource};
-use virtio_mem_host::cli::CliCommand;
-use virtio_mem_host::config::{HostConfig, HostSettings};
-use virtio_mem_host::control_channel::ControlChannel;
-use virtio_mem_host::guest_channel::{publication_copy_path, GuestChannel};
-use virtio_mem_host::host_memory::ProcMeminfoSource;
-use virtio_mem_host::ownership::DeviceOwner;
-use virtio_mem_host::qga::VirshGuestFiles;
-use virtio_mem_host::resize_sink::VirshResizeSink;
-use virtio_mem_host::runtime::{HostRuntime, VmController};
-use virtio_mem_host::virsh::Virsh;
-use virtio_mem_host::xml_source::VirshXmlSource;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let config_path = match virtio_mem_host::cli::parse_args(&args) {
+    let config_path = match rampire::cli::parse_args(&args) {
         Ok(CliCommand::Run { config }) => config,
         Ok(command) => {
-            return match virtio_mem_host::cli::run(command) {
+            return match rampire::cli::run(command) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
-                    eprintln!("virtio-mem-host CLI failed: {error}");
+                    eprintln!("rampire CLI failed: {error}");
                     ExitCode::FAILURE
                 }
             };
@@ -38,7 +38,7 @@ fn main() -> ExitCode {
     let settings = match HostSettings::load(&config_path) {
         Ok(settings) => settings,
         Err(error) => {
-            eprintln!("virtio-mem-host configuration error: {error}");
+            eprintln!("rampire configuration error: {error}");
             return ExitCode::FAILURE;
         }
     };
@@ -52,14 +52,14 @@ fn main() -> ExitCode {
         first.libvirt_uri.clone(),
     );
     if let Err(error) = virsh.require_management_access() {
-        eprintln!("virtio-mem-host authorization error: {error}");
+        eprintln!("rampire authorization error: {error}");
         return ExitCode::FAILURE;
     }
     let stop = Arc::new(AtomicBool::new(false));
     if let Err(error) = flag::register(SIGTERM, Arc::clone(&stop))
         .and_then(|_| flag::register(SIGINT, Arc::clone(&stop)))
     {
-        eprintln!("virtio-mem-host signal setup error: {error}");
+        eprintln!("rampire signal setup error: {error}");
         return ExitCode::FAILURE;
     }
     // Device owners are held until the runtime ends.
@@ -75,7 +75,7 @@ fn main() -> ExitCode {
                 controls.push(control);
             }
             Err(error) => {
-                eprintln!("virtio-mem-host controller setup error: {error}");
+                eprintln!("rampire controller setup error: {error}");
                 return ExitCode::FAILURE;
             }
         }
@@ -83,11 +83,11 @@ fn main() -> ExitCode {
     let mut runtime = match HostRuntime::new(vms, ProcMeminfoSource::new(), settings.pool_bytes) {
         Ok(runtime) => runtime,
         Err(error) => {
-            eprintln!("virtio-mem-host configuration error: {error}");
+            eprintln!("rampire configuration error: {error}");
             return ExitCode::FAILURE;
         }
     };
-    let events = match virtio_mem_host::wake::MemoryEvents::start(&virsh) {
+    let events = match rampire::wake::MemoryEvents::start(&virsh) {
         Ok(events) => Some(events),
         Err(error) => {
             eprintln!("libvirt events unavailable; polling continues: {error}");
@@ -99,11 +99,11 @@ fn main() -> ExitCode {
     drop(owners);
     match result {
         Ok(()) => {
-            eprintln!("virtio-mem-host stopped");
+            eprintln!("rampire stopped");
             ExitCode::SUCCESS
         }
         Err(error) => {
-            eprintln!("virtio-mem-host failed: {error}");
+            eprintln!("rampire failed: {error}");
             ExitCode::FAILURE
         }
     }

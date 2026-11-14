@@ -291,7 +291,7 @@ mod tests {
     ) -> RawTelemetryEnvelope {
         RawTelemetryEnvelope::new(
             "guest",
-            "VirtioMemService",
+            "RampireGuest",
             session,
             observed,
             monotonic,
@@ -308,7 +308,7 @@ mod tests {
         let parsed: RawTelemetryEnvelope = serde_json::from_slice(&bytes).unwrap();
         assert!(parsed.diagnostics.is_none());
         assert_eq!(
-            parsed.validate_for("guest", "VirtioMemService", 1_000_000, 60_000, 5000),
+            parsed.validate_for("guest", "RampireGuest", 1_000_000, 60_000, 5000),
             Ok(())
         );
         let mut new = old;
@@ -335,7 +335,7 @@ mod tests {
             serde_json::from_slice(&serde_json::to_vec(&new).unwrap()).unwrap();
         assert_eq!(parsed, new);
         assert_eq!(
-            parsed.validate_for("guest", "VirtioMemService", 1_000_000, 60_000, 5000),
+            parsed.validate_for("guest", "RampireGuest", 1_000_000, 60_000, 5000),
             Ok(())
         );
     }
@@ -355,25 +355,22 @@ mod tests {
         let check = |envelope: &RawTelemetryEnvelope, vm, service, now| {
             envelope.validate_for(vm, service, now, 60_000, 5_000)
         };
-        assert_eq!(
-            check(&current, "guest", "VirtioMemService", 1_000_000),
-            Ok(())
-        );
-        assert!(check(&current, "other", "VirtioMemService", 1_000_000).is_err());
+        assert_eq!(check(&current, "guest", "RampireGuest", 1_000_000), Ok(()));
+        assert!(check(&current, "other", "RampireGuest", 1_000_000).is_err());
         assert!(check(&current, "guest", "other-service", 1_000_000).is_err());
-        assert!(check(&current, "guest", "VirtioMemService", 1_056_000).is_err());
+        assert!(check(&current, "guest", "RampireGuest", 1_056_000).is_err());
         let future = envelope("session-a", 1_006_000, 20, 1);
-        assert!(check(&future, "guest", "VirtioMemService", 1_000_000).is_err());
+        assert!(check(&future, "guest", "RampireGuest", 1_000_000).is_err());
 
         let mut old = current.clone();
         old.version = 3;
         assert_eq!(
-            check(&old, "guest", "VirtioMemService", 1_000_000),
+            check(&old, "guest", "RampireGuest", 1_000_000),
             Err(DemandError::UnsupportedTelemetryVersion(3))
         );
         let mut control = current.clone();
         control.session_id = "session\n".to_owned();
-        assert!(check(&control, "guest", "VirtioMemService", 1_000_000).is_err());
+        assert!(check(&control, "guest", "RampireGuest", 1_000_000).is_err());
     }
 
     #[test]

@@ -4,13 +4,13 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
-use virtio_mem_core::{
+use rampire_core::{
     parse_virtio_mem_xml_for_alias, settings::GuestOs, CompatibilityEvidence,
     VirtioMemCompatibility,
 };
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 use crate::compatibility_source::CompatibilitySource;
 use crate::virsh::VirshCommand;
@@ -494,7 +494,7 @@ fn evidence(value: bool) -> CompatibilityEvidence {
 }
 
 fn validate_alias(alias: &str) -> Result<(), String> {
-    if virtio_mem_core::settings::valid_alias(alias) {
+    if rampire_core::settings::valid_alias(alias) {
         Ok(())
     } else {
         Err("compatibility evidence alias contains unsupported characters".to_owned())

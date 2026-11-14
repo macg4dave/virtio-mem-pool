@@ -15,9 +15,9 @@
 use std::collections::VecDeque;
 use std::path::Path;
 
+use rampire::virsh::{Virsh, VirshCommand};
+use rampire_core::RawTelemetryEnvelope;
 use serde_json::{json, Map, Value};
-use virtio_mem_core::RawTelemetryEnvelope;
-use virtio_mem_host::virsh::{Virsh, VirshCommand};
 
 use super::{iso_utc, JournalEvent, Sample};
 use crate::process;
@@ -704,7 +704,7 @@ pub(super) struct BundleContext<'a> {
 /// The bundle text: the incident's own evidence, then what is collected now.
 pub(super) fn bundle_text(number: u32, incident: &Incident, context: &BundleContext) -> String {
     let mut text = format!(
-        "# virtio-mem metrics incident {number:03}\n\
+        "# RAMpire metrics incident {number:03}\n\
          component: {}\ndetected:  {}\nsummary:   {}\nvm:        {}\nunit:      {}\n",
         incident.component.name(),
         iso_utc(incident.unix_millis),
@@ -794,7 +794,7 @@ fn file_tail(path: &str) -> String {
 /// Where the guest keeps its own record of a service stop, for the guest OS
 /// that publishes under `service_name`. The host cannot read it.
 fn guest_evidence_hint(service_name: &str, since: &str) -> String {
-    if service_name == virtio_mem_core::settings::GuestOs::Linux.service_name() {
+    if service_name == rampire_core::settings::GuestOs::Linux.service_name() {
         format!(
             "systemd journal: journalctl -u {service_name} --utc --since '{since}'\n\
              Service state and last exit: systemctl status {service_name}\n\
@@ -820,15 +820,15 @@ mod tests {
 
     #[test]
     fn guest_service_incidents_point_at_the_guest_os_own_logs() {
-        let linux = guest_evidence_hint("virtio-mem-guest", "2026-11-13T02:00:00Z");
-        assert!(linux.contains("journalctl -u virtio-mem-guest"));
+        let linux = guest_evidence_hint("rampire-guest", "2026-11-13T02:00:00Z");
+        assert!(linux.contains("journalctl -u rampire-guest"));
         assert!(!linux.contains("Event Viewer"));
-        let windows = guest_evidence_hint("VirtioMemService", "2026-11-13T02:00:00Z");
-        assert!(windows.contains("Get-WinEvent") && windows.contains("VirtioMemService"));
+        let windows = guest_evidence_hint("RampireGuest", "2026-11-13T02:00:00Z");
+        assert!(windows.contains("Get-WinEvent") && windows.contains("RampireGuest"));
         assert!(windows.contains("StartTime='2026-11-13T02:00:00Z'"));
     }
+    use rampire_core::MemoryTelemetrySnapshot;
     use std::time::Duration;
-    use virtio_mem_core::MemoryTelemetrySnapshot;
 
     fn unit(text: &str) -> UnitStatus {
         UnitStatus::parse(&text.replace(' ', "\n"))
@@ -914,12 +914,12 @@ mod tests {
         let mut lifecycle = Lifecycle::new(12_000);
         assert!(lifecycle.observe(&sample(0), &[]).events.is_empty());
         let journal = [
-            line(10, "virtio-mem-host: event=control_health ok"),
+            line(10, "rampire: event=control_health ok"),
             line(10, "thread 'main' panicked at host/src/runtime.rs:12:5:"),
             line(10, "index out of bounds"),
             line(
                 1,
-                "virtio-mem-host@w.service: Main process exited, code=exited, status=101/n/a",
+                "rampire@w.service: Main process exited, code=exited, status=101/n/a",
             ),
         ];
         let failed = Sample {
@@ -1041,7 +1041,7 @@ mod tests {
         let envelope = |session: &str, observed: u64, sequence: u64| {
             RawTelemetryEnvelope::new(
                 "w",
-                "VirtioMemService",
+                "RampireGuest",
                 session,
                 observed,
                 0,
@@ -1110,15 +1110,15 @@ mod tests {
         );
         let context = BundleContext {
             vm: "no-such-vm-for-tests",
-            unit: "virtio-mem-host@no-such-vm-for-tests.service",
+            unit: "rampire@no-such-vm-for-tests.service",
             repo: Path::new("."),
             recent_rows: vec!["time_utc,elapsed_s".to_owned(), "x,1.0".to_owned()],
         };
         let text = bundle_text(7, &observed.incidents[0], &context);
         for expected in [
-            "# virtio-mem metrics incident 007",
+            "# RAMpire metrics incident 007",
             "component: vm",
-            "## journalctl -u virtio-mem-host@no-such-vm-for-tests.service",
+            "## journalctl -u rampire@no-such-vm-for-tests.service",
             "## tail of /var/log/libvirt/qemu/no-such-vm-for-tests.log\n(unavailable:",
             "## samples before detection (samples.csv)\ntime_utc,elapsed_s\nx,1.0",
         ] {

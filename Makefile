@@ -28,11 +28,11 @@ $(error $(WINDOWS_SITE) not found: copy deploy/examples/windows-build.mk.example
 endif
 include $(WINDOWS_SITE)
 endif
-$(WINDOWS_TARGETS): export VIRTIO_MEM_WINDOWS_SSH ?= $(WINDOWS_SSH)
-$(WINDOWS_TARGETS): export VIRTIO_MEM_WINDOWS_DIR ?= $(WINDOWS_DIR)
-$(WINDOWS_TARGETS): export VIRTIO_MEM_WINDOWS_ARTIFACTS ?= $(WINDOWS_ARTIFACTS)
-$(WINDOWS_TARGETS): export VIRTIO_MEM_WINDOWS_CONNECT_TIMEOUT_SECONDS ?= $(WINDOWS_CONNECT_TIMEOUT_SECONDS)
-$(WINDOWS_TARGETS): export VIRTIO_MEM_WINDOWS_OPERATION_TIMEOUT_SECONDS ?= $(WINDOWS_OPERATION_TIMEOUT_SECONDS)
+$(WINDOWS_TARGETS): export RAMPIRE_WINDOWS_SSH ?= $(WINDOWS_SSH)
+$(WINDOWS_TARGETS): export RAMPIRE_WINDOWS_DIR ?= $(WINDOWS_DIR)
+$(WINDOWS_TARGETS): export RAMPIRE_WINDOWS_ARTIFACTS ?= $(WINDOWS_ARTIFACTS)
+$(WINDOWS_TARGETS): export RAMPIRE_WINDOWS_CONNECT_TIMEOUT_SECONDS ?= $(WINDOWS_CONNECT_TIMEOUT_SECONDS)
+$(WINDOWS_TARGETS): export RAMPIRE_WINDOWS_OPERATION_TIMEOUT_SECONDS ?= $(WINDOWS_OPERATION_TIMEOUT_SECONDS)
 
 windows-build:
 	cargo xtask windows check
@@ -44,11 +44,11 @@ windows-native-gate:
 	cargo xtask windows all
 
 windows-status:
-	cargo xtask windows build-status $(WINDOWS_SERVICE) --output $(VIRTIO_MEM_WINDOWS_ARTIFACTS)/build-status.json
+	cargo xtask windows build-status $(WINDOWS_SERVICE) --output $(RAMPIRE_WINDOWS_ARTIFACTS)/build-status.json
 
 # Restarts the Windows service in the guest with the site's VM settings.
 windows-deploy:
-	cargo xtask windows deploy $(WINDOWS_MANIFEST) --output $(VIRTIO_MEM_WINDOWS_ARTIFACTS)/deploy.json --apply
+	cargo xtask windows deploy $(WINDOWS_MANIFEST) --output $(RAMPIRE_WINDOWS_ARTIFACTS)/deploy.json --apply
 
 all-gates:
 	cargo xtask gate all

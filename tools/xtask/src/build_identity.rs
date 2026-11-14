@@ -2,7 +2,7 @@
 //! executable installed on the guest.
 //!
 //! `sync` stamps the remote workspace with a [`BuildIdentity`]; `build` compiles
-//! its `build_id` into the service (`virtio-mem-service version`); `fetch`
+//! its `build_id` into the service (`rampire-guest version`); `fetch`
 //! records the verified executables as a [`BuildRecord`]. The installed
 //! service is compared with that record by SHA-256, the authority for "which
 //! binary is this", with the self-reported build ID as the readable label.
@@ -10,7 +10,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Remote workspace file holding the identity of the last synchronised source.
-pub const STAMP_FILE: &str = "virtio-mem-build.json";
+pub const STAMP_FILE: &str = "rampire-build.json";
 /// Local record of the last fetched, verified candidate.
 pub const RECORD_FILE: &str = "build.json";
 const RECORD_SCHEMA_VERSION: u32 = 1;
@@ -179,7 +179,7 @@ mod tests {
 
     fn installed(sha256: &str) -> InstalledBuild {
         InstalledBuild {
-            path: r"C:\Program Files\VirtioMemService\virtio-mem-service.exe".to_owned(),
+            path: r"C:\Program Files\RampireGuest\rampire-guest.exe".to_owned(),
             sha256: sha256.to_owned(),
             build_id: None,
         }

@@ -1,11 +1,11 @@
 use std::io::Read;
 use std::time::Duration;
 
-use virtio_mem_core::{WindowsServiceConfigFile, WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION};
+use rampire_core::{WindowsServiceConfigFile, WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION};
 
 use crate::error::ConfigurationError;
 
-pub const DEFAULT_CONFIG_PATH: &str = r"C:\ProgramData\VirtioMemService\config.json";
+pub const DEFAULT_CONFIG_PATH: &str = r"C:\ProgramData\RampireGuest\config.json";
 
 /// The deployed configuration file and where it was loaded from. It reads as
 /// the file's own fields.
@@ -34,7 +34,7 @@ impl ServiceConfig {
             .and_then(|()| self.file.validate_paths(&self.config_path))
             .map_err(ConfigurationError::InvalidFile)?;
         #[cfg(windows)]
-        validate_file_identity(&self.config_path, virtio_mem_core::settings::CONTROL_PATH)?;
+        validate_file_identity(&self.config_path, rampire_core::settings::CONTROL_PATH)?;
         Ok(())
     }
 
@@ -104,8 +104,8 @@ pub(crate) fn validate_file_identity(config: &str, report: &str) -> Result<(), C
     if let Some(config_id) = identify(config)? {
         for path in [
             report.to_owned(),
-            virtio_mem_core::host_status_path(report),
-            virtio_mem_core::request_state_path(report),
+            rampire_core::host_status_path(report),
+            rampire_core::request_state_path(report),
         ] {
             if identify(&path)? == Some(config_id) {
                 return Err(ConfigurationError::InvalidFile(
@@ -138,10 +138,7 @@ mod tests {
     use super::*;
 
     fn test_path(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
-            "virtio-mem-service-{name}-{}.json",
-            std::process::id()
-        ))
+        std::env::temp_dir().join(format!("rampire-guest-{name}-{}.json", std::process::id()))
     }
 
     #[test]
@@ -162,10 +159,9 @@ mod tests {
     #[test]
     fn rejects_path_collisions_and_control_characters() {
         let mut config = test_config();
-        config.config_path = virtio_mem_core::settings::CONTROL_PATH.to_uppercase();
+        config.config_path = rampire_core::settings::CONTROL_PATH.to_uppercase();
         assert!(config.validate().is_err());
-        config.config_path =
-            virtio_mem_core::request_state_path(virtio_mem_core::settings::CONTROL_PATH);
+        config.config_path = rampire_core::request_state_path(rampire_core::settings::CONTROL_PATH);
         assert!(config.validate().is_err());
         let mut config = test_config();
         config.file.description.push('\0');

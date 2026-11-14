@@ -12,15 +12,15 @@ use crate::{
     WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION,
 };
 
-pub const SERVICE_NAME: &str = "VirtioMemService";
+pub const SERVICE_NAME: &str = "RampireGuest";
 // The control channel is required for memory requests, independently of optional
 // diagnostic output. Keep its historical path to retain durable pending requests.
-pub const CONTROL_PATH: &str = r"C:\ProgramData\VirtioMemService\telemetry.json";
+pub const CONTROL_PATH: &str = r"C:\ProgramData\RampireGuest\telemetry.json";
 /// The Linux guest service's wire identity and systemd unit name.
-pub const LINUX_SERVICE_NAME: &str = "virtio-mem-guest";
+pub const LINUX_SERVICE_NAME: &str = "rampire-guest";
 /// The Linux guest's control publication; host status and durable request
 /// state are derived beside it, as on Windows.
-pub const LINUX_CONTROL_PATH: &str = "/var/lib/virtio-mem-guest/control.json";
+pub const LINUX_CONTROL_PATH: &str = "/var/lib/rampire-guest/control.json";
 
 /// The guest operating system decides the guest service's identity, its
 /// control path and which driver-specific host behaviour applies.
@@ -72,10 +72,10 @@ impl GuestOs {
     }
 }
 
-/// The Linux driver's first busy-removal retry, `VIRTIO_MEM_RETRY_TIMER_MIN_MS`
+/// The Linux driver's first busy-removal retry, `RAMPIRE_RETRY_TIMER_MIN_MS`
 /// in `drivers/virtio/virtio_mem.c`.
 const LINUX_REMOVAL_RETRY_MIN_SECONDS: u64 = 50;
-/// The longest wait between Linux retries, `VIRTIO_MEM_RETRY_TIMER_MAX_MS`.
+/// The longest wait between Linux retries, `RAMPIRE_RETRY_TIMER_MAX_MS`.
 const LINUX_REMOVAL_RETRY_MAX_SECONDS: u64 = 300;
 /// Busy-removal retries a Linux guest gets before its removal is settled.
 const LINUX_REMOVAL_RETRIES_AWAITED: u32 = 3;
@@ -298,7 +298,7 @@ impl VmSettings {
             schema_version: WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION,
             service_name: SERVICE_NAME.to_owned(),
             display_name: "Virtio Memory Service".to_owned(),
-            description: "Manages guest virtio-mem requests.".to_owned(),
+            description: "RAMpire guest memory requests.".to_owned(),
             service_account: service_account.to_owned(),
             shutdown_timeout_millis: 30_000,
         })
@@ -396,8 +396,8 @@ impl HostList {
                     .components()
                     .any(|part| matches!(part, std::path::Component::ParentDir))
                     || file.file_name().is_none()
-                    || file.starts_with("/var/lib/virtio-mem-host")
-                    || file.starts_with("/etc/virtio-mem-host")
+                    || file.starts_with("/var/lib/rampire")
+                    || file.starts_with("/etc/rampire")
                     // Host paths are Linux paths, whatever platform checks them.
                     || !path.starts_with('/')
                     || path.chars().any(char::is_control)
@@ -503,9 +503,7 @@ mod tests {
             free_ram: 2 * GIB,
             vm_name: name.to_owned(),
             guest_os: GuestOs::Windows,
-            install_path: Some(
-                r"C:\Program Files\VirtioMemService\virtio-mem-service.exe".to_owned(),
-            ),
+            install_path: Some(r"C:\Program Files\RampireGuest\rampire-guest.exe".to_owned()),
             service_account: Some(r"NT AUTHORITY\LocalService".to_owned()),
         }
     }
@@ -538,7 +536,7 @@ mod tests {
         let service = settings.service_config().unwrap();
         service.validate().unwrap();
         service
-            .validate_paths(r"C:\ProgramData\VirtioMemService\config.json")
+            .validate_paths(r"C:\ProgramData\RampireGuest\config.json")
             .unwrap();
         assert_eq!(service.service_account, r"NT AUTHORITY\LocalService");
         let host: HostList =
@@ -668,7 +666,7 @@ mod tests {
 
     #[test]
     fn independent_vm_files_are_loaded_relative_to_list_and_identity_checked() {
-        let root = std::env::temp_dir().join(format!("virtio-mem-settings-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("rampire-settings-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join(HOST_LIST_FILE);
         let mut list = HostList {

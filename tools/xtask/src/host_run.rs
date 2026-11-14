@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use rampire::host_memory::{HostMemorySource, ProcMeminfoSource};
 use signal_hook::consts::signal::{SIGINT, SIGTERM};
-use virtio_mem_host::host_memory::{HostMemorySource, ProcMeminfoSource};
 
 use crate::process;
 
@@ -81,10 +81,10 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
 pub fn run(command: &Command, repo: &Path) -> Result<(), String> {
     process::run(
         "cargo",
-        &["build", "--release", "--locked", "-p", "virtio-mem-host"],
+        &["build", "--release", "--locked", "-p", "rampire"],
         repo,
     )?;
-    let binary = repo.join("target/release/virtio-mem-host");
+    let binary = repo.join("target/release/rampire");
     let config = resolve(repo, &command.config);
     let config = config
         .canonicalize()
@@ -324,10 +324,8 @@ mod tests {
     }
 
     fn scratch_log(name: &str) -> Mutex<File> {
-        let path = std::env::temp_dir().join(format!(
-            "virtio-mem-host-run-{name}-{}.log",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("rampire-run-{name}-{}.log", std::process::id()));
         Mutex::new(File::create(path).expect("scratch log"))
     }
 

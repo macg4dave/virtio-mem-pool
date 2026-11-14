@@ -17,7 +17,7 @@ pub mod service_scm;
 /// Build identity stamped by `xtask windows build` from the synchronised
 /// source (`<commit>` or `<commit>-dirty.<source digest>`); local builds
 /// without the stamp report `unversioned`.
-pub const BUILD_ID: &str = match option_env!("VIRTIO_MEM_BUILD_ID") {
+pub const BUILD_ID: &str = match option_env!("RAMPIRE_BUILD_ID") {
     Some(id) => id,
     None => "unversioned",
 };

@@ -9,7 +9,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use virtio_mem_core::{
+use rampire_core::{
     host_status_path, HostMemoryStatus, RawTelemetryEnvelope, MAX_HOST_STATUS_BYTES,
 };
 
@@ -18,7 +18,7 @@ use crate::qga::{GuestFileReader, GuestFileWriter};
 /// Where the controller keeps each guest's latest validated publication, so
 /// observation tools on the host can read it without the guest agent. It is
 /// the unit's runtime directory: the copies go when the controller stops.
-pub const PUBLICATION_COPY_DIRECTORY: &str = "/run/virtio-mem-host";
+pub const PUBLICATION_COPY_DIRECTORY: &str = "/run/rampire";
 
 /// How long the control files are left alone after libvirt answers that the
 /// domain has no guest agent. Without the pause a guest whose control
@@ -135,7 +135,7 @@ impl<Q, T> GuestChannel<Q, T> {
             Err(error) => {
                 if !self.copy_failed.replace(true) {
                     eprintln!(
-                        "virtio-mem-host: vm={} event=publication_copy_failed reason={error}",
+                        "rampire: vm={} event=publication_copy_failed reason={error}",
                         self.vm_name
                     );
                 }
@@ -443,11 +443,11 @@ fn duration_millis(duration: Duration) -> Result<u64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-    use virtio_mem_core::{
+    use rampire_core::{
         MemoryOperation, MemoryRequest, MemoryResourceNotificationState, MemoryTelemetrySnapshot,
         RequestIdentity, MEMORY_REQUEST_VERSION,
     };
+    use std::sync::Mutex;
 
     #[derive(Default)]
     struct FakeGuestFiles {
@@ -500,7 +500,7 @@ mod tests {
     fn envelope(session: &str, observed: u64, sequence: u64) -> RawTelemetryEnvelope {
         RawTelemetryEnvelope::new(
             "guest",
-            "VirtioMemService",
+            "RampireGuest",
             session,
             observed,
             10 + sequence,
@@ -519,9 +519,9 @@ mod tests {
                 publication,
                 written: Mutex::default(),
             },
-            r"C:\ProgramData\VirtioMemService\telemetry.json",
+            r"C:\ProgramData\RampireGuest\telemetry.json",
             "guest",
-            "VirtioMemService",
+            "RampireGuest",
             Duration::from_secs(60),
             Duration::from_secs(5),
             FixedClock(1_000_000),
@@ -547,7 +547,7 @@ mod tests {
             version: MEMORY_REQUEST_VERSION,
             identity: RequestIdentity {
                 vm_name: "guest".to_owned(),
-                service_name: "VirtioMemService".to_owned(),
+                service_name: "RampireGuest".to_owned(),
                 session_id: "earlier-session".to_owned(),
                 sequence: 3,
             },
@@ -569,7 +569,7 @@ mod tests {
     fn rejects_missing_stale_cross_vm_partial_and_oversized_records() {
         let cross_vm = RawTelemetryEnvelope::new(
             "other",
-            "VirtioMemService",
+            "RampireGuest",
             "session-a",
             995_000,
             1,
@@ -613,9 +613,9 @@ mod tests {
         }
         let channel = GuestChannel::with_clock(
             NoAgent(std::cell::Cell::new(0)),
-            "/var/lib/virtio-mem/telemetry.json",
+            "/var/lib/rampire-guest/telemetry.json",
             "guest",
-            "virtio-mem-guest",
+            "rampire-guest",
             Duration::from_secs(60),
             Duration::from_secs(5),
             FixedClock(1_000_000),
@@ -623,7 +623,7 @@ mod tests {
         let status = HostMemoryStatus {
             version: MEMORY_REQUEST_VERSION,
             vm_name: "guest".to_owned(),
-            service_name: "virtio-mem-guest".to_owned(),
+            service_name: "rampire-guest".to_owned(),
             device_alias: "memory0".to_owned(),
             observed_unix_millis: 1_000_000,
             device_size_bytes: 8 << 30,
@@ -692,7 +692,7 @@ mod tests {
         let first = HostMemoryStatus {
             version: MEMORY_REQUEST_VERSION,
             vm_name: "guest".to_owned(),
-            service_name: "VirtioMemService".to_owned(),
+            service_name: "RampireGuest".to_owned(),
             device_alias: "memory0".to_owned(),
             observed_unix_millis: 999_000,
             device_size_bytes: 8 << 30,
@@ -716,7 +716,7 @@ mod tests {
         let status = HostMemoryStatus {
             version: MEMORY_REQUEST_VERSION,
             vm_name: "guest".to_owned(),
-            service_name: "VirtioMemService".to_owned(),
+            service_name: "RampireGuest".to_owned(),
             device_alias: "memory0".to_owned(),
             observed_unix_millis: 1_000_000,
             device_size_bytes: 8 << 30,
@@ -754,7 +754,7 @@ mod tests {
     #[test]
     fn each_valid_publication_is_kept_for_host_tools_who_prefer_it() {
         let directory =
-            std::env::temp_dir().join(format!("virtio-mem-copy-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("rampire-copy-test-{}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
         let copy = directory.join("guest.publication.json");
         let published = envelope("s", 995_000, 1);
@@ -787,7 +787,7 @@ mod tests {
         let status = HostMemoryStatus {
             version: MEMORY_REQUEST_VERSION,
             vm_name: "guest".to_owned(),
-            service_name: "VirtioMemService".to_owned(),
+            service_name: "RampireGuest".to_owned(),
             device_alias: "memory0".to_owned(),
             observed_unix_millis: 1_000_000,
             device_size_bytes: 8 << 30,
@@ -811,7 +811,7 @@ mod tests {
         assert_eq!(written.len(), 2);
         assert_eq!(
             written[0].0,
-            r"C:\ProgramData\VirtioMemService\telemetry.json.host-status"
+            r"C:\ProgramData\RampireGuest\telemetry.json.host-status"
         );
         assert_eq!(
             serde_json::from_slice::<HostMemoryStatus>(&written[0].1).expect("status"),

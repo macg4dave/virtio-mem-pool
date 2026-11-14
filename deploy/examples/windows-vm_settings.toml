@@ -26,5 +26,5 @@ free_ram = "2GB"
 
 # Where the Windows service is installed, and the account it runs as.
 # Don't change these.
-install_path = 'C:\Program Files\VirtioMemService\virtio-mem-service.exe'
+install_path = 'C:\Program Files\RampireGuest\rampire-guest.exe'
 service_account = 'NT AUTHORITY\LocalService'

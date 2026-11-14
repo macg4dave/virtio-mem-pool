@@ -18,15 +18,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use virtio_mem_core::{
+use rampire::config::HostConfig;
+use rampire::guest_channel::PublicationCopyFirst;
+use rampire::host_memory::meminfo_bytes;
+use rampire::qga::{GuestFileReader, VirshGuestFiles};
+use rampire::virsh::{Virsh, VirshCommand};
+use rampire_core::{
     parse_virtio_mem_xml_for_alias, MemoryResourceNotificationState, RawTelemetryEnvelope,
     VirtioMemState,
 };
-use virtio_mem_host::config::HostConfig;
-use virtio_mem_host::guest_channel::PublicationCopyFirst;
-use virtio_mem_host::host_memory::meminfo_bytes;
-use virtio_mem_host::qga::{GuestFileReader, VirshGuestFiles};
-use virtio_mem_host::virsh::{Virsh, VirshCommand};
 
 use crate::dashboard::{
     clock, gib, host_name, mib, terminal_columns, Frame, BACKGROUND, CYAN, DIM, GIB, GREEN, LABEL,
@@ -41,7 +41,7 @@ pub const HELP: &str = "Watch options (read-only live dashboard):
   --config PATH                 Required host TOML; the VM, device alias,
                                 telemetry path and host floor come from it.
   --vm NAME                     The [[vm]] to show; required with several.
-  --instance NAME               Controller unit virtio-mem-host@NAME.service;
+  --instance NAME               Controller unit rampire@NAME.service;
                                 default the one installed controller unit,
                                 else the VM name.
   --connect URI                 Libvirt URI; default qemu:///system.
@@ -131,7 +131,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
     let config = HostConfig::load_vm(&config_path, vm.as_deref())
         .map_err(|error| format!("{}: {error}", config_path.display()))?;
     command.unit = format!(
-        "virtio-mem-host@{}.service",
+        "rampire@{}.service",
         instance.as_deref().unwrap_or(&config.vm_name)
     );
     command.unit_named = instance.is_some();
@@ -747,7 +747,7 @@ mod tests {
         assert_eq!(defaults.host_floor_bytes, expected.host_min_headroom_bytes);
         assert_eq!(
             defaults.unit,
-            format!("virtio-mem-host@{}.service", expected.vm_name)
+            format!("rampire@{}.service", expected.vm_name)
         );
         assert_eq!(defaults.interval, Duration::from_secs(1));
         let command = parse(
@@ -765,7 +765,7 @@ mod tests {
             .map(str::to_owned),
         )
         .expect("options");
-        assert_eq!(command.unit, "virtio-mem-host@other.service");
+        assert_eq!(command.unit, "rampire@other.service");
         assert_eq!(command.interval, Duration::from_millis(500));
         assert_eq!(command.events, 3);
         assert!(!command.guest);
@@ -794,11 +794,11 @@ mod tests {
     #[test]
     fn events_are_newest_first_shortened_coloured_and_collapsed() {
         let journal = "\
-2026-10-27T09:50:31+00:00 kvm-host virtio-mem-host[1]: virtio-mem-host: vm=w event=guest_input_invalid reason=raw telemetry observation 1793093751508 is stale at 1793094631000
-2026-10-27T09:50:37+00:00 kvm-host virtio-mem-host[1]: virtio-mem-host: vm=w event=guest_input_invalid reason=raw telemetry observation 1793093751508 is stale at 1793094637000
-2026-10-27T09:57:19+00:00 kvm-host virtio-mem-host[1]: virtio-mem-host: vm=w event=controller_decision action=grant session_id=s-1 operation=Remove bytes=3221225472
-2026-10-27T09:57:20+00:00 kvm-host virtio-mem-host[1]: virtio-mem-host: vm=w event=control_health direction=Shrink
-2026-10-27T09:57:40+00:00 kvm-host virtio-mem-host[1]: virtio-mem-host: vm=w event=actuation_latched reason=x
+2026-10-27T09:50:31+00:00 kvm-host rampire[1]: rampire: vm=w event=guest_input_invalid reason=raw telemetry observation 1793093751508 is stale at 1793094631000
+2026-10-27T09:50:37+00:00 kvm-host rampire[1]: rampire: vm=w event=guest_input_invalid reason=raw telemetry observation 1793093751508 is stale at 1793094637000
+2026-10-27T09:57:19+00:00 kvm-host rampire[1]: rampire: vm=w event=controller_decision action=grant session_id=s-1 operation=Remove bytes=3221225472
+2026-10-27T09:57:20+00:00 kvm-host rampire[1]: rampire: vm=w event=control_health direction=Shrink
+2026-10-27T09:57:40+00:00 kvm-host rampire[1]: rampire: vm=w event=actuation_latched reason=x
 ";
         let events = parse_events(journal, 6);
         assert_eq!(events.len(), 3);
@@ -822,9 +822,9 @@ mod tests {
     #[test]
     fn last_result_comes_from_the_newest_completion() {
         let journal = "\
-2026-10-27T09:57:46+00:00 h virtio-mem-host[1]: virtio-mem-host: vm=w event=request_completed operation_id=1 sequence=0 operation=Remove bytes=3221225472 outcome=Partial actual_bytes=1895825408
-2026-10-27T10:03:21+00:00 h virtio-mem-host[1]: virtio-mem-host: vm=w event=request_completed operation_id=2 sequence=1 operation=Add bytes=1073741824 outcome=Completed actual_bytes=1073741824
-2026-10-27T10:03:33+00:00 h virtio-mem-host[1]: virtio-mem-host: vm=w event=guest_status_unpublished reason=x
+2026-10-27T09:57:46+00:00 h rampire[1]: rampire: vm=w event=request_completed operation_id=1 sequence=0 operation=Remove bytes=3221225472 outcome=Partial actual_bytes=1895825408
+2026-10-27T10:03:21+00:00 h rampire[1]: rampire: vm=w event=request_completed operation_id=2 sequence=1 operation=Add bytes=1073741824 outcome=Completed actual_bytes=1073741824
+2026-10-27T10:03:33+00:00 h rampire[1]: rampire: vm=w event=guest_status_unpublished reason=x
 ";
         assert_eq!(
             parse_last_result(journal),

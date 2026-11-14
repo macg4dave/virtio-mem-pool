@@ -12,15 +12,15 @@ read-only. Ctrl+C stops it and leaves the last view on screen to copy.
 The host and checkout are site values. Pass them, or set them once in the
 environment or in site/pool.env (untracked; copy
 deploy/examples/pool.env.example):
-  VIRTIO_MEM_POOL_HOST      SSH destination of the KVM host
-  VIRTIO_MEM_POOL_CHECKOUT  Path of this repository's checkout on that host
-  VIRTIO_MEM_POOL_CONFIG    Host list; default /etc/virtio-mem-host/host_list.toml
+  RAMPIRE_POOL_HOST      SSH destination of the KVM host
+  RAMPIRE_POOL_CHECKOUT  Path of this repository's checkout on that host
+  RAMPIRE_POOL_CONFIG    Host list; default /etc/rampire/host_list.toml
 .EXAMPLE
 .\Watch-Pool.ps1
 .EXAMPLE
 .\Watch-Pool.ps1 -NewWindow
 .EXAMPLE
-.\Watch-Pool.ps1 -HostName kvm-host -Checkout '~/src/virtio-mem-pool' -Update
+.\Watch-Pool.ps1 -HostName kvm-host -Checkout '~/src/rampire' -Update
 #>
 [CmdletBinding()]
 param(
@@ -55,12 +55,12 @@ function Resolve-Setting([string] $Value, [string] $Name, [string] $Default) {
     if ($site.ContainsKey($Name) -and $site[$Name]) { return $site[$Name] }
     return $Default
 }
-$HostName = Resolve-Setting $HostName 'VIRTIO_MEM_POOL_HOST' ''
-$Checkout = Resolve-Setting $Checkout 'VIRTIO_MEM_POOL_CHECKOUT' ''
-$Config = Resolve-Setting $Config 'VIRTIO_MEM_POOL_CONFIG' '/etc/virtio-mem-host/host_list.toml'
+$HostName = Resolve-Setting $HostName 'RAMPIRE_POOL_HOST' ''
+$Checkout = Resolve-Setting $Checkout 'RAMPIRE_POOL_CHECKOUT' ''
+$Config = Resolve-Setting $Config 'RAMPIRE_POOL_CONFIG' '/etc/rampire/host_list.toml'
 if (-not $HostName -or -not $Checkout) {
     throw 'Name the KVM host and its checkout: -HostName and -Checkout, ' +
-        'VIRTIO_MEM_POOL_HOST and VIRTIO_MEM_POOL_CHECKOUT, or site/pool.env ' +
+        'RAMPIRE_POOL_HOST and RAMPIRE_POOL_CHECKOUT, or site/pool.env ' +
         '(see deploy/examples/pool.env.example).'
 }
 foreach ($value in @($HostName, $Checkout, $Config)) {
@@ -89,9 +89,9 @@ set -eu
 cd -- "$remoteCheckout"
 if [ -f "`$HOME/.cargo/env" ]; then . "`$HOME/.cargo/env"; fi
 $(if ($Update) { "echo '==> updating the checkout'; git pull --ff-only" })
-echo '==> building virtio-mem-xtask'
-cargo build --quiet --release -p virtio-mem-xtask
-exec sudo target/release/virtio-mem-xtask pool --config '$Config' --interval-seconds $interval --events $Events
+echo '==> building xtask'
+cargo build --quiet --release -p xtask
+exec sudo target/release/xtask pool --config '$Config' --interval-seconds $interval --events $Events
 "@
 # Base64 keeps the script clear of Windows PowerShell's native-argument
 # quoting; process substitution keeps the terminal as bash's stdin, so sudo

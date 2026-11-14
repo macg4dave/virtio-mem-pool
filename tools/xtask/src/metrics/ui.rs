@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use rampire_core::RawTelemetryEnvelope;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -15,7 +16,6 @@ use ratatui::widgets::{
     Axis, Block, Chart, Dataset, GraphType, LineGauge, List, ListItem, Paragraph,
 };
 use ratatui::{DefaultTerminal, Frame};
-use virtio_mem_core::RawTelemetryEnvelope;
 
 use super::{lock, mib, signal_name, unix_millis, Command, JournalEvent, Live, Point, Stat, MIB};
 use crate::watch;
@@ -270,7 +270,7 @@ fn draw_header(frame: &mut Frame, area: Rect, command: &Command, live: &Live) {
         Span::styled(" ● REC ", Style::new().fg(Color::White).bg(BAD).bold())
     };
     let line = Line::from(vec![
-        Span::styled(" virtio-mem metrics ", Style::new().bold()),
+        Span::styled(" RAMpire metrics ", Style::new().bold()),
         Span::styled(command.vm.clone(), Style::new().fg(INFO).bold()),
         Span::raw("  "),
         state,
@@ -899,7 +899,7 @@ mod tests {
     #[test]
     fn draws_every_panel_and_handles_keys() {
         use super::super::{GuestRead, HostMemory, Sample};
-        use virtio_mem_core::{MemoryTelemetrySnapshot, VirtioMemState};
+        use rampire_core::{MemoryTelemetrySnapshot, VirtioMemState};
 
         let command = test_command();
         let mut live = Live::new(&command, "/tmp/run".into(), unix_millis());
@@ -907,7 +907,7 @@ mod tests {
 
         let telemetry = RawTelemetryEnvelope::new(
             "windows-guest",
-            "VirtioMemService",
+            "RampireGuest",
             "session",
             unix_millis(),
             1,

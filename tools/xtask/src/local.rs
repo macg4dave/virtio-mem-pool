@@ -4,15 +4,15 @@ use crate::process;
 
 const PACKAGES: &[&str] = &[
     "-p",
-    "virtio-mem-core",
+    "rampire-core",
     "-p",
-    "virtio-mem-guest",
+    "rampire-guest",
     "-p",
-    "virtio-mem-host",
+    "rampire",
     "-p",
-    "virtio-mem-xtask",
+    "xtask",
     "-p",
-    "virtio-mem-guest-linux",
+    "rampire-guest-linux",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

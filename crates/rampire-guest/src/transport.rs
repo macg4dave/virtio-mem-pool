@@ -13,7 +13,7 @@
 use std::io::{ErrorKind, Read, Write};
 use std::path::PathBuf;
 
-use virtio_mem_core::{
+use rampire_core::{
     host_status_path, HostMemoryStatus, RecordReader, RecordWriter, MAX_HOST_STATUS_BYTES,
     MEMORY_CONTROL_CHANNEL_NAME,
 };
@@ -183,8 +183,8 @@ impl<S: Read + Write + std::fmt::Debug> Transport for StreamTransport<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rampire_core::MEMORY_REQUEST_VERSION;
     use std::collections::VecDeque;
-    use virtio_mem_core::MEMORY_REQUEST_VERSION;
 
     /// A stream whose host end the test plays: bytes queued in `incoming`
     /// are read once, `written` collects what the guest sends, and a
@@ -233,7 +233,7 @@ mod tests {
         HostMemoryStatus {
             version: MEMORY_REQUEST_VERSION,
             vm_name: "debian".to_owned(),
-            service_name: "virtio-mem-guest".to_owned(),
+            service_name: "rampire-guest".to_owned(),
             device_alias: "ua-virtiomem0".to_owned(),
             observed_unix_millis: 1_000_000,
             device_size_bytes: 4 << 30,
@@ -313,7 +313,7 @@ mod tests {
     #[test]
     fn control_files_carry_the_same_records() {
         let directory =
-            std::env::temp_dir().join(format!("virtio-mem-guest-transport-{}", std::process::id()));
+            std::env::temp_dir().join(format!("rampire-guest-transport-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory).unwrap();
         let control = directory.join("control.json").display().to_string();

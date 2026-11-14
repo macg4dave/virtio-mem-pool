@@ -1,13 +1,13 @@
 [package]
-name = "virtio-mem-guest"
+name = "rampire-guest"
 version = "0.1.0"
 edition = "2021"
 authors = ["macg4dave"]
 license = "GPL-3.0-or-later"
-description = "The guest side of the virtio-mem request protocol, shared by the Windows and Linux guest services"
+description = "RAMpire guest side of the memory request protocol, shared by the Linux and Windows guest services"
 
 [dependencies]
-virtio-mem-core = { path = "../virtio-mem-core" }
+rampire-core = { path = "../rampire-core" }
 serde_json = "1.0"
 
 [target.'cfg(windows)'.dependencies]

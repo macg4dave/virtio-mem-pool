@@ -185,10 +185,7 @@ pub fn wait(
             return;
         }
         if result < 0 && io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
-            eprintln!(
-                "virtio-mem-host: wake wait failed: {}",
-                io::Error::last_os_error()
-            );
+            eprintln!("rampire: wake wait failed: {}", io::Error::last_os_error());
             std::thread::sleep(bound);
         }
     }

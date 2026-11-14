@@ -8,21 +8,21 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use rampire::config::HostConfig;
+use rampire::guest_channel::PublicationCopyFirst;
+use rampire::host_memory::meminfo_bytes;
+use rampire::qga::{GuestFileReader, VirshGuestFiles};
+use rampire::virsh::Virsh;
+use rampire_core::settings::GuestOs;
+use rampire_core::{parse_virtio_mem_xml_for_alias, RawTelemetryEnvelope};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use virtio_mem_core::settings::GuestOs;
-use virtio_mem_core::{parse_virtio_mem_xml_for_alias, RawTelemetryEnvelope};
-use virtio_mem_host::config::HostConfig;
-use virtio_mem_host::guest_channel::PublicationCopyFirst;
-use virtio_mem_host::host_memory::meminfo_bytes;
-use virtio_mem_host::qga::{GuestFileReader, VirshGuestFiles};
-use virtio_mem_host::virsh::Virsh;
 use wait_timeout::ChildExt;
 
 use crate::process;
 
 const SCHEMA_VERSION: u32 = 4;
-const CONTROLLER_GUARD_ROOT: &str = "/run/virtio-mem-qualification";
+const CONTROLLER_GUARD_ROOT: &str = "/run/rampire-qualification";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -412,7 +412,7 @@ fn parse_start(args: &[String], repo: &Path) -> Result<StartOptions, String> {
             {
                 return Err("--remote-workload contains characters unsafe for cmd.exe".to_owned());
             }
-            virtio_mem_core::windows_service_config::normalize_windows_path(&telemetry_path)?;
+            rampire_core::windows_service_config::normalize_windows_path(&telemetry_path)?;
             if mode == WorkloadMode::FileCache || cache_dir.is_some() {
                 return Err("the file-cache workload is for Linux guests".to_owned());
             }
@@ -1861,7 +1861,7 @@ fn capture_privileged_sample(config: &Config, repo: &Path) -> Result<PrivilegedS
     );
     let bytes = reader.read_file(
         &config.telemetry_path,
-        virtio_mem_host::guest_channel::MAX_RAW_TELEMETRY_FILE_BYTES,
+        rampire::guest_channel::MAX_RAW_TELEMETRY_FILE_BYTES,
     )?;
     let contents = String::from_utf8(bytes)
         .map_err(|error| format!("QGA raw telemetry is not valid UTF-8: {error}"))?;
@@ -2412,13 +2412,13 @@ mod tests {
             "--expect-renewed-growth-bytes",
             "50",
             "--remote-workload",
-            r"C:\qualification\virtio-mem-workload.exe",
+            r"C:\qualification\rampire-workload.exe",
             "--controller-unit",
-            "virtio-mem-host@vm.service",
+            "rampire@vm.service",
             "--guest-service",
             "ConfiguredService",
             "--telemetry-path",
-            r"C:\ProgramData\VirtioMemService\telemetry.json",
+            r"C:\ProgramData\RampireGuest\telemetry.json",
             "--telemetry-max-age-seconds",
             "30",
             "--telemetry-future-tolerance-seconds",
@@ -2525,9 +2525,9 @@ mod tests {
     fn linux_start_arguments() -> Vec<String> {
         let mut arguments = valid_start_arguments();
         for (option, value) in [
-            ("--remote-workload", "/usr/local/bin/virtio-mem-workload"),
-            ("--guest-service", "virtio-mem-guest"),
-            ("--telemetry-path", "/var/lib/virtio-mem-guest/control.json"),
+            ("--remote-workload", "/usr/local/bin/rampire-workload"),
+            ("--guest-service", "rampire-guest"),
+            ("--telemetry-path", "/var/lib/rampire-guest/control.json"),
         ] {
             let position = arguments.iter().position(|item| item == option).unwrap();
             arguments[position + 1] = value.to_owned();
@@ -2541,7 +2541,7 @@ mod tests {
         let options = parse_start(&linux_start_arguments(), Path::new("/repo")).expect("linux");
         assert_eq!(options.config.guest_os, GuestOs::Linux);
         let command = workload_command(&options.config);
-        assert!(command.starts_with("'/usr/local/bin/virtio-mem-workload' --workload-id "));
+        assert!(command.starts_with("'/usr/local/bin/rampire-workload' --workload-id "));
         assert!(!command.contains("--cache-dir"));
 
         let mut cache = linux_start_arguments();
@@ -2583,8 +2583,8 @@ mod tests {
 
     #[test]
     fn linux_health_reads_service_package_manager_and_reboot_state() {
-        let script = linux_health_script("virtio-mem-guest");
-        assert!(script.contains("systemctl is-active virtio-mem-guest"));
+        let script = linux_health_script("rampire-guest");
+        assert!(script.contains("systemctl is-active rampire-guest"));
         let facts = key_values("service=active\npackage_manager=idle\nreboot_required=no\nnoise\n");
         assert_eq!(facts["service"], "active");
         assert_eq!(facts.len(), 3);
@@ -2920,7 +2920,7 @@ mod tests {
     #[test]
     fn artifact_index_only_claims_files_that_exist() {
         let directory = std::env::temp_dir().join(format!(
-            "virtio-mem-qualification-artifacts-{}",
+            "rampire-qualification-artifacts-{}",
             std::process::id()
         ));
         std::fs::create_dir_all(&directory).expect("create test directory");
@@ -2935,15 +2935,13 @@ mod tests {
     #[test]
     fn controller_config_comes_only_from_its_exact_command_line() {
         assert_eq!(
-            controller_config_path(
-                b"/usr/local/libexec/virtio-mem-host\0--config\0/etc/virtio-mem-host/guest.toml\0"
-            ),
-            Ok(PathBuf::from("/etc/virtio-mem-host/guest.toml"))
+            controller_config_path(b"/usr/local/bin/rampire\0--config\0/etc/rampire/guest.toml\0"),
+            Ok(PathBuf::from("/etc/rampire/guest.toml"))
         );
         for unexpected in [
-            &b"/usr/local/libexec/virtio-mem-host\0"[..],
-            b"/usr/local/libexec/virtio-mem-host\0status\0--config\0a.toml\0",
-            b"/usr/local/libexec/virtio-mem-host\0--config\0a.toml\0--config\0b.toml\0",
+            &b"/usr/local/bin/rampire\0"[..],
+            b"/usr/local/bin/rampire\0status\0--config\0a.toml\0",
+            b"/usr/local/bin/rampire\0--config\0a.toml\0--config\0b.toml\0",
         ] {
             assert!(controller_config_path(unexpected).is_err());
         }

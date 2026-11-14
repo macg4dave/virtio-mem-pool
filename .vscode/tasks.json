@@ -39,11 +39,11 @@
       "args": ["xtask", "windows", "all"],
       "options": {
         "env": {
-          "VIRTIO_MEM_WINDOWS_SSH": "${input:windowsSshTarget}",
-          "VIRTIO_MEM_WINDOWS_DIR": "${input:windowsWorkspace}",
-          "VIRTIO_MEM_WINDOWS_ARTIFACTS": "${input:windowsArtifacts}",
-          "VIRTIO_MEM_WINDOWS_CONNECT_TIMEOUT_SECONDS": "${input:windowsConnectTimeout}",
-          "VIRTIO_MEM_WINDOWS_OPERATION_TIMEOUT_SECONDS": "${input:windowsOperationTimeout}"
+          "RAMPIRE_WINDOWS_SSH": "${input:windowsSshTarget}",
+          "RAMPIRE_WINDOWS_DIR": "${input:windowsWorkspace}",
+          "RAMPIRE_WINDOWS_ARTIFACTS": "${input:windowsArtifacts}",
+          "RAMPIRE_WINDOWS_CONNECT_TIMEOUT_SECONDS": "${input:windowsConnectTimeout}",
+          "RAMPIRE_WINDOWS_OPERATION_TIMEOUT_SECONDS": "${input:windowsOperationTimeout}"
         }
       },
       "problemMatcher": []

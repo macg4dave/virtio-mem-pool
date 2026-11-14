@@ -1,6 +1,6 @@
 use std::process;
 
-use virtio_mem_guest_windows::{
+use rampire_guest_windows::{
     install_service, remove_service, run_as_service, start_service, stop_service, ProtocolWorker,
     RuntimeWiringError, ServiceConfig, ServiceHost, BUILD_ID,
 };
@@ -50,7 +50,7 @@ fn main() {
     };
     match command {
         ServiceCommand::Help => {
-            println!("Usage: virtio-mem-service [install|start|run|stop|remove|version|help]\nRecovery with missing/damaged configuration: sc.exe stop SERVICE_NAME; sc.exe delete SERVICE_NAME (administrator terminal). Use the installed SCM identity.");
+            println!("Usage: rampire-guest [install|start|run|stop|remove|version|help]\nRecovery with missing/damaged configuration: sc.exe stop SERVICE_NAME; sc.exe delete SERVICE_NAME (administrator terminal). Use the installed SCM identity.");
             return;
         }
         ServiceCommand::Version => {
@@ -110,7 +110,7 @@ fn main() {
         }
         ServiceCommand::Run => {
             if let Err(error) = run_service(config) {
-                eprintln!("virtio-mem service runtime failed: {error}");
+                eprintln!("RAMpire guest service runtime failed: {error}");
                 process::exit(1);
             }
         }

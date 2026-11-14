@@ -50,13 +50,13 @@ Attestation options:
   --command-timeout-seconds N   Required external-command bound.
   --connect URI                 Libvirt URI; default qemu:///system.
 
-Host deployment options (INSTANCE names the unit; settings install under /etc/virtio-mem-host/):
+Host deployment options (INSTANCE names the unit; settings install under /etc/rampire/):
   --config PATH                 Reviewed host_list.toml with sibling global/VM settings,
                                 installed exactly as written (comments and sizes kept).
   --attestation-dir DIR         Folder holding <vm_name>.attestation.json for each VM.
   --attestation VM=PATH         One VM's attestation, overriding --attestation-dir.
                                 Every VM needs one; installed as
-                                /etc/virtio-mem-host/attestations/<vm_name>.attestation.json.
+                                /etc/rampire/attestations/<vm_name>.attestation.json.
   --output PATH                 Required structured JSON evidence path.
   --command-timeout-seconds N   Required external-command bound.
   --apply                       Install; otherwise validate only.
@@ -78,7 +78,7 @@ Controller status options:
   --elevate                     Invoke this prebuilt xtask once through sudo.
 
 No-actuation preflight options:
-  --unit UNIT                   Required disabled/inactive virtio-mem-host@INSTANCE unit.
+  --unit UNIT                   Required disabled/inactive rampire@INSTANCE unit.
   --telemetry-path PATH         Required protected Windows telemetry path.
   --service SERVICE             Required Windows telemetry service identity.
   --attestation PATH            Required reviewed attestation.
@@ -124,7 +124,7 @@ Qualification options:
   --expect-no-reclaim         Require growth without any lower requested target; replaces --expect-reclaim-bytes.
   --require-renewed-during-pending-shrink Require an observed pending shrink before renewed pressure.
   --remote-workload PATH     Required workload executable path in the guest.
-  --controller-unit UNIT     Required virtio-mem-host@INSTANCE unit whose config holds VM.
+  --controller-unit UNIT     Required rampire@INSTANCE unit whose config holds VM.
   --guest-service NAME       Required guest service identity on the wire.
   --apply-service-restart    Restart the named Windows service after the controller is active.
   --guest-service-cycle-timeout-seconds N Required bound for that explicit restart.
@@ -136,15 +136,15 @@ Qualification options:
   --output-root PATH         Default .artifacts/qualification.
 
 Windows environment:
-  VIRTIO_MEM_WINDOWS_SSH              Required SSH config alias or USER@HOST.
-  VIRTIO_MEM_WINDOWS_DIR              Remote workspace directory.
-  VIRTIO_MEM_WINDOWS_ARTIFACTS        Local artifact directory.
-  VIRTIO_MEM_WINDOWS_CONNECT_TIMEOUT_SECONDS Required SSH connection bound.
-  VIRTIO_MEM_WINDOWS_OPERATION_TIMEOUT_SECONDS Required operation bound.
-  VIRTIO_MEM_WINDOWS_KNOWN_HOSTS_FILE Optional pinned known-hosts file.
-  VIRTIO_MEM_WINDOWS_IDENTITY_FILE    Optional private-key path.
-  VIRTIO_MEM_WINDOWS_HOST_NAME        Optional current endpoint override.
-  VIRTIO_MEM_WINDOWS_HOST_KEY_ALIAS   Required with host-name override.
+  RAMPIRE_WINDOWS_SSH              Required SSH config alias or USER@HOST.
+  RAMPIRE_WINDOWS_DIR              Remote workspace directory.
+  RAMPIRE_WINDOWS_ARTIFACTS        Local artifact directory.
+  RAMPIRE_WINDOWS_CONNECT_TIMEOUT_SECONDS Required SSH connection bound.
+  RAMPIRE_WINDOWS_OPERATION_TIMEOUT_SECONDS Required operation bound.
+  RAMPIRE_WINDOWS_KNOWN_HOSTS_FILE Optional pinned known-hosts file.
+  RAMPIRE_WINDOWS_IDENTITY_FILE    Optional private-key path.
+  RAMPIRE_WINDOWS_HOST_NAME        Optional current endpoint override.
+  RAMPIRE_WINDOWS_HOST_KEY_ALIAS   Required with host-name override.
 "#;
 
 fn main() -> ExitCode {
@@ -152,7 +152,7 @@ fn main() -> ExitCode {
     match execute(&arguments) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("virtio-mem-xtask failed: {error}");
+            eprintln!("xtask failed: {error}");
             ExitCode::FAILURE
         }
     }

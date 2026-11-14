@@ -38,12 +38,11 @@ pub(super) fn write_manifest(
             COMMAND_TIMEOUT,
         ))
     };
-    let settings = virtio_mem_core::settings::load_configuration(&command.config_path)
+    let settings = rampire_core::settings::load_configuration(&command.config_path)
         .map_err(|error| error.to_string())
         .map(|(global, hosts, vms)| json!({"global": global, "hosts": hosts, "vms": vms}));
-    let config =
-        virtio_mem_host::config::HostConfig::load_vm(&command.config_path, Some(&command.vm))
-            .map_err(|error| error.to_string());
+    let config = rampire::config::HostConfig::load_vm(&command.config_path, Some(&command.vm))
+        .map_err(|error| error.to_string());
     let controller_pid = process::bounded_text(
         "systemctl",
         &[
@@ -80,8 +79,8 @@ pub(super) fn write_manifest(
         "configured_settings": settings.unwrap_or_else(|error| json!({"error": error})),
         "installed_controller_sha256": installed_hash,
         "controller_unit": run("systemctl", &["show", &command.unit, "--property=ExecStart,FragmentPath,MainPID,InvocationID"]),
-        "installed_settings": {"global": read(Path::new("/etc/virtio-mem-host/global-settings.toml")), "host_list": read(Path::new("/etc/virtio-mem-host/host_list.toml")),
-            "vm": read(&PathBuf::from(format!("/etc/virtio-mem-host/{}_settings.toml", command.vm)))},
+        "installed_settings": {"global": read(Path::new("/etc/rampire/global-settings.toml")), "host_list": read(Path::new("/etc/rampire/host_list.toml")),
+            "vm": read(&PathBuf::from(format!("/etc/rampire/{}_settings.toml", command.vm)))},
         "initial_control_state": state,
         "host_boot_id": read(Path::new("/proc/sys/kernel/random/boot_id")),
         "live_xml": run("virsh", &["-c", &command.connect, "--readonly", "dumpxml", &command.vm]),
@@ -329,9 +328,9 @@ impl Diagnostics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rampire_core::demand::GuestDiagnostics;
+    use rampire_core::{MemoryTelemetrySnapshot, RawTelemetryEnvelope, VirtioMemState};
     use std::time::Duration;
-    use virtio_mem_core::demand::GuestDiagnostics;
-    use virtio_mem_core::{MemoryTelemetrySnapshot, RawTelemetryEnvelope, VirtioMemState};
 
     fn fixture(name: &str) -> (PathBuf, Diagnostics, Command) {
         let directory =
@@ -357,7 +356,7 @@ mod tests {
     fn sample(now: u64, session: &str, uptime: u64) -> Sample {
         let mut guest = RawTelemetryEnvelope::new(
             "windows-guest",
-            "VirtioMemService",
+            "RampireGuest",
             session,
             now,
             now,

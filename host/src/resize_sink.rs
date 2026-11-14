@@ -1,5 +1,5 @@
+use rampire_core::{bytes_to_kibibytes, parse_virtio_mem_xml_for_alias, VirtioMemState};
 use std::sync::atomic::{AtomicBool, Ordering};
-use virtio_mem_core::{bytes_to_kibibytes, parse_virtio_mem_xml_for_alias, VirtioMemState};
 
 use crate::compatibility_source::CompatibilitySource;
 use crate::runtime::{ResizeSink, ResizeSinkError};
@@ -141,7 +141,7 @@ mod tests {
     use super::*;
     use crate::compatibility_source::FixedCompatibilitySource;
     use crate::virsh::{VirshCommand, VirshError};
-    use virtio_mem_core::VirtioMemCompatibility;
+    use rampire_core::VirtioMemCompatibility;
 
     struct DriftedAttestation;
 

@@ -401,7 +401,7 @@ mod tests {
         let mut command = Command::new(std::env::current_exe().expect("test executable"));
         command
             .args(["--exact", "virsh::tests::process_fixture", "--nocapture"])
-            .env("VIRTIO_MEM_VIRSH_FIXTURE", mode);
+            .env("RAMPIRE_VIRSH_FIXTURE", mode);
         command
     }
 
@@ -409,7 +409,7 @@ mod tests {
     fn process_fixture() {
         use std::io::Write;
 
-        let Ok(mode) = std::env::var("VIRTIO_MEM_VIRSH_FIXTURE") else {
+        let Ok(mode) = std::env::var("RAMPIRE_VIRSH_FIXTURE") else {
             return;
         };
         match mode.as_str() {

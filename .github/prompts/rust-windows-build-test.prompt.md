@@ -38,8 +38,8 @@ before relying on them. Fixed product values:
 | --- | --- |
 | Libvirt connection | `qemu:///system` |
 | Native target | `x86_64-pc-windows-msvc` |
-| Service configuration | `C:\ProgramData\VirtioMemService\config.json` |
-| Control file | `C:\ProgramData\VirtioMemService\telemetry.json` |
+| Service configuration | `C:\ProgramData\RampireGuest\config.json` |
+| Control file | `C:\ProgramData\RampireGuest\telemetry.json` |
 
 The SSH alias and libvirt VM name are different identifiers. Do not substitute
 one for the other. Read the installed configuration to discover the actual
@@ -117,18 +117,18 @@ The presets provide the required environment to their child commands. For
 individual `cargo xtask windows ...` commands, export it explicitly:
 
 ```bash
-export VIRTIO_MEM_WINDOWS_SSH="$WINDOWS_SSH"
-export VIRTIO_MEM_WINDOWS_DIR="$WINDOWS_DIR"
-export VIRTIO_MEM_WINDOWS_ARTIFACTS="$WINDOWS_ARTIFACTS"
-export VIRTIO_MEM_WINDOWS_CONNECT_TIMEOUT_SECONDS=10
-export VIRTIO_MEM_WINDOWS_OPERATION_TIMEOUT_SECONDS=1200
+export RAMPIRE_WINDOWS_SSH="$WINDOWS_SSH"
+export RAMPIRE_WINDOWS_DIR="$WINDOWS_DIR"
+export RAMPIRE_WINDOWS_ARTIFACTS="$WINDOWS_ARTIFACTS"
+export RAMPIRE_WINDOWS_CONNECT_TIMEOUT_SECONDS=10
+export RAMPIRE_WINDOWS_OPERATION_TIMEOUT_SECONDS=1200
 ```
 
 Available operations: `check`, `sync`, `build`, `test`, `lint`, `fetch`, `all`;
 `build-status` and `uninstall` take `SERVICE --output PATH`.
 Use the Make/environment overrides when a different verified endpoint or
-workspace is required. `VIRTIO_MEM_WINDOWS_HOST_NAME` and
-`VIRTIO_MEM_WINDOWS_HOST_KEY_ALIAS` must be supplied together; verify trust
+workspace is required. `RAMPIRE_WINDOWS_HOST_NAME` and
+`RAMPIRE_WINDOWS_HOST_KEY_ALIAS` must be supplied together; verify trust
 before overriding an endpoint. The Windows check expects Rust/rustfmt/Clippy,
 Visual Studio C++ tools discovered through `vswhere`, Windows tar and certutil.
 Inspect the detected installation rather than hardcoding a compiler version.

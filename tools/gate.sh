@@ -8,12 +8,12 @@
 # The build host is site configuration, read from the environment or from
 # site/gate.env (untracked; see deploy/examples/gate.env.example):
 #
-#   VIRTIO_MEM_GATE_HOST  SSH destination of a Linux build host. Unset: build
+#   RAMPIRE_GATE_HOST  SSH destination of a Linux build host. Unset: build
 #                         here, which must then be Linux.
-#   VIRTIO_MEM_GATE_DIR   Absolute directory on that host the gate owns. The
+#   RAMPIRE_GATE_DIR   Absolute directory on that host the gate owns. The
 #                         source copy in its src/ is replaced on every run;
 #                         Cargo output stays in its target/.
-#   VIRTIO_MEM_SSH        SSH client to use (default: ssh).
+#   RAMPIRE_SSH        SSH client to use (default: ssh).
 #
 # The working tree is sent as it is, uncommitted and untracked (not ignored)
 # files included, with Git's line endings, so the gate checks what is on disk.
@@ -25,9 +25,9 @@ if [[ -f site/gate.env ]]; then
   # shellcheck source=/dev/null
   source site/gate.env
 fi
-host=${VIRTIO_MEM_GATE_HOST:-}
-remote_dir=${VIRTIO_MEM_GATE_DIR:-}
-ssh=${VIRTIO_MEM_SSH:-ssh}
+host=${RAMPIRE_GATE_HOST:-}
+remote_dir=${RAMPIRE_GATE_DIR:-}
+ssh=${RAMPIRE_SSH:-ssh}
 
 # Snapshot the working tree as a Git tree object without touching the
 # user's index: a temporary index takes every non-ignored file.
@@ -42,15 +42,15 @@ git diff --check HEAD "$tree"
 
 if [[ -z $host ]]; then
   if [[ $(uname -s) != Linux ]]; then
-    echo 'the host and xtask crates build only on Linux: set VIRTIO_MEM_GATE_HOST' >&2
-    echo '(and VIRTIO_MEM_GATE_DIR) or create site/gate.env' >&2
+    echo 'the host and xtask crates build only on Linux: set RAMPIRE_GATE_HOST' >&2
+    echo '(and RAMPIRE_GATE_DIR) or create site/gate.env' >&2
     exit 1
   fi
   exec cargo xtask gate checks
 fi
 
 if [[ $remote_dir != /* || $remote_dir == / || $remote_dir =~ [[:space:]\'\"\$\`\\] ]]; then
-  echo 'VIRTIO_MEM_GATE_DIR must be an absolute, plain path other than /' >&2
+  echo 'RAMPIRE_GATE_DIR must be an absolute, plain path other than /' >&2
   exit 1
 fi
 
@@ -70,14 +70,14 @@ echo "==> gate on $host"
   cd '$remote_dir/src'
   export CARGO_TARGET_DIR='$remote_dir/target'
   . \"\$HOME/.cargo/env\" 2>/dev/null || true
-  cargo run --quiet --locked -p virtio-mem-xtask -- gate checks"
+  cargo run --quiet --locked -p xtask -- gate checks"
 
 # On a Windows workstation the Windows guest builds natively too. This is
 # not the native gate on a Windows VM (cargo xtask windows all), which also
 # runs the release build that gets deployed.
 case $(uname -s) in
   MINGW* | MSYS* | CYGWIN*)
-    windows=(-p virtio-mem-core -p virtio-mem-guest -p virtio-mem-guest-windows)
+    windows=(-p rampire-core -p rampire-guest -p rampire-guest-windows)
     echo "==> Windows guest: tests and Clippy here"
     cargo test "${windows[@]}" --locked --quiet
     cargo clippy "${windows[@]}" --all-targets --locked --quiet -- -D warnings

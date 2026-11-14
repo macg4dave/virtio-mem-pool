@@ -26,13 +26,13 @@
 
 use std::path::Path;
 
-use virtio_mem_core::MemoryTelemetrySnapshot;
+use rampire_core::MemoryTelemetrySnapshot;
 
 pub const MEMINFO_PATH: &str = "/proc/meminfo";
 /// `/proc/meminfo` is a few kilobytes; anything larger is not that file.
 const MAX_MEMINFO_BYTES: usize = 64 * 1024;
 
-pub use virtio_mem_guest::worker::MemorySource;
+pub use rampire_guest::worker::MemorySource;
 
 /// Whether the kernel enforces a commit limit that more RAM would raise.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,7 +55,7 @@ impl CommitModel {
     /// Read on every sample: an administrator can change it while we run.
     pub(crate) fn current() -> Self {
         let read = |name: &str| {
-            virtio_mem_guest::files::read_bounded(&Path::new("/proc/sys/vm").join(name), 64)
+            rampire_guest::files::read_bounded(&Path::new("/proc/sys/vm").join(name), 64)
                 .ok()
                 .flatten()
                 .and_then(|bytes| String::from_utf8(bytes).ok())
@@ -93,10 +93,9 @@ impl ProcMeminfo {
 
 impl MemorySource for ProcMeminfo {
     fn sample(&mut self) -> Result<MemoryTelemetrySnapshot, String> {
-        let text =
-            virtio_mem_guest::files::read_bounded(Path::new(MEMINFO_PATH), MAX_MEMINFO_BYTES)
-                .map_err(|error| format!("read {MEMINFO_PATH}: {error}"))?
-                .ok_or_else(|| format!("{MEMINFO_PATH} is missing"))?;
+        let text = rampire_guest::files::read_bounded(Path::new(MEMINFO_PATH), MAX_MEMINFO_BYTES)
+            .map_err(|error| format!("read {MEMINFO_PATH}: {error}"))?
+            .ok_or_else(|| format!("{MEMINFO_PATH} is missing"))?;
         let text = String::from_utf8(text).map_err(|_| format!("{MEMINFO_PATH} is not UTF-8"))?;
         let commit = CommitModel::current();
         let snapshot = snapshot_from_meminfo(&text, commit, self.commit_peak_bytes)?;

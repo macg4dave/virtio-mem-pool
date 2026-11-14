@@ -2,25 +2,25 @@ use std::process::ExitCode;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
+use rampire_core::settings::{LINUX_CONTROL_PATH, LINUX_SERVICE_NAME};
+use rampire_guest::requests::GuestIdentity;
+use rampire_guest::serve::{serve, Platform, Sources};
+use rampire_guest_linux::clock::SystemClock;
+use rampire_guest_linux::meminfo::ProcMeminfo;
+use rampire_guest_linux::pressure::ProcPressure;
+use rampire_guest_linux::{channel, kernel_release, readiness, BUILD_ID};
 use signal_hook::consts::signal::{SIGINT, SIGTERM};
-use virtio_mem_core::settings::{LINUX_CONTROL_PATH, LINUX_SERVICE_NAME};
-use virtio_mem_guest::requests::GuestIdentity;
-use virtio_mem_guest::serve::{serve, Platform, Sources};
-use virtio_mem_guest_linux::clock::SystemClock;
-use virtio_mem_guest_linux::meminfo::ProcMeminfo;
-use virtio_mem_guest_linux::pressure::ProcPressure;
-use virtio_mem_guest_linux::{channel, kernel_release, readiness, BUILD_ID};
 
-const HELP: &str = "Usage: virtio-mem-guest [run [--control PATH] [--channel PATH]|version|help]\n\
+const HELP: &str = "Usage: rampire-guest [run [--control PATH] [--channel PATH]|version|help]\n\
 Runs in the foreground until SIGTERM or SIGINT; systemd supervises it as\n\
-virtio-mem-guest.service. It has no configuration file: the host publishes\n\
+rampire-guest.service. It has no configuration file: the host publishes\n\
 this VM's name, limits and policy with its status.\n\
 \n\
 The host is reached over the control channel when there is one: the port\n\
 named by --channel, or the one systemd opened for the unit. Otherwise the\n\
 control files are used, which the host reaches through the guest agent.\n\
 --control names the control publication and the directory of the durable\n\
-request state; the default is /var/lib/virtio-mem-guest/control.json.";
+request state; the default is /var/lib/rampire-guest/control.json.";
 
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
@@ -72,7 +72,7 @@ fn run(control_path: &str, channel_path: Option<&str>) -> Result<(), String> {
             .map_err(|error| format!("signal setup failed: {error}"))?;
     }
     let transport = channel::select(control_path, channel_path)?;
-    eprintln!("virtio-mem-guest {BUILD_ID} started; request state beside {control_path}");
+    eprintln!("rampire-guest {BUILD_ID} started; request state beside {control_path}");
     let ready = readiness::assess(&readiness::Probe::read());
     let facts: Vec<String> = ready
         .environment
@@ -114,7 +114,7 @@ fn main() -> ExitCode {
         Ok(Command::Version) => println!("{BUILD_ID}"),
         Ok(Command::Run { control, channel }) => {
             if let Err(error) = run(&control, channel.as_deref()) {
-                eprintln!("virtio-mem-guest failed: {error}");
+                eprintln!("rampire-guest failed: {error}");
                 return ExitCode::FAILURE;
             }
         }
@@ -172,7 +172,7 @@ mod tests {
             &["run", "--control", "relative.json"],
             &["run", "--channel"],
             &["run", "--channel", "/a", "--channel", "/b"],
-            &["run", "--config", "/etc/virtio-mem-guest/config.json"],
+            &["run", "--config", "/etc/rampire-guest/config.json"],
             &["run", "extra"],
             &["version", "extra"],
         ] {

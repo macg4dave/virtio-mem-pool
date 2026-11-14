@@ -11,8 +11,8 @@ pub mod pressure;
 pub mod readiness;
 
 /// Build identity stamped at build time from the synchronised source
-/// (`VIRTIO_MEM_BUILD_ID`); builds without the stamp report `unversioned`.
-pub const BUILD_ID: &str = match option_env!("VIRTIO_MEM_BUILD_ID") {
+/// (`RAMPIRE_BUILD_ID`); builds without the stamp report `unversioned`.
+pub const BUILD_ID: &str = match option_env!("RAMPIRE_BUILD_ID") {
     Some(id) => id,
     None => "unversioned",
 };
@@ -20,7 +20,7 @@ pub const BUILD_ID: &str = match option_env!("VIRTIO_MEM_BUILD_ID") {
 /// The in-tree virtio-mem driver is versioned with its kernel.
 pub fn kernel_release() -> Result<String, String> {
     let path = std::path::Path::new("/proc/sys/kernel/osrelease");
-    let bytes = virtio_mem_guest::files::read_bounded(path, 256)
+    let bytes = rampire_guest::files::read_bounded(path, 256)
         .map_err(|error| format!("read kernel release: {error}"))?
         .ok_or("kernel release is unavailable on this platform")?;
     let release = String::from_utf8(bytes).map_err(|_| "kernel release is not UTF-8")?;

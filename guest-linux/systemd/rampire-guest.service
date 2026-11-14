@@ -1,6 +1,6 @@
 [Unit]
-Description=Virtio-mem guest memory requests
-Documentation=https://github.com/macg4dave/virtio-mem-pool
+Description=RAMpire guest memory requests
+Documentation=https://github.com/macg4dave/rampire
 # Without the control channel the host exchanges the control files through
 # the guest agent instead.
 After=qemu-guest-agent.service
@@ -8,7 +8,7 @@ ConditionVirtualization=kvm
 
 [Service]
 Type=exec
-ExecStart=/usr/local/libexec/virtio-mem-guest run
+ExecStart=/usr/local/libexec/rampire-guest run
 # The control channel to the host. systemd opens it and hands the service the
 # descriptor, so the unprivileged service needs no device access. "graceful":
 # a VM without the port starts the service anyway, on the control files.
@@ -26,7 +26,7 @@ RestartSec=5
 # writes the host status beside it, so the directory and its files stay
 # readable.
 DynamicUser=yes
-StateDirectory=virtio-mem-guest
+StateDirectory=rampire-guest
 StateDirectoryMode=0755
 UMask=0022
 # The kernel serves memory-pressure triggers with windows shorter than two

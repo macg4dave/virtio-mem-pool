@@ -187,8 +187,9 @@ happens here, once, before the command is built on top of it.
   name, not ours.
 
   Done: [names](names.md), reviewed 2026-11-14.
-- [ ] **R2** Rename and restructure the workspace following R1: crates,
-  binary, units, paths and environment variables.
+- [x] **R2** Rename and restructure the workspace following R1: crates,
+  binary, units, paths and environment variables. The host unit is
+  `rampire@.service` until O1.8 removes the instance.
 - [ ] **R3** Rename the wire identifiers (decision D8): the control
   channel port in the guest unit, the controller and the documented
   domain XML, and the schema names in publications, host status and

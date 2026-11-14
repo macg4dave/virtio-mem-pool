@@ -1,5 +1,5 @@
 [package]
-name = "virtio-mem-guest-linux"
+name = "rampire-guest-linux"
 version = "0.1.0"
 edition = "2021"
 authors = ["macg4dave"]
@@ -7,8 +7,8 @@ license = "GPL-3.0-or-later"
 description = "Linux guest service that decides and publishes guest memory requests from /proc telemetry"
 
 [dependencies]
-virtio-mem-core = { path = "../crates/virtio-mem-core" }
-virtio-mem-guest = { path = "../crates/virtio-mem-guest" }
+rampire-core = { path = "../crates/rampire-core" }
+rampire-guest = { path = "../crates/rampire-guest" }
 serde_json = "1.0"
 signal-hook = "0.3"
 
@@ -16,9 +16,9 @@ signal-hook = "0.3"
 libc = "0.2"
 
 [[bin]]
-name = "virtio-mem-guest"
+name = "rampire-guest"
 path = "src/main.rs"
 
 [[bin]]
-name = "virtio-mem-workload"
-path = "src/bin/virtio-mem-workload.rs"
+name = "rampire-workload"
+path = "src/bin/rampire-workload.rs"

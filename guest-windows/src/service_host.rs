@@ -499,7 +499,7 @@ mod tests {
 
     #[test]
     fn shutdown_timeout_terminates_the_process() {
-        const FIXTURE: &str = "VIRTIO_MEM_SHUTDOWN_TIMEOUT_FIXTURE";
+        const FIXTURE: &str = "RAMPIRE_SHUTDOWN_TIMEOUT_FIXTURE";
         if std::env::var_os(FIXTURE).is_some() {
             let stop = StopSignal::new();
             let cancel = stop.clone();

@@ -4,17 +4,17 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use rampire::qga::encode_base64;
+use rampire_core::settings::{self, VmSettings, CONTROL_PATH, SERVICE_NAME};
 use serde::Serialize;
-use virtio_mem_core::settings::{self, VmSettings, CONTROL_PATH, SERVICE_NAME};
-use virtio_mem_host::qga::encode_base64;
 
 use crate::build_identity::{
     BuildIdentity, BuildRecord, InstalledBuild, Verdict, RECORD_FILE, STAMP_FILE,
 };
 use crate::process;
 
-const SERVICE_EXE: &str = "virtio-mem-service.exe";
-const WORKLOAD_EXE: &str = "virtio-mem-workload.exe";
+const SERVICE_EXE: &str = "rampire-guest.exe";
+const WORKLOAD_EXE: &str = "rampire-workload.exe";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operation {
@@ -67,7 +67,7 @@ struct DeploymentEvidence {
     build_id: String,
     candidate_sha256: String,
     manifest: VmSettings,
-    service_config: virtio_mem_core::WindowsServiceConfigFile,
+    service_config: rampire_core::WindowsServiceConfigFile,
     #[serde(skip_serializing_if = "Option::is_none")]
     windows: Option<serde_json::Value>,
 }
@@ -243,23 +243,21 @@ pub fn run_all(repo: &Path) -> Result<(), String> {
 
 impl Config {
     fn from_env(repo: &Path) -> Result<Self, String> {
-        let ssh_target = std::env::var("VIRTIO_MEM_WINDOWS_SSH").map_err(|_| {
-            "VIRTIO_MEM_WINDOWS_SSH is required; refusing to guess a guest".to_owned()
-        })?;
-        let remote_dir = required_env("VIRTIO_MEM_WINDOWS_DIR")?;
-        let artifact_dir = PathBuf::from(required_env("VIRTIO_MEM_WINDOWS_ARTIFACTS")?);
+        let ssh_target = std::env::var("RAMPIRE_WINDOWS_SSH")
+            .map_err(|_| "RAMPIRE_WINDOWS_SSH is required; refusing to guess a guest".to_owned())?;
+        let remote_dir = required_env("RAMPIRE_WINDOWS_DIR")?;
+        let artifact_dir = PathBuf::from(required_env("RAMPIRE_WINDOWS_ARTIFACTS")?);
         let artifact_dir = if artifact_dir.is_absolute() {
             artifact_dir
         } else {
             repo.join(artifact_dir)
         };
-        let known_hosts_file = optional_path("VIRTIO_MEM_WINDOWS_KNOWN_HOSTS_FILE")?;
-        let identity_file = optional_path("VIRTIO_MEM_WINDOWS_IDENTITY_FILE")?;
-        let host_name = optional_env("VIRTIO_MEM_WINDOWS_HOST_NAME");
-        let host_key_alias = optional_env("VIRTIO_MEM_WINDOWS_HOST_KEY_ALIAS");
-        let connect_timeout_seconds = positive_env("VIRTIO_MEM_WINDOWS_CONNECT_TIMEOUT_SECONDS")?;
-        let operation_timeout_seconds =
-            positive_env("VIRTIO_MEM_WINDOWS_OPERATION_TIMEOUT_SECONDS")?;
+        let known_hosts_file = optional_path("RAMPIRE_WINDOWS_KNOWN_HOSTS_FILE")?;
+        let identity_file = optional_path("RAMPIRE_WINDOWS_IDENTITY_FILE")?;
+        let host_name = optional_env("RAMPIRE_WINDOWS_HOST_NAME");
+        let host_key_alias = optional_env("RAMPIRE_WINDOWS_HOST_KEY_ALIAS");
+        let connect_timeout_seconds = positive_env("RAMPIRE_WINDOWS_CONNECT_TIMEOUT_SECONDS")?;
+        let operation_timeout_seconds = positive_env("RAMPIRE_WINDOWS_OPERATION_TIMEOUT_SECONDS")?;
         let config = Self {
             ssh_target,
             remote_dir,
@@ -278,7 +276,7 @@ impl Config {
     fn validate(&self) -> Result<(), String> {
         validate_ssh_target(&self.ssh_target)?;
         if self.host_name.is_some() != self.host_key_alias.is_some() {
-            return Err("VIRTIO_MEM_WINDOWS_HOST_NAME and VIRTIO_MEM_WINDOWS_HOST_KEY_ALIAS must be supplied together".to_owned());
+            return Err("RAMPIRE_WINDOWS_HOST_NAME and RAMPIRE_WINDOWS_HOST_KEY_ALIAS must be supplied together".to_owned());
         }
         if let Some(value) = &self.host_name {
             validate_ssh_target(value)?;
@@ -293,7 +291,7 @@ impl Config {
                 .chars()
                 .any(|character| "&|<>^%!\"".contains(character))
         {
-            return Err("VIRTIO_MEM_WINDOWS_DIR contains characters unsafe for cmd.exe".to_owned());
+            return Err("RAMPIRE_WINDOWS_DIR contains characters unsafe for cmd.exe".to_owned());
         }
         Ok(())
     }
@@ -308,10 +306,10 @@ impl Config {
             ssh_target: ssh_target.to_owned(),
             remote_dir: r"C:\".to_owned(),
             artifact_dir: repo.to_path_buf(),
-            known_hosts_file: optional_path("VIRTIO_MEM_WINDOWS_KNOWN_HOSTS_FILE")?,
-            identity_file: optional_path("VIRTIO_MEM_WINDOWS_IDENTITY_FILE")?,
-            host_name: optional_env("VIRTIO_MEM_WINDOWS_HOST_NAME"),
-            host_key_alias: optional_env("VIRTIO_MEM_WINDOWS_HOST_KEY_ALIAS"),
+            known_hosts_file: optional_path("RAMPIRE_WINDOWS_KNOWN_HOSTS_FILE")?,
+            identity_file: optional_path("RAMPIRE_WINDOWS_IDENTITY_FILE")?,
+            host_name: optional_env("RAMPIRE_WINDOWS_HOST_NAME"),
+            host_key_alias: optional_env("RAMPIRE_WINDOWS_HOST_KEY_ALIAS"),
             connect_timeout_seconds,
             operation_timeout_seconds,
         };
@@ -397,10 +395,8 @@ fn check(config: &Config, repo: &Path) -> Result<(), String> {
 
 fn sync_source(config: &Config, repo: &Path) -> Result<(), String> {
     require_commands(&["git", "tar", "scp", "ssh"])?;
-    let archive = std::env::temp_dir().join(format!(
-        "virtio-mem-windows-source-{}.tar",
-        std::process::id()
-    ));
+    let archive =
+        std::env::temp_dir().join(format!("rampire-windows-source-{}.tar", std::process::id()));
     let archive_text = archive
         .to_str()
         .ok_or_else(|| "temporary archive path is not valid UTF-8".to_owned())?;
@@ -425,7 +421,7 @@ fn sync_source(config: &Config, repo: &Path) -> Result<(), String> {
             &filtered,
         )?;
         append_stamp(repo, archive_text, &identity)?;
-        let remote_archive = format!("virtio-mem-windows-source-{}.tar", std::process::id());
+        let remote_archive = format!("rampire-windows-source-{}.tar", std::process::id());
         print_remote(
             config,
             repo,
@@ -508,7 +504,7 @@ fn source_identity(repo: &Path, nul_separated: &[u8]) -> Result<BuildIdentity, S
     );
     let manifest = process::checked_output("sha256sum", &args, repo)?;
     let manifest_path = std::env::temp_dir().join(format!(
-        "virtio-mem-windows-source-{}.sha256",
+        "rampire-windows-source-{}.sha256",
         std::process::id()
     ));
     std::fs::write(&manifest_path, manifest)
@@ -524,7 +520,7 @@ fn source_identity(repo: &Path, nul_separated: &[u8]) -> Result<BuildIdentity, S
 /// workspace atomically with the files it describes.
 fn append_stamp(repo: &Path, archive: &str, identity: &BuildIdentity) -> Result<(), String> {
     let directory =
-        std::env::temp_dir().join(format!("virtio-mem-windows-stamp-{}", std::process::id()));
+        std::env::temp_dir().join(format!("rampire-windows-stamp-{}", std::process::id()));
     let result = (|| {
         std::fs::create_dir_all(&directory)
             .map_err(|error| format!("create build stamp directory: {error}"))?;
@@ -577,7 +573,7 @@ fn build(config: &Config, repo: &Path) -> Result<(), String> {
         config,
         repo,
         &format!(
-            "set \"VIRTIO_MEM_BUILD_ID={}\" ^&^& set \"RUSTC={}\" ^&^& set \"RUSTDOC={}\" ^&^& \"{}\" build -p virtio-mem-guest-windows --release --locked",
+            "set \"RAMPIRE_BUILD_ID={}\" ^&^& set \"RUSTC={}\" ^&^& set \"RUSTDOC={}\" ^&^& \"{}\" build -p rampire-guest-windows --release --locked",
             identity.build_id, tools.rustc, tools.rustdoc, tools.cargo
         ),
     )?;
@@ -590,7 +586,7 @@ fn test(config: &Config, repo: &Path) -> Result<(), String> {
         config,
         repo,
         &format!(
-            "set \"RUSTC={}\" ^&^& set \"RUSTDOC={}\" ^&^& \"{}\" test -p virtio-mem-guest-windows --all-features --locked",
+            "set \"RUSTC={}\" ^&^& set \"RUSTDOC={}\" ^&^& \"{}\" test -p rampire-guest-windows --all-features --locked",
             tools.rustc, tools.rustdoc, tools.cargo
         ),
     )?;
@@ -603,7 +599,7 @@ fn lint(config: &Config, repo: &Path) -> Result<(), String> {
         config,
         repo,
         &format!(
-            "\"{}\" fmt --all -- --check ^&^& set \"RUSTC={}\" ^&^& set \"RUSTDOC={}\" ^&^& \"{}\" clippy -p virtio-mem-guest-windows --all-targets --all-features --locked -- -D warnings",
+            "\"{}\" fmt --all -- --check ^&^& set \"RUSTC={}\" ^&^& set \"RUSTDOC={}\" ^&^& \"{}\" clippy -p rampire-guest-windows --all-targets --all-features --locked -- -D warnings",
             tools.cargo_fmt, tools.rustc, tools.rustdoc, tools.cargo_clippy
         ),
     )?;
@@ -802,7 +798,7 @@ fn verify(
     let host_port = ssh_config_value(&ssh_config, "port")
         .ok_or_else(|| "could not resolve SSH port".to_owned())?;
     let known_hosts =
-        std::env::temp_dir().join(format!("virtio-mem-known-hosts-{}", std::process::id()));
+        std::env::temp_dir().join(format!("rampire-known-hosts-{}", std::process::id()));
     let result = (|| {
         let scan = process::bounded_text(
             "ssh-keyscan",
@@ -909,7 +905,7 @@ fn deploy(
     let manifest = settings::load_vm(&manifest_path)?;
     let service_config = manifest.service_config()?;
     service_config.validate()?;
-    service_config.validate_paths(r"C:\ProgramData\VirtioMemService\config.json")?;
+    service_config.validate_paths(r"C:\ProgramData\RampireGuest\config.json")?;
     let record = required_record(config)?;
 
     let candidate_path = release_path(config, SERVICE_EXE);
@@ -1072,7 +1068,7 @@ fn uninstall(
 $ErrorActionPreference='Stop'
 $service={service}
 $apply={apply}
-$root='C:\ProgramData\VirtioMemService'
+$root='C:\ProgramData\RampireGuest'
 $config=Join-Path $root 'config.json'
 $svc=Get-CimInstance Win32_Service -Filter ("Name='"+$service.Replace("'","''")+"'")
 if($null -eq $svc){{throw 'named Windows service was not found'}}
@@ -1271,8 +1267,8 @@ $service={service}
 $candidate={candidate}
 $install={install}
 $telemetry={telemetry}
-$config='C:\ProgramData\VirtioMemService\config.json'
-$root='C:\ProgramData\VirtioMemService'
+$config='C:\ProgramData\RampireGuest\config.json'
+$root='C:\ProgramData\RampireGuest'
 $backup=Join-Path $root ('deployment-backups\'+[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())
 $prior=Get-CimInstance Win32_Service -Filter ("Name='"+$service.Replace("'","''")+"'") -ErrorAction SilentlyContinue
 $priorRunning=($null -ne $prior -and $prior.State -eq 'Running')
@@ -1305,7 +1301,7 @@ try {{
   & $install install
   if($LASTEXITCODE -ne 0){{throw "candidate install failed with exit code $LASTEXITCODE"}}
   {port_access}
-  $controlAccess=Set-VirtioMemPortAccess -PortName {control_port} -BackupDirectory $backup
+  $controlAccess=Set-RampirePortAccess -PortName {control_port} -BackupDirectory $backup
   & $install start
   if($LASTEXITCODE -ne 0){{throw "candidate start failed with exit code $LASTEXITCODE"}}
   (Get-Service $service).WaitForStatus('Running',[TimeSpan]::FromSeconds(30))
@@ -1340,14 +1336,14 @@ try {{
   throw
 }}"#,
         port_access = include_str!("../../../tools/windows/Set-PortAccess.ps1"),
-        control_port = ps_literal(virtio_mem_core::MEMORY_CONTROL_CHANNEL_NAME),
+        control_port = ps_literal(rampire_core::MEMORY_CONTROL_CHANNEL_NAME),
     )
 }
 
 fn remote_powershell(config: &Config, repo: &Path, script: &str) -> Result<String, String> {
     let nonce = format!("{}-{}", std::process::id(), unix_millis()?);
-    let local = std::env::temp_dir().join(format!("virtio-mem-deploy-{nonce}.ps1"));
-    let remote = format!("virtio-mem-deploy-{nonce}.ps1");
+    let local = std::env::temp_dir().join(format!("rampire-deploy-{nonce}.ps1"));
+    let remote = format!("rampire-deploy-{nonce}.ps1");
     std::fs::write(&local, script)
         .map_err(|error| format!("write temporary PowerShell payload: {error}"))?;
     let result = (|| {
@@ -1569,19 +1565,19 @@ mod tests {
         assert_eq!(
             parse(&strings(&[
                 "build-status",
-                "VirtioMemService",
+                "RampireGuest",
                 "--output",
                 "status.json"
             ])),
             Ok(Command::BuildStatus {
-                service: "VirtioMemService".to_owned(),
+                service: "RampireGuest".to_owned(),
                 output: PathBuf::from("status.json"),
             })
         );
         assert!(matches!(
             parse(&strings(&[
                 "uninstall",
-                "VirtioMemService",
+                "RampireGuest",
                 "--output",
                 "u.json"
             ])),
@@ -1590,7 +1586,7 @@ mod tests {
         assert!(matches!(
             parse(&strings(&[
                 "uninstall",
-                "VirtioMemService",
+                "RampireGuest",
                 "--output",
                 "u.json",
                 "--apply"
@@ -1599,7 +1595,7 @@ mod tests {
         ));
         assert!(parse(&strings(&[
             "build-status",
-            "VirtioMemService",
+            "RampireGuest",
             "--output",
             "s.json",
             "--apply"
@@ -1612,7 +1608,7 @@ mod tests {
             "u.json"
         ]))
         .is_err());
-        assert!(parse(&strings(&["uninstall", "VirtioMemService"])).is_err());
+        assert!(parse(&strings(&["uninstall", "RampireGuest"])).is_err());
     }
 
     #[test]
@@ -1636,8 +1632,7 @@ mod tests {
 
     #[test]
     fn filters_working_tree_deletions_from_git_inventory() {
-        let root =
-            std::env::temp_dir().join(format!("virtio-mem-xtask-sync-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("rampire-xtask-sync-{}", std::process::id()));
         std::fs::create_dir_all(&root).expect("create fixture directory");
         std::fs::write(root.join("present"), "fixture").expect("write fixture");
         let filtered = existing_paths(&root, b"present\0deleted\0").expect("filter paths");
@@ -1654,11 +1649,11 @@ mod tests {
         let vm = settings::load_vm(&path).expect("VM settings");
         let wire = vm.service_config().unwrap();
         wire.validate().expect("valid service config");
-        wire.validate_paths(r"C:\ProgramData\VirtioMemService\config.json")
+        wire.validate_paths(r"C:\ProgramData\RampireGuest\config.json")
             .expect("distinct paths");
         let script = deployment_powershell(&vm, "candidate.exe", "e30=");
         assert!(script.contains(CONTROL_PATH));
-        assert!(script.contains("Set-VirtioMemPortAccess -PortName 'org.virtio-mem.control.0'"));
+        assert!(script.contains("Set-RampirePortAccess -PortName 'org.virtio-mem.control.0'"));
         assert!(script.contains("deployment-backups"));
         assert!(script.contains("Assert-LegacySetting"));
     }

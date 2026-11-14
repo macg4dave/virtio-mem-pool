@@ -22,7 +22,7 @@ if [[ ! -f $review ]]; then
   exit 1
 fi
 virsh=(virsh -c qemu:///system)
-unit=virtio-mem-host@${instance}.service
+unit=rampire@${instance}.service
 out_dir=.artifacts/block-size
 attestation=$out_dir/${vm}.attestation.$(date +%Y%m%dT%H%M%S).json
 mkdir -p "$out_dir"

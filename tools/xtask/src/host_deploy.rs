@@ -3,11 +3,11 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use rampire::attestation::{AttestedCompatibilitySource, CompatibilityAttestation};
+use rampire::compatibility_source::CompatibilitySource;
+use rampire::config::{HostConfig, HostSettings};
+use rampire::virsh::Virsh;
 use serde::Serialize;
-use virtio_mem_host::attestation::{AttestedCompatibilitySource, CompatibilityAttestation};
-use virtio_mem_host::compatibility_source::CompatibilitySource;
-use virtio_mem_host::config::{HostConfig, HostSettings};
-use virtio_mem_host::virsh::Virsh;
 
 use crate::process;
 
@@ -55,20 +55,20 @@ struct AttestationEvidence {
 
 /// Where host-deploy installs the configuration, with the attestations in
 /// their own folder inside it; the unit's ExecStart names the host list in it.
-const CONFIG_DIRECTORY: &str = "/etc/virtio-mem-host";
+const CONFIG_DIRECTORY: &str = "/etc/rampire";
 
-/// The deployment layout: unit `virtio-mem-host@INSTANCE.service` runs the
-/// config `/etc/virtio-mem-host/host_list.toml` and its sibling settings files.
+/// The deployment layout: unit `rampire@INSTANCE.service` runs the
+/// config `/etc/rampire/host_list.toml` and its sibling settings files.
 /// Returns INSTANCE for a controller unit name.
 pub fn controller_instance(unit: &str) -> Result<&str, String> {
-    unit.strip_prefix("virtio-mem-host@")
+    unit.strip_prefix("rampire@")
         .and_then(|rest| rest.strip_suffix(".service"))
         .filter(|instance| validate_identity(instance).is_ok())
-        .ok_or_else(|| format!("{unit} is not a virtio-mem-host@INSTANCE.service unit"))
+        .ok_or_else(|| format!("{unit} is not a rampire@INSTANCE.service unit"))
 }
 
 /// The controller unit to observe when none was named: the one
-/// `virtio-mem-host@INSTANCE` unit systemd knows on this host, since one
+/// `rampire@INSTANCE` unit systemd knows on this host, since one
 /// controller manages every VM in its configuration. With none or several,
 /// `fallback` (the unit named after the VM) is kept.
 pub fn installed_controller_unit(fallback: &str, repo: &Path) -> String {
@@ -79,7 +79,7 @@ pub fn installed_controller_unit(fallback: &str, repo: &Path) -> String {
             process::os("--all"),
             process::os("--plain"),
             process::os("--no-legend"),
-            process::os("virtio-mem-host@*.service"),
+            process::os("rampire@*.service"),
         ],
         repo,
         Duration::from_secs(10),
@@ -213,7 +213,7 @@ pub fn run(command: &Command, repo: &Path) -> Result<(), String> {
 /// the administrator wrote: their comments and sizes such as `"3GB"` stay as
 /// they are. The caller validates the copy, not the source.
 fn snapshot_configuration(source: &Path, directory: &Path) -> Result<PathBuf, String> {
-    use virtio_mem_core::settings::{self, GLOBAL_FILE, HOST_LIST_FILE};
+    use rampire_core::settings::{self, GLOBAL_FILE, HOST_LIST_FILE};
     let (_, _, vms) = settings::load_configuration(source)?;
     let from = source.parent().unwrap_or(Path::new("."));
     let copy = |name: &str| -> Result<(), String> {
@@ -240,7 +240,7 @@ fn snapshot_configuration(source: &Path, directory: &Path) -> Result<PathBuf, St
 }
 
 fn configuration_paths(list_path: &Path) -> Result<Vec<PathBuf>, String> {
-    use virtio_mem_core::settings::{self, GLOBAL_FILE};
+    use rampire_core::settings::{self, GLOBAL_FILE};
     let (_, _, vms) = settings::load_configuration(list_path)?;
     let directory = list_path
         .parent()
@@ -254,9 +254,9 @@ fn configuration_paths(list_path: &Path) -> Result<Vec<PathBuf>, String> {
 
 fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
     let config_source = resolve(repo, &command.config);
-    let candidate = repo.join("target/release/virtio-mem-host");
-    let unit_source = repo.join("host/systemd/virtio-mem-host@.service");
-    let policy_source = repo.join("host/systemd/50-virtio-mem-host.rules");
+    let candidate = repo.join("target/release/rampire");
+    let unit_source = repo.join("host/systemd/rampire@.service");
+    let policy_source = repo.join("host/systemd/50-rampire.rules");
     for path in [&config_source, &candidate, &unit_source, &policy_source] {
         if !path.is_file() {
             return Err(format!(
@@ -286,8 +286,7 @@ fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
     )?;
     // Snapshot the attestations with the settings, so an install from the
     // installed directory itself never copies a file onto itself.
-    let attestation_snapshot =
-        config_source.with_file_name(virtio_mem_host::config::ATTESTATION_DIRECTORY);
+    let attestation_snapshot = config_source.with_file_name(rampire::config::ATTESTATION_DIRECTORY);
     for attestation in &mut attestations {
         let bytes = std::fs::read(&attestation.source).map_err(|error| {
             format!(
@@ -305,7 +304,7 @@ fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
         CompatibilityAttestation::parse(&text)?;
         validate_live_attestation(config, &attestation.source, command.timeout)?;
     }
-    let unit = format!("virtio-mem-host@{}.service", command.instance);
+    let unit = format!("rampire@{}.service", command.instance);
     let before = properties(&unit, repo, command.timeout)?;
     require_inactive(&before, &unit)?;
 
@@ -368,13 +367,7 @@ fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
         candidate_binary_sha256: candidate_hash,
         installed_binary_sha256: command
             .apply
-            .then(|| {
-                hash(
-                    Path::new("/usr/local/libexec/virtio-mem-host"),
-                    repo,
-                    command.timeout,
-                )
-            })
+            .then(|| hash(Path::new("/usr/local/bin/rampire"), repo, command.timeout))
             .transpose()?,
         config_sha256: config_hash,
         attestations: attestation_evidence,
@@ -435,10 +428,8 @@ fn pair_attestations(
                     ))
                 }
             };
-            let target = virtio_mem_host::config::attestation_path(
-                Path::new(CONFIG_DIRECTORY),
-                &config.vm_name,
-            );
+            let target =
+                rampire::config::attestation_path(Path::new(CONFIG_DIRECTORY), &config.vm_name);
             Ok(DeployedAttestation {
                 vm_name: config.vm_name.clone(),
                 source,
@@ -458,7 +449,7 @@ fn install(
     before: &BTreeMap<String, Vec<String>>,
 ) -> Result<String, String> {
     install_directory(
-        "/var/lib/virtio-mem-host",
+        "/var/lib/rampire",
         "root",
         "root",
         "0755",
@@ -466,7 +457,7 @@ fn install(
         command.timeout,
     )?;
     install_directory(
-        "/var/lib/virtio-mem-host/deployment-backups",
+        "/var/lib/rampire/deployment-backups",
         "root",
         "root",
         "0700",
@@ -474,15 +465,15 @@ fn install(
         command.timeout,
     )?;
     install_directory(
-        "/var/lib/virtio-mem-host/state",
-        "virtio-mem-host",
-        "virtio-mem-host",
+        "/var/lib/rampire/state",
+        "rampire",
+        "rampire",
         "0700",
         repo,
         command.timeout,
     )?;
     let backup = PathBuf::from(format!(
-        "/var/lib/virtio-mem-host/deployment-backups/{}",
+        "/var/lib/rampire/deployment-backups/{}",
         now_millis()?
     ));
     std::fs::create_dir_all(&backup)
@@ -495,16 +486,16 @@ fn install(
     )?;
     let config_files = configuration_paths(config)?;
     let targets = [
-        PathBuf::from("/usr/local/libexec/virtio-mem-host"),
-        PathBuf::from("/etc/systemd/system/virtio-mem-host@.service"),
-        PathBuf::from("/etc/polkit-1/rules.d/50-virtio-mem-host.rules"),
+        PathBuf::from("/usr/local/bin/rampire"),
+        PathBuf::from("/etc/systemd/system/rampire@.service"),
+        PathBuf::from("/etc/polkit-1/rules.d/50-rampire.rules"),
     ]
     .into_iter()
     .chain(
         config_files
             .iter()
             .filter_map(|path| path.file_name())
-            .map(|name| Path::new("/etc/virtio-mem-host").join(name)),
+            .map(|name| Path::new("/etc/rampire").join(name)),
     )
     .chain(
         attestations
@@ -544,18 +535,18 @@ fn install(
     )?;
     install_directory(
         &Path::new(CONFIG_DIRECTORY)
-            .join(virtio_mem_host::config::ATTESTATION_DIRECTORY)
+            .join(rampire::config::ATTESTATION_DIRECTORY)
             .display()
             .to_string(),
         "root",
-        "virtio-mem-host",
+        "rampire",
         "0750",
         repo,
         command.timeout,
     )?;
     install_file(
         candidate,
-        "/usr/local/libexec/virtio-mem-host",
+        "/usr/local/bin/rampire",
         "root",
         "root",
         "0755",
@@ -564,7 +555,7 @@ fn install(
     )?;
     install_file(
         unit,
-        "/etc/systemd/system/virtio-mem-host@.service",
+        "/etc/systemd/system/rampire@.service",
         "root",
         "root",
         "0644",
@@ -572,8 +563,8 @@ fn install(
         command.timeout,
     )?;
     install_file(
-        &repo.join("host/systemd/50-virtio-mem-host.rules"),
-        "/etc/polkit-1/rules.d/50-virtio-mem-host.rules",
+        &repo.join("host/systemd/50-rampire.rules"),
+        "/etc/polkit-1/rules.d/50-rampire.rules",
         "root",
         "root",
         "0644",
@@ -587,9 +578,9 @@ fn install(
             .ok_or("invalid configuration filename")?;
         install_file(
             source,
-            &format!("/etc/virtio-mem-host/{name}"),
+            &format!("/etc/rampire/{name}"),
             "root",
-            "virtio-mem-host",
+            "rampire",
             "0640",
             repo,
             command.timeout,
@@ -603,7 +594,7 @@ fn install(
                 .to_str()
                 .ok_or("attestation target is not UTF-8")?,
             "root",
-            "virtio-mem-host",
+            "rampire",
             "0640",
             repo,
             command.timeout,
@@ -623,7 +614,7 @@ fn install(
         "systemctl",
         &[
             process::os("disable"),
-            process::os(format!("virtio-mem-host@{}.service", command.instance)),
+            process::os(format!("rampire@{}.service", command.instance)),
         ],
         repo,
         command.timeout,
@@ -933,7 +924,7 @@ mod tests {
     #[test]
     fn every_configured_vm_needs_exactly_one_attestation_in_the_config_directory() {
         let directory =
-            std::env::temp_dir().join(format!("virtio-mem-deploy-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("rampire-deploy-test-{}", std::process::id()));
         let source = crate::repo_root()
             .expect("root")
             .join("fixtures/config/host_list.toml");
@@ -955,7 +946,7 @@ mod tests {
         // Installed in their own folder, apart from the settings files.
         assert_eq!(
             paired[1].target,
-            Path::new("/etc/virtio-mem-host/attestations/b.attestation.json")
+            Path::new("/etc/rampire/attestations/b.attestation.json")
         );
 
         let mut missing = both.clone();
@@ -969,7 +960,7 @@ mod tests {
     #[test]
     fn an_attestation_folder_supplies_each_vm_not_named_explicitly() {
         let directory =
-            std::env::temp_dir().join(format!("virtio-mem-deploy-dir-{}", std::process::id()));
+            std::env::temp_dir().join(format!("rampire-deploy-dir-{}", std::process::id()));
         std::fs::create_dir_all(&directory).expect("folder");
         std::fs::write(directory.join("a.attestation.json"), b"{}").expect("a");
         let source = crate::repo_root()
@@ -994,8 +985,7 @@ mod tests {
 
     #[test]
     fn the_installed_configuration_keeps_comments_and_written_sizes() {
-        let root =
-            std::env::temp_dir().join(format!("virtio-mem-deploy-copy-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("rampire-deploy-copy-{}", std::process::id()));
         let source = root.join("source");
         std::fs::create_dir_all(&source).expect("source");
         let globals = "# The pool every VM shares.\npool_bytes = \"3GB\"\n";
@@ -1025,7 +1015,7 @@ mod tests {
     #[test]
     fn only_top_level_attestations_are_legacy() {
         let root =
-            std::env::temp_dir().join(format!("virtio-mem-deploy-legacy-{}", std::process::id()));
+            std::env::temp_dir().join(format!("rampire-deploy-legacy-{}", std::process::id()));
         std::fs::create_dir_all(root.join("attestations")).expect("folders");
         for name in [
             "web.attestation.json",
@@ -1043,15 +1033,12 @@ mod tests {
 
     #[test]
     fn controller_units_name_a_deployment_instance() {
-        assert_eq!(
-            controller_instance("virtio-mem-host@pool.service"),
-            Ok("pool")
-        );
+        assert_eq!(controller_instance("rampire@pool.service"), Ok("pool"));
         for unit in [
-            "virtio-mem-host@.service",
-            "virtio-mem-host@a/b.service",
+            "rampire@.service",
+            "rampire@a/b.service",
             "other@pool.service",
-            "virtio-mem-host@pool",
+            "rampire@pool",
         ] {
             assert!(controller_instance(unit).is_err(), "{unit}");
         }
@@ -1059,14 +1046,13 @@ mod tests {
 
     #[test]
     fn the_only_installed_controller_is_the_default_one() {
-        let one =
-            "virtio-mem-host@main.service loaded active running Virtio-mem controller for main\n";
+        let one = "rampire@main.service loaded active running Virtio-mem controller for main\n";
         assert_eq!(
             only_controller_unit(one).as_deref(),
-            Some("virtio-mem-host@main.service")
+            Some("rampire@main.service")
         );
         // Several controllers, or none, leave the choice to the caller.
-        let two = format!("{one}virtio-mem-host@lab.service loaded inactive dead x\n");
+        let two = format!("{one}rampire@lab.service loaded inactive dead x\n");
         assert_eq!(only_controller_unit(&two), None);
         assert_eq!(only_controller_unit(""), None);
         assert_eq!(

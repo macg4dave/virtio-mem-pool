@@ -5,8 +5,8 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use virtio_mem_core::demand::GuestDiagnostics;
-use virtio_mem_core::{
+use rampire_core::demand::GuestDiagnostics;
+use rampire_core::{
     request_state_path, GuestRequestState, GuestRequester, GuestSettings, HostMemoryStatus,
     MemoryRequest, MemoryResult, TargetSample,
 };

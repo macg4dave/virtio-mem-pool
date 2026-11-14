@@ -11,12 +11,12 @@ use std::path::{Path, PathBuf};
 
 use crate::process;
 
-const PACKAGE: &str = "virtio-mem-guest";
-const DEVELOPMENT_BINARY: &str = "/usr/local/libexec/virtio-mem-guest";
-const PACKAGED_BINARY: &str = "/usr/libexec/virtio-mem-guest";
-const PACKAGED_UNIT: &str = "/usr/lib/systemd/system/virtio-mem-guest.service";
-const PACKAGED_MONITOR: &str = "/usr/bin/virtio-mem-watch-ram";
-const HOMEPAGE: &str = "https://github.com/macg4dave/virtio-mem-pool";
+const PACKAGE: &str = "rampire-guest";
+const DEVELOPMENT_BINARY: &str = "/usr/local/libexec/rampire-guest";
+const PACKAGED_BINARY: &str = "/usr/libexec/rampire-guest";
+const PACKAGED_UNIT: &str = "/usr/lib/systemd/system/rampire-guest.service";
+const PACKAGED_MONITOR: &str = "/usr/bin/rampire-watch-ram";
+const HOMEPAGE: &str = "https://github.com/macg4dave/rampire";
 /// `OpenFile=` in the unit, which hands the service the control channel,
 /// first appeared in systemd 253.
 const DEPENDS: &str = "libc6, systemd (>= 253)";
@@ -49,7 +49,7 @@ pub fn build(contents: &Contents<'_>, output: &Path, repo: &Path) -> Result<Path
             (PACKAGED_UNIT, unit.as_slice(), 0o644),
             (PACKAGED_MONITOR, contents.monitor, 0o755),
             (
-                "/usr/share/doc/virtio-mem-guest/copyright",
+                "/usr/share/doc/rampire-guest/copyright",
                 COPYRIGHT.as_bytes(),
                 0o644,
             ),
@@ -148,8 +148,8 @@ Depends: {DEPENDS}
 Section: admin
 Priority: optional
 Homepage: {HOMEPAGE}
-Description: virtio-mem guest memory requests
- Asks the KVM host's virtio-mem pool controller for memory when the guest
+Description: RAMpire guest memory requests
+ Asks the KVM host's RAMpire controller for memory when the guest
  needs more and returns it when the guest has spare. Talks to the host
  over the virtio-serial port org.virtio-mem.control.0, or through control
  files the QEMU guest agent carries when the VM has no such port.
@@ -158,8 +158,8 @@ Description: virtio-mem guest memory requests
 }
 
 const COPYRIGHT: &str = "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: virtio-mem-pool
-Source: https://github.com/macg4dave/virtio-mem-pool
+Upstream-Name: rampire
+Source: https://github.com/macg4dave/rampire
 
 Files: *
 Copyright: 2026 macg4dave
@@ -189,10 +189,10 @@ if [ \"$1\" = configure ] || [ \"$1\" = abort-upgrade ]; then
     if [ -d /run/systemd/system ]; then
         systemctl daemon-reload
         if [ -z \"$2\" ]; then
-            systemctl enable virtio-mem-guest.service
+            systemctl enable rampire-guest.service
         fi
-        if systemctl is-enabled --quiet virtio-mem-guest.service; then
-            systemctl restart virtio-mem-guest.service
+        if systemctl is-enabled --quiet rampire-guest.service; then
+            systemctl restart rampire-guest.service
         fi
     fi
 fi
@@ -201,7 +201,7 @@ fi
 const PRERM: &str = "#!/bin/sh
 set -e
 if [ \"$1\" = remove ] && [ -d /run/systemd/system ]; then
-    systemctl disable --now virtio-mem-guest.service
+    systemctl disable --now rampire-guest.service
 fi
 ";
 
@@ -213,7 +213,7 @@ if [ -d /run/systemd/system ]; then
     systemctl daemon-reload
 fi
 if [ \"$1\" = purge ]; then
-    rm -rf /var/lib/private/virtio-mem-guest /var/lib/virtio-mem-guest
+    rm -rf /var/lib/private/rampire-guest /var/lib/rampire-guest
 fi
 ";
 
@@ -312,11 +312,11 @@ mod tests {
         let unit = std::fs::read(
             crate::repo_root()
                 .expect("root")
-                .join("guest-linux/systemd/virtio-mem-guest.service"),
+                .join("guest-linux/systemd/rampire-guest.service"),
         )
         .expect("unit");
         let packaged = String::from_utf8(packaged_unit(&unit).expect("packaged")).unwrap();
-        assert!(packaged.contains("ExecStart=/usr/libexec/virtio-mem-guest run"));
+        assert!(packaged.contains("ExecStart=/usr/libexec/rampire-guest run"));
         assert!(!packaged.contains("/usr/local/"));
         assert!(!packaged.contains('\r'));
         assert!(packaged_unit(b"[Service]\nExecStart=/bin/true\n").is_err());
@@ -340,9 +340,7 @@ mod tests {
     #[test]
     fn removal_keeps_request_state_and_purge_discards_it() {
         let purge = POSTRM.split("if [ \"$1\" = purge ]").nth(1).unwrap();
-        assert!(
-            purge.contains("rm -rf /var/lib/private/virtio-mem-guest /var/lib/virtio-mem-guest")
-        );
+        assert!(purge.contains("rm -rf /var/lib/private/rampire-guest /var/lib/rampire-guest"));
         assert_eq!(POSTRM.matches("rm -rf").count(), 1);
         assert!(PRERM.contains("[ \"$1\" = remove ]"));
         let control = control_file("1", "amd64", "M <m@example.org>", 10);

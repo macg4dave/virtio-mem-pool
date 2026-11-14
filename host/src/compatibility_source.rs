@@ -1,4 +1,4 @@
-use virtio_mem_core::VirtioMemCompatibility;
+use rampire_core::VirtioMemCompatibility;
 
 /// Supplies compatibility evidence immediately before resize preparation.
 pub trait CompatibilitySource {

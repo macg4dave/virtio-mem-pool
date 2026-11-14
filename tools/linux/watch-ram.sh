@@ -38,7 +38,7 @@ WIDTH=78
 PLOT_W=60
 PLOT_H=5
 PAGE_KB=$(( $(getconf PAGESIZE 2>/dev/null || echo 4096) / 1024 ))
-CONTROL=/var/lib/virtio-mem-guest/control.json
+CONTROL=/var/lib/rampire-guest/control.json
 INTERACTIVE=0
 if [ $CSV -eq 0 ] && [ $NOCLEAR -eq 0 ] && [ -t 1 ]; then INTERACTIVE=1; fi
 

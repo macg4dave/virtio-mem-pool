@@ -22,7 +22,7 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use virtio_mem_core::MemoryResourceNotificationState;
+use rampire_core::MemoryResourceNotificationState;
 
 pub const PRESSURE_PATH: &str = "/proc/pressure/memory";
 const MAX_PRESSURE_BYTES: usize = 4096;
@@ -49,7 +49,7 @@ pub fn trigger_description() -> &'static str {
     TRIGGER.get().copied().unwrap_or("pending")
 }
 
-pub use virtio_mem_guest::worker::PressureSource;
+pub use rampire_guest::worker::PressureSource;
 
 #[derive(Debug, Default)]
 pub struct ProcPressure {
@@ -102,7 +102,7 @@ impl PressureSource for ProcPressure {
         if fired == Some(true) {
             return Some(MemoryResourceNotificationState::Low);
         }
-        let bytes = virtio_mem_guest::files::read_bounded(
+        let bytes = rampire_guest::files::read_bounded(
             std::path::Path::new(PRESSURE_PATH),
             MAX_PRESSURE_BYTES,
         )

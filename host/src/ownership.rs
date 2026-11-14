@@ -97,7 +97,7 @@ impl DeviceOwner {
     pub fn acquire(vm: &str) -> Result<Self, String> {
         use sha2::{Digest, Sha256};
         use std::os::linux::net::SocketAddrExt;
-        let name = format!("virtio-mem-host-{:x}", Sha256::digest(vm.as_bytes()));
+        let name = format!("rampire-{:x}", Sha256::digest(vm.as_bytes()));
         let address = std::os::unix::net::SocketAddr::from_abstract_name(name.as_bytes())
             .map_err(|error| error.to_string())?;
         std::os::unix::net::UnixListener::bind_addr(&address)
@@ -146,8 +146,8 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn locks_are_exclusive_across_processes() {
-        const PATH_ENV: &str = "VIRTIO_MEM_OWNERSHIP_FIXTURE_PATH";
-        const VM_ENV: &str = "VIRTIO_MEM_OWNERSHIP_FIXTURE_VM";
+        const PATH_ENV: &str = "RAMPIRE_OWNERSHIP_FIXTURE_PATH";
+        const VM_ENV: &str = "RAMPIRE_OWNERSHIP_FIXTURE_VM";
         if let Some(path) = std::env::var_os(PATH_ENV) {
             assert!(CheckpointOwner::acquire(Path::new(&path)).is_err());
             assert!(DeviceOwner::acquire(&std::env::var(VM_ENV).unwrap()).is_err());

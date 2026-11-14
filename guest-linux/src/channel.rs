@@ -2,7 +2,7 @@
 //! unit (`OpenFile=`), or one named on the command line. Everything carried
 //! over it is the shared transport's.
 
-use virtio_mem_guest::transport::{FileTransport, StreamTransport, Transport};
+use rampire_guest::transport::{FileTransport, StreamTransport, Transport};
 
 /// The name systemd passes the opened control channel under (`OpenFile=`).
 pub const CONTROL_FD_NAME: &str = "control";

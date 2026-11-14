@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const USAGE: &str = "Usage: virtio-mem-workload \
+const USAGE: &str = "Usage: rampire-workload \
     --workload-id ID \
     --mode committed|resident|file-cache \
     --peak-bytes BYTES \
@@ -129,7 +129,7 @@ fn parse(arguments: &[String]) -> Result<Config, String> {
         }
         Some(path) if path.starts_with('/') => PathBuf::from(path),
         Some(_) => return Err("--cache-dir must be an absolute path".to_owned()),
-        None => PathBuf::from(format!("/var/tmp/virtio-mem-workload-{workload_id}")),
+        None => PathBuf::from(format!("/var/tmp/rampire-workload-{workload_id}")),
     };
     let config = Config {
         workload_id,
@@ -326,7 +326,7 @@ mod memory {
             // SAFETY: address and bytes are exactly what mmap returned.
             if unsafe { libc::munmap(self.address.cast(), self.bytes) } != 0 {
                 eprintln!(
-                    "virtio-mem-workload: munmap failed: {}",
+                    "rampire-workload: munmap failed: {}",
                     std::io::Error::last_os_error()
                 );
             }
@@ -391,7 +391,7 @@ fn main() -> ExitCode {
     match parse(&arguments).and_then(|config| run(&config)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("virtio-mem-workload: {error}");
+            eprintln!("rampire-workload: {error}");
             ExitCode::FAILURE
         }
     }
@@ -442,7 +442,7 @@ mod tests {
         assert_eq!((config.peak_bytes, config.retained_bytes), (2048, 1024));
         assert_eq!(
             config.cache_dir,
-            PathBuf::from("/var/tmp/virtio-mem-workload-run-1")
+            PathBuf::from("/var/tmp/rampire-workload-run-1")
         );
         let mut cache = with("--mode", "file-cache");
         cache.extend(["--cache-dir".to_owned(), "/srv/cache".to_owned()]);
@@ -474,7 +474,7 @@ mod tests {
     #[test]
     fn file_cache_grows_and_shrinks_by_whole_files_and_cleans_up() {
         let directory =
-            std::env::temp_dir().join(format!("virtio-mem-workload-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("rampire-workload-test-{}", std::process::id()));
         let mut cache = FileCache {
             directory: directory.clone(),
             files: Vec::new(),

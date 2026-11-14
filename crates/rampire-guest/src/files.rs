@@ -124,7 +124,7 @@ mod tests {
     #[test]
     fn replacement_is_whole_and_reads_are_bounded() {
         let directory =
-            std::env::temp_dir().join(format!("virtio-mem-guest-files-{}", std::process::id()));
+            std::env::temp_dir().join(format!("rampire-guest-files-{}", std::process::id()));
         let path = directory.join("nested").join("state.json");
         assert_eq!(read_bounded(&path, 16).unwrap(), None);
         replace_file(&path, b"first", false).unwrap();
