@@ -92,6 +92,19 @@ sudo rampire apply      # check, then switch
 sudo rampire rollback   # back to the copy before
 ```
 
+`rampire set` changes settings without an editor, keeping the file's
+comments, then applies:
+
+```bash
+sudo rampire set webserver priority=150 max_ram=12GB
+sudo rampire set global host_reserve=6GB
+```
+
+The target is a VM's name, or `global` for `global.toml`. A value is
+written as a whole number, `true`/`false`, or text (`"12GB"`). Nothing is
+written unless the changed file is valid and the whole configuration still
+loads. `--no-apply` changes the draft only.
+
 `apply` copies the draft, checks the copy like `rampire check` (the
 settings and every VM's attestation against the live VM) while the
 controller keeps running, shows the difference and asks. Only then does
@@ -151,7 +164,8 @@ planning and resizing.
 
 One file per VM. The file's name is the libvirt domain name with `.toml`
 added: lower-case ASCII letters, digits, `-` and `_`, at most 64
-characters. The name isn't repeated inside.
+characters, and not `global`, which `rampire set` uses for `global.toml`.
+The name isn't repeated inside.
 
 | Key | Meaning |
 |---|---|

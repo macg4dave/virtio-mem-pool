@@ -250,7 +250,15 @@ The steps are always the same: edit the file, apply the change, check it.
    the pool view shows them live
    ([Checking that it's working](#checking-that-its-working)).
 
-**Example: let `webserver` grow to 12 GB.** Run
+**The same change in one command.** `rampire set` changes a setting and
+applies it, keeping the file's notes:
+
+```bash
+sudo rampire set backup priority=150
+```
+
+**Example: let `webserver` grow to 12 GB.** Run `sudo rampire set
+webserver max_ram=12GB`, or run
 `sudo nano /etc/rampire/vms.d/webserver.toml`, change
 `max_ram = "8GB"` to `max_ram = "12GB"`, save, and apply exactly as in
 step 3 above.

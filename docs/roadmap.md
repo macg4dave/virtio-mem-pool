@@ -284,9 +284,11 @@ version.
   documented default, prunes old evidence and old applied copies (X18). Done:
   `retention` (default 10, at least 2) never removes the current copy or
   the one before it. `host-deploy`'s deployment backups go when it does.
-- [ ] **O1.6** `set VM KEY=VALUE ...` and `set global KEY=VALUE ...`
+- [x] **O1.6** `set VM KEY=VALUE ...` and `set global KEY=VALUE ...`
   change a setting in the draft with the file's comments kept, then
-  `apply`.
+  `apply`. Done; `--no-apply` edits only. `global` means
+  `global.toml`, so `global` is a reserved VM name (judgment call,
+  2026-11-14).
 - [ ] **O1.7** `init`: on a first run, read the host's memory and every
   libvirt domain, and write `global.toml`. It suggests `host_reserve`,
   and suggests `pool` as the host's memory minus:

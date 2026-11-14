@@ -9,5 +9,6 @@ pub mod dashboard;
 pub mod evidence;
 pub mod pool;
 pub mod process;
+pub mod set;
 pub mod units;
 pub mod watch;

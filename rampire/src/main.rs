@@ -154,6 +154,22 @@ enum Command {
     /// Go back to the applied copy before the current one, through the same
     /// checks as `apply`.
     Rollback,
+    /// Change settings in the draft, keeping its comments, then apply.
+    ///
+    /// TARGET is a VM's name, or `global` for global.toml. Each change is
+    /// KEY=VALUE, for example `priority=150` or `max_ram=12GB`. Nothing is
+    /// written unless the changed file is valid and the whole configuration
+    /// still loads.
+    Set {
+        /// A VM's name, or `global`.
+        target: String,
+        /// KEY=VALUE, one or more.
+        #[arg(required = true, value_name = "KEY=VALUE")]
+        changes: Vec<String>,
+        /// Change the draft only; apply later.
+        #[arg(long)]
+        no_apply: bool,
+    },
     /// Show the controller's journal.
     Logs {
         /// Keep showing new entries.
@@ -268,6 +284,23 @@ fn run(cli: &Cli) -> Result<ExitCode, String> {
         Command::Diff => diff(cli),
         Command::Apply { detailed_exitcode } => apply(cli, *detailed_exitcode),
         Command::Rollback => rollback(cli),
+        Command::Set {
+            target,
+            changes,
+            no_apply,
+        } => {
+            let changes = changes
+                .iter()
+                .map(|change| rampire_ops::set::parse_assignment(change))
+                .collect::<Result<Vec<_>, _>>()?;
+            let path = rampire_ops::set::set(&cli.config, target, &changes)?;
+            println!("changed {}", path.display());
+            if *no_apply {
+                println!("not applied: run rampire apply when ready");
+                return Ok(ExitCode::SUCCESS);
+            }
+            apply(cli, false)
+        }
         Command::Logs { follow, since } => logs(*follow, since.as_deref()),
         Command::Recover { vm, reason } => recover(cli, vm, reason),
         Command::ClearLatch { vm, reason, apply } => {
@@ -815,6 +848,10 @@ mod tests {
         assert!(cli.yes);
         assert!(Cli::try_parse_from(["rampire", "recover", "web"]).is_err());
         assert!(Cli::try_parse_from(["rampire"]).is_err());
+        let cli =
+            Cli::try_parse_from(["rampire", "set", "web", "priority=150", "max_ram=12GB"]).unwrap();
+        assert!(matches!(cli.command, Command::Set { ref changes, .. } if changes.len() == 2));
+        assert!(Cli::try_parse_from(["rampire", "set", "web"]).is_err());
     }
 
     #[test]

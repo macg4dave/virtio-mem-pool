@@ -257,7 +257,7 @@ pub struct VmSettings {
 
 impl VmSettings {
     pub fn validate(&self) -> Result<(), String> {
-        validate_name("VM", &self.vm_name)?;
+        validate_vm_name(&self.vm_name)?;
         if self.priority == 0 || !valid_alias(&self.alias) {
             return Err(
                 "a VM needs a positive priority and a valid libvirt device alias".to_owned(),
@@ -393,9 +393,22 @@ fn validate_name(kind: &str, name: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// A name the command line uses for `global.toml`, so no VM may have it.
+pub const RESERVED_VM_NAME: &str = "global";
+
+fn validate_vm_name(name: &str) -> Result<(), String> {
+    validate_name("VM", name)?;
+    if name == RESERVED_VM_NAME {
+        return Err(format!(
+            "a VM can't be named {RESERVED_VM_NAME:?}: rampire set uses that name for global.toml"
+        ));
+    }
+    Ok(())
+}
+
 /// The settings file of the VM `name`, inside `vms.d`.
 pub fn vm_filename(name: &str) -> Result<String, String> {
-    validate_name("VM", name)?;
+    validate_vm_name(name)?;
     Ok(format!("{name}.toml"))
 }
 
@@ -545,6 +558,7 @@ mod tests {
         }
         assert!(vm_filename(&"x".repeat(65)).is_err());
         assert_eq!(vm_filename("guest").unwrap(), "guest.toml");
+        assert!(vm_filename("global").is_err());
     }
 
     #[test]
