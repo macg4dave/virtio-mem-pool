@@ -1,5 +1,6 @@
 # The Linux guest package, rampire-guest, as RPM and .deb (roadmap O2.6).
-# Built by packaging/build.sh, which sets VERSION, ARCH, REPO and STAGE.
+# Built by packaging/build.sh from the repository root, which sets VERSION
+# and ARCH. Source paths are relative to the root.
 name: rampire-guest
 version: "${VERSION}"
 arch: "${ARCH}"
@@ -13,23 +14,23 @@ description: |
   spare, over the virtio-serial port org.rampire.control.0 or through
   control files the QEMU guest agent carries.
 contents:
-  - src: "${REPO}/target/release/rampire-guest"
+  - src: "./target/release/rampire-guest"
     dst: /usr/libexec/rampire-guest
     file_info: { mode: 0755 }
   # The unit with the packaged binary path, written by build.sh.
-  - src: "${STAGE}/rampire-guest.service"
+  - src: "./target/packaging/rampire-guest.service"
     dst: /usr/lib/systemd/system/rampire-guest.service
     file_info: { mode: 0644 }
-  - src: "${REPO}/tools/linux/watch-ram.sh"
+  - src: "./tools/linux/watch-ram.sh"
     dst: /usr/bin/rampire-watch-ram
     file_info: { mode: 0755 }
-  - src: "${REPO}/LICENSE"
+  - src: "./LICENSE"
     dst: /usr/share/doc/rampire-guest/LICENSE
     file_info: { mode: 0644 }
 scripts:
-  postinstall: "${REPO}/packaging/scripts/guest-postinstall.sh"
-  preremove: "${REPO}/packaging/scripts/guest-preremove.sh"
-  postremove: "${REPO}/packaging/scripts/guest-postremove.sh"
+  postinstall: "./packaging/scripts/guest-postinstall.sh"
+  preremove: "./packaging/scripts/guest-preremove.sh"
+  postremove: "./packaging/scripts/guest-postremove.sh"
 # The unit opens the control channel with OpenFile=, new in systemd 253.
 overrides:
   rpm:

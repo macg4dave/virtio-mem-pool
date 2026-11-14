@@ -13,20 +13,20 @@ description: |
   controller resizes the VM's virtio-mem device within the pool, the VM's
   limits and the host's own reserve.
 contents:
-  - src: "${REPO}/target/release/rampire"
+  - src: "./target/release/rampire"
     dst: /usr/bin/rampire
     file_info: { mode: 0755 }
-  - src: "${REPO}/host/systemd/rampire.service"
+  - src: "./host/systemd/rampire.service"
     dst: /usr/lib/systemd/system/rampire.service
     file_info: { mode: 0644 }
-  - src: "${REPO}/packaging/debian-socket-group.conf"
+  - src: "./packaging/debian-socket-group.conf"
     dst: /usr/lib/systemd/system/rampire.service.d/socket-group.conf
     file_info: { mode: 0644 }
     packager: deb
-  - src: "${REPO}/host/systemd/50-rampire.rules"
+  - src: "./host/systemd/50-rampire.rules"
     dst: /usr/share/polkit-1/rules.d/50-rampire.rules
     file_info: { mode: 0644 }
-  - src: "${REPO}/packaging/rampire.sysusers"
+  - src: "./packaging/rampire.sysusers"
     dst: /usr/lib/sysusers.d/rampire.conf
     file_info: { mode: 0644 }
   # The draft's folders. global.toml is left to `rampire init`, which never
@@ -40,23 +40,23 @@ contents:
   - dst: /etc/rampire/attestations
     type: dir
     file_info: { mode: 0755 }
-  - src: "${REPO}/deploy/examples/reviews/linux-standard.toml"
+  - src: "./deploy/examples/reviews/linux-standard.toml"
     dst: /etc/rampire/reviews/linux-standard.toml
     type: config|noreplace
     file_info: { mode: 0644 }
-  - src: "${REPO}/deploy/examples/global.toml"
+  - src: "./deploy/examples/global.toml"
     dst: /usr/share/doc/rampire/examples/global.toml
     file_info: { mode: 0644 }
-  - src: "${REPO}/deploy/examples/vms.d/linux-vm.toml"
+  - src: "./deploy/examples/vms.d/linux-vm.toml"
     dst: /usr/share/doc/rampire/examples/vms.d/linux-vm.toml
     file_info: { mode: 0644 }
-  - src: "${REPO}/LICENSE"
+  - src: "./LICENSE"
     dst: /usr/share/doc/rampire/LICENSE
     file_info: { mode: 0644 }
 scripts:
-  postinstall: "${REPO}/packaging/scripts/host-postinstall.sh"
-  preremove: "${REPO}/packaging/scripts/host-preremove.sh"
-  postremove: "${REPO}/packaging/scripts/host-postremove.sh"
+  postinstall: "./packaging/scripts/host-postinstall.sh"
+  preremove: "./packaging/scripts/host-preremove.sh"
+  postremove: "./packaging/scripts/host-postremove.sh"
 overrides:
   rpm:
     depends:

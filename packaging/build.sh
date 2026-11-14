@@ -21,15 +21,19 @@ stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 command -v nfpm >/dev/null || { echo 'nfpm is required: https://nfpm.goreleaser.com' >&2; exit 1; }
 
-# Packages install the guest binary in /usr/libexec, not /usr/local.
+# Packages install the guest binary in /usr/libexec, not /usr/local. The
+# nfpm definitions name their files relative to the repository root.
+cd "$repo"
+mkdir -p target/packaging
 sed 's#/usr/local/libexec/rampire-guest#/usr/libexec/rampire-guest#' \
-  "$repo/guest-linux/systemd/rampire-guest.service" > "$stage/rampire-guest.service"
-grep -q '^ExecStart=/usr/libexec/rampire-guest ' "$stage/rampire-guest.service"
+  guest-linux/systemd/rampire-guest.service > target/packaging/rampire-guest.service
+grep -q '^ExecStart=/usr/libexec/rampire-guest ' target/packaging/rampire-guest.service
+cp target/packaging/rampire-guest.service "$stage/rampire-guest.service"
 
-export VERSION=$version REPO=$repo STAGE=$stage ARCH=amd64
+export VERSION=$version ARCH=amd64
 for package in rampire rampire-guest; do
   for packager in rpm deb; do
-    nfpm package --config "$repo/packaging/$package.nfpm.yaml" \
+    nfpm package --config "packaging/$package.nfpm.yaml" \
       --packager "$packager" --target "$output/"
   done
 done
