@@ -42,6 +42,13 @@ the copy it runs and its state from the unit's `StateDirectory`.
 
 ## Installing the controller
 
+`sudo rampire doctor` checks these once the controller is installed:
+libvirt 10.1 or later and QEMU 8.2 or later, QEMU's `virtio-mem-pci`
+with `dynamic-memslots` and `unplugged-inaccessible`, the service
+account, the unit's socket group, the account's libvirt access (the
+polkit rule) and an applied configuration. It prints the fix for each
+problem.
+
 Requirements: a RHEL-family (or other systemd) KVM host with libvirt and
 QEMU, `virsh` on the path, polkit, and Rust to build the controller.
 
@@ -404,6 +411,7 @@ sudo rampire top            # every VM and the pool
 sudo rampire watch VM       # one VM
 sudo rampire status [VM]    # the controller's status, as JSON
 sudo rampire check          # settings and attestations against the live VMs
+sudo rampire doctor         # what the host needs, with the fix for each problem
 sudo rampire logs --follow  # the controller's journal
 cargo xtask metrics --config /etc/rampire
 ```

@@ -46,6 +46,20 @@ rampire_core::schema_name! {
     struct CheckSchema = "rampire.check";
 }
 
+rampire_core::schema_name! {
+    /// `rampire doctor --json`.
+    struct DoctorSchema = "rampire.doctor";
+}
+
+/// `rampire doctor --json`.
+#[derive(Debug, Serialize)]
+struct DoctorReport {
+    schema: DoctorSchema,
+    version: u16,
+    passed: bool,
+    findings: Vec<rampire_ops::doctor::Finding>,
+}
+
 /// `rampire status --json`: every VM's controller status.
 #[derive(Debug, Serialize)]
 struct StatusReport {
@@ -174,6 +188,8 @@ enum Command {
         #[arg(long)]
         no_apply: bool,
     },
+    /// Check what the host needs for RAMpire, with the fix for each problem.
+    Doctor,
     /// Show the controller's journal.
     Logs {
         /// Keep showing new entries.
@@ -283,6 +299,7 @@ fn run(cli: &Cli) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         Command::Check => check(cli),
+        Command::Doctor => doctor(cli),
         Command::Diff => diff(cli),
         Command::Apply { detailed_exitcode } => apply(cli, *detailed_exitcode),
         Command::Rollback => rollback(cli),
@@ -775,6 +792,34 @@ fn restart_if_running(unit: &str) -> Result<bool, String> {
         println!("{unit} is not running; it will use the new copy when it starts");
     }
     Ok(active)
+}
+
+fn doctor(cli: &Cli) -> Result<ExitCode, String> {
+    let findings = rampire_ops::doctor::run(&connection(cli)?, SERVICE_ACCOUNT, applied_root());
+    let passed = findings.iter().all(|finding| finding.ok);
+    if cli.json {
+        print_json(&DoctorReport {
+            schema: DoctorSchema,
+            version: 1,
+            passed,
+            findings,
+        })?;
+    } else {
+        for finding in &findings {
+            match &finding.fix {
+                None => println!("ok: {}: {}", finding.check, finding.detail),
+                Some(fix) => {
+                    println!("problem: {}: {}", finding.check, finding.detail);
+                    println!("  fix: {fix}");
+                }
+            }
+        }
+    }
+    Ok(ExitCode::from(if passed {
+        exit::SUCCESS
+    } else {
+        exit::FAILURE
+    }))
 }
 
 fn controller_unit() -> String {

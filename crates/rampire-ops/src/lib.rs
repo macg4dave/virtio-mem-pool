@@ -6,6 +6,7 @@
 pub mod applied;
 pub mod check;
 pub mod dashboard;
+pub mod doctor;
 pub mod evidence;
 pub mod init;
 pub mod pool;

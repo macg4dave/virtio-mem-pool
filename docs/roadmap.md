@@ -306,13 +306,15 @@ version.
   template (decision D2, X4). Because every command runs as root, the
   runtime directory holding guest publications becomes private to the
   service account and root. Done.
-- [ ] **O1.9** `doctor` checks:
+- [x] **O1.9** `doctor` checks:
   - `virsh` and the polkit rule;
   - the service account and its libvirt socket group;
   - QEMU 8.2 or later, with the device options attestation needs;
   - the libvirt version.
 
-  It gives the fix for each problem it finds.
+  It gives the fix for each problem it finds. Done; it also checks that a
+  configuration has been applied. The minimums are libvirt 10.1 (the first
+  with `dynamicMemslots`) and QEMU 8.2.
 - [x] **O1.10** Delete `install-host.sh`, `recover-latch.sh`,
   `restart-vm-attest.sh` and `add-linux-vm.sh`. `clone-vm.sh` stays a
   development tool. Done; a development host installs with
