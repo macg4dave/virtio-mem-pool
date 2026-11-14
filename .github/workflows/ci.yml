@@ -1,0 +1,81 @@
+# The gate on every push and pull request; release artefacts on a v* tag
+# (roadmap O2.1).
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-gate:
+    name: Linux gate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Format, build, test, Clippy and shell syntax
+        run: cargo xtask gate checks
+
+  windows-guest:
+    name: Windows guest
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Test
+        run: cargo test --locked -p rampire-core -p rampire-guest -p rampire-guest-windows
+      - name: Clippy
+        run: cargo clippy --locked -p rampire-core -p rampire-guest -p rampire-guest-windows --all-targets -- -D warnings
+
+  release:
+    name: Release artefacts
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux-gate, windows-guest]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      NFPM_VERSION: 2.41.1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - name: Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          curl -sSfL -o nfpm.deb \
+            "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_amd64.deb"
+          sudo dpkg -i nfpm.deb
+      - name: The tag matches the crate version
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          crate=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "rampire") | .version')
+          test "$version" = "$crate" || { echo "tag $version but rampire is $crate" >&2; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Build
+        run: |
+          export RAMPIRE_BUILD_ID=${GITHUB_SHA::12}
+          cargo build --release --locked -p rampire -p rampire-guest-linux
+          cargo build --release --locked --target x86_64-unknown-linux-musl -p rampire -p rampire-guest-linux
+      - name: Package
+        run: packaging/build.sh "$VERSION" dist
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign the checksums
+        run: cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body_path: CHANGELOG.md

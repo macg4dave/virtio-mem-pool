@@ -2936,14 +2936,14 @@ mod tests {
     #[test]
     fn controller_config_comes_only_from_its_exact_command_line() {
         assert_eq!(
-            controller_config_path(b"/usr/local/bin/rampire\0daemon\0--config\0/etc/rampire\0"),
+            controller_config_path(b"/usr/bin/rampire\0daemon\0--config\0/etc/rampire\0"),
             Ok(PathBuf::from("/etc/rampire"))
         );
         for unexpected in [
-            &b"/usr/local/bin/rampire\0"[..],
-            b"/usr/local/bin/rampire\0--config\0/etc/rampire\0",
-            b"/usr/local/bin/rampire\0status\0--config\0a\0",
-            b"/usr/local/bin/rampire\0daemon\0--config\0a\0--config\0b\0",
+            &b"/usr/bin/rampire\0"[..],
+            b"/usr/bin/rampire\0--config\0/etc/rampire\0",
+            b"/usr/bin/rampire\0status\0--config\0a\0",
+            b"/usr/bin/rampire\0daemon\0--config\0a\0--config\0b\0",
         ] {
             assert!(controller_config_path(unexpected).is_err());
         }

@@ -23,7 +23,7 @@ Environment=XDG_CACHE_HOME=/run/rampire/.cache
 # never the draft in /etc/rampire: a mistake there can't reach it, through
 # a restart or a reboot. The copy holds global.toml, vms.d/ and
 # attestations/; durable state goes in the StateDirectory below.
-ExecStart=/usr/local/bin/rampire daemon --config /var/lib/rampire/applied/current
+ExecStart=/usr/bin/rampire daemon --config /var/lib/rampire/applied/current
 # Failure is fail-stop. Deployment monitoring decides when a reviewed restart
 # is appropriate; the unit does not create an automatic restart loop.
 Restart=no

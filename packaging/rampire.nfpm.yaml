@@ -1,0 +1,70 @@
+# The host package, rampire, as RPM and .deb (roadmap O2.2, O2.3). Built by
+# packaging/build.sh, which sets VERSION, ARCH and REPO.
+name: rampire
+version: "${VERSION}"
+arch: "${ARCH}"
+platform: linux
+maintainer: macg4dave
+license: GPL-3.0-or-later
+homepage: https://github.com/macg4dave/rampire
+description: |
+  RAMpire shares a pool of RAM between the VMs on a KVM host. Each guest
+  asks for memory when it needs more and returns it when it has spare; the
+  controller resizes the VM's virtio-mem device within the pool, the VM's
+  limits and the host's own reserve.
+contents:
+  - src: "${REPO}/target/release/rampire"
+    dst: /usr/bin/rampire
+    file_info: { mode: 0755 }
+  - src: "${REPO}/host/systemd/rampire.service"
+    dst: /usr/lib/systemd/system/rampire.service
+    file_info: { mode: 0644 }
+  - src: "${REPO}/packaging/debian-socket-group.conf"
+    dst: /usr/lib/systemd/system/rampire.service.d/socket-group.conf
+    file_info: { mode: 0644 }
+    packager: deb
+  - src: "${REPO}/host/systemd/50-rampire.rules"
+    dst: /usr/share/polkit-1/rules.d/50-rampire.rules
+    file_info: { mode: 0644 }
+  - src: "${REPO}/packaging/rampire.sysusers"
+    dst: /usr/lib/sysusers.d/rampire.conf
+    file_info: { mode: 0644 }
+  # The draft's folders. global.toml is left to `rampire init`, which never
+  # overwrites one, because no example suits every host.
+  - dst: /etc/rampire
+    type: dir
+    file_info: { mode: 0755 }
+  - dst: /etc/rampire/vms.d
+    type: dir
+    file_info: { mode: 0755 }
+  - dst: /etc/rampire/attestations
+    type: dir
+    file_info: { mode: 0755 }
+  - src: "${REPO}/deploy/examples/reviews/linux-standard.toml"
+    dst: /etc/rampire/reviews/linux-standard.toml
+    type: config|noreplace
+    file_info: { mode: 0644 }
+  - src: "${REPO}/deploy/examples/global.toml"
+    dst: /usr/share/doc/rampire/examples/global.toml
+    file_info: { mode: 0644 }
+  - src: "${REPO}/deploy/examples/vms.d/linux-vm.toml"
+    dst: /usr/share/doc/rampire/examples/vms.d/linux-vm.toml
+    file_info: { mode: 0644 }
+  - src: "${REPO}/LICENSE"
+    dst: /usr/share/doc/rampire/LICENSE
+    file_info: { mode: 0644 }
+scripts:
+  postinstall: "${REPO}/packaging/scripts/host-postinstall.sh"
+  preremove: "${REPO}/packaging/scripts/host-preremove.sh"
+  postremove: "${REPO}/packaging/scripts/host-postremove.sh"
+overrides:
+  rpm:
+    depends:
+      - libvirt-client
+      - polkit
+      - systemd
+  deb:
+    depends:
+      - libvirt-clients
+      - polkitd
+      - systemd

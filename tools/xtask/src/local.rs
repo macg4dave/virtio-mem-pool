@@ -58,7 +58,7 @@ fn checks(repo: &Path) -> Result<(), String> {
 fn shell_syntax(repo: &Path) -> Result<(), String> {
     println!("==> shell syntax");
     let mut scripts = Vec::new();
-    for directory in ["deploy", "tools", "guest-linux"] {
+    for directory in ["deploy", "tools", "guest-linux", "packaging"] {
         collect_scripts(&repo.join(directory), &mut scripts)?;
     }
     scripts.sort();

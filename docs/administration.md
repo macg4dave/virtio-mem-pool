@@ -25,7 +25,7 @@ Run one controller per host: separate controllers cannot share a pool.
 
 | Item | Location |
 |---|---|
-| Controller binary | `/usr/local/bin/rampire` |
+| Controller binary | `/usr/bin/rampire` |
 | Unit | `/etc/systemd/system/rampire.service` |
 | libvirt access rule | `/etc/polkit-1/rules.d/50-rampire.rules` |
 | Configuration (the draft) | `/etc/rampire/` (`global.toml`, `vms.d/<vm_name>.toml`, `reviews/`) |
@@ -388,9 +388,7 @@ Commands that change or check the configuration (`check`, `diff`,
 `apply`, `set`, `init`) work on the draft, `/etc/rampire`; the views and
 recovery (`status`, `top`, `watch`, `recover`) on the applied copy the
 controller runs, so a mistake in the draft doesn't hide what is running.
-`--config` or `RAMPIRE_CONFIG` names another directory for both. On a
-development install in `/usr/local/bin`, RHEL's `sudo` doesn't search that
-folder: run `sudo /usr/local/bin/rampire`. `rampire --help` and
+`--config` or `RAMPIRE_CONFIG` names another directory for both. `rampire --help` and
 `rampire COMMAND --help` list every option.
 
 The same command serves a person and a script:

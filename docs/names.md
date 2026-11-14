@@ -66,8 +66,7 @@ under `crates/` follow their crate names.
 | Unit description | `Virtio-mem controller for %i` | `RAMpire memory controller` |
 | Service account and group | `virtio-mem-host` | `rampire` |
 | Polkit rule file | `50-virtio-mem-host.rules` | `50-rampire.rules` |
-| Binary, package install | — | `/usr/bin/rampire` |
-| Binary, development install | `/usr/local/libexec/virtio-mem-host` | `/usr/local/bin/rampire` |
+| Binary | `/usr/local/libexec/virtio-mem-host` | `/usr/bin/rampire`, from a package or a development install |
 | Configuration (the draft) | `/etc/virtio-mem-host/` | `/etc/rampire/` |
 | Global settings | `global-settings.toml` | `global.toml` |
 | VM list and VM settings | `host_list.toml`, `NAME_settings.toml` | `vms.d/NAME.toml` (R4) |

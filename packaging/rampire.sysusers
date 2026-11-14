@@ -1,0 +1,2 @@
+# The account rampire.service runs as (systemd-sysusers).
+u rampire - "RAMpire memory controller"

@@ -335,7 +335,7 @@ fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
         candidate_binary_sha256: candidate_hash,
         installed_binary_sha256: command
             .apply
-            .then(|| hash(Path::new("/usr/local/bin/rampire"), repo, command.timeout))
+            .then(|| hash(Path::new("/usr/bin/rampire"), repo, command.timeout))
             .transpose()?,
         config_sha256: config_hash,
         attestations: attestation_evidence,
@@ -457,7 +457,7 @@ fn install(
     let config_files = configuration_files(config)?;
     let stale = stale_vm_files(Path::new(CONFIG_DIRECTORY), &config_files)?;
     let targets = [
-        PathBuf::from("/usr/local/bin/rampire"),
+        PathBuf::from("/usr/bin/rampire"),
         PathBuf::from("/etc/systemd/system/rampire.service"),
         PathBuf::from("/etc/polkit-1/rules.d/50-rampire.rules"),
     ]
@@ -517,7 +517,7 @@ fn install(
     )?;
     install_file(
         candidate,
-        "/usr/local/bin/rampire",
+        "/usr/bin/rampire",
         "root",
         "root",
         "0755",
