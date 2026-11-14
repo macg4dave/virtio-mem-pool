@@ -225,7 +225,13 @@ fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
     let candidate = repo.join("target/release/rampire");
     let unit_source = repo.join("host/systemd/rampire.service");
     let policy_source = repo.join("host/systemd/50-rampire.rules");
-    for path in [&config_source, &candidate, &unit_source, &policy_source] {
+    if !config_source.is_dir() {
+        return Err(format!(
+            "the configuration directory is missing: {}",
+            config_source.display()
+        ));
+    }
+    for path in [&candidate, &unit_source, &policy_source] {
         if !path.is_file() {
             return Err(format!(
                 "required host deployment input is missing: {}",
@@ -233,7 +239,7 @@ fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
             ));
         }
     }
-    // Snapshot all three formats together; validation, hashing and installation
+    // Snapshot the configuration once; validation, hashing and installation
     // consume the same bytes even if the administrator edits the source later.
     let config_source = snapshot_configuration(
         &config_source,
