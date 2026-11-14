@@ -4,6 +4,7 @@
 //! commands run from the working directory the caller passes.
 
 pub mod applied;
+pub mod attest;
 pub mod check;
 pub mod dashboard;
 pub mod doctor;

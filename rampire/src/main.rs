@@ -227,6 +227,11 @@ enum Command {
         /// Why it is safe to resume, recorded in the VM's state.
         reason: String,
     },
+    /// Add, attest and remove the VMs RAMpire manages.
+    Vm {
+        #[command(subcommand)]
+        command: VmCommand,
+    },
     /// Recovery's own step, run as the service account.
     #[command(hide = true)]
     ClearLatch {
@@ -234,6 +239,30 @@ enum Command {
         reason: String,
         #[arg(long)]
         apply: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum VmCommand {
+    /// Attest a running VM again from its review profile, then apply.
+    ///
+    /// Needed after any change to the VM's definition: a VM whose live
+    /// evidence has drifted from its attestation is never re-attested
+    /// without a person (decision D11).
+    Attest {
+        /// The VM; or --drifted for every VM whose evidence has drifted.
+        #[arg(required_unless_present = "drifted", conflicts_with = "drifted")]
+        vm: Option<String>,
+        /// Every running VM whose live evidence no longer matches.
+        #[arg(long)]
+        drifted: bool,
+        /// Shut the VM down and start it first, so its saved definition
+        /// takes effect.
+        #[arg(long, conflicts_with = "drifted")]
+        restart: bool,
+        /// Write the attestation to the draft only; apply later.
+        #[arg(long)]
+        no_apply: bool,
     },
 }
 
@@ -340,6 +369,14 @@ fn run(cli: &Cli) -> Result<ExitCode, String> {
         }
         Command::Logs { follow, since } => logs(*follow, since.as_deref()),
         Command::Recover { vm, reason } => recover(cli, vm, reason),
+        Command::Vm { command } => match command {
+            VmCommand::Attest {
+                vm,
+                drifted,
+                restart,
+                no_apply,
+            } => vm_attest(cli, vm.as_deref(), *drifted, *restart, *no_apply),
+        },
         Command::ClearLatch { vm, reason, apply } => {
             let target = target(cli, Some(vm))?;
             rampire_host::cli::clear_latch(reason, &target, *apply, &mut std::io::stdout())?;
@@ -577,8 +614,68 @@ fn print_check(report: &rampire_ops::check::Report) {
     for vm in &report.vms {
         if let Some(problem) = &vm.problem {
             println!("problem: {}: {problem}", vm.vm_name);
+            if problem.contains("drifted") {
+                println!(
+                    "  fix: if the change was intended, rampire vm attest {}",
+                    vm.vm_name
+                );
+            }
         }
     }
+}
+
+fn libvirt(cli: &Cli) -> Result<rampire_ops::attest::Libvirt, String> {
+    Ok(rampire_ops::attest::Libvirt {
+        connection: connection(cli)?,
+        timeout: std::time::Duration::from_secs(60),
+    })
+}
+
+fn vm_attest(
+    cli: &Cli,
+    vm: Option<&str>,
+    drifted: bool,
+    restart: bool,
+    no_apply: bool,
+) -> Result<ExitCode, String> {
+    use rampire_ops::attest;
+    let directory = draft(cli);
+    let libvirt = libvirt(cli)?;
+    let vms = if drifted {
+        let found = attest::drifted(&directory, &libvirt)?;
+        if found.is_empty() {
+            println!("no running VM has drifted from its attestation");
+            return Ok(ExitCode::SUCCESS);
+        }
+        for (name, change) in &found {
+            println!("{name}: {change}");
+        }
+        if !confirm(cli, "Attest these VMs again as they are now?")? {
+            println!("nothing changed");
+            return Ok(ExitCode::SUCCESS);
+        }
+        found.into_iter().map(|(name, _)| name).collect()
+    } else {
+        let vm = vm.ok_or("name a VM, or pass --drifted")?.to_owned();
+        if restart {
+            if !confirm(cli, &format!("Shut {vm} down and start it again?"))? {
+                println!("nothing changed");
+                return Ok(ExitCode::SUCCESS);
+            }
+            attest::cold_restart(&vm, &libvirt, std::time::Duration::from_secs(300))?;
+            println!("{vm} restarted");
+        }
+        vec![vm]
+    };
+    for vm in &vms {
+        let path = attest::attest(&directory, vm, &libvirt)?;
+        println!("attested {vm}: {}", path.display());
+    }
+    if no_apply {
+        println!("not applied: run rampire apply when ready");
+        return Ok(ExitCode::SUCCESS);
+    }
+    apply(cli, false)
 }
 
 /// Show the difference between two configuration directories, `None` being
@@ -648,6 +745,11 @@ fn apply(cli: &Cli, detailed: bool) -> Result<ExitCode, String> {
 
 /// Returns whether the applied configuration changed.
 fn stage_and_apply(cli: &Cli, root: &Path, staged: &Path) -> Result<bool, String> {
+    // A VM with no attestation yet is attested here when its file names a
+    // review profile and it runs (decision D11); a drifted one is not.
+    for vm in rampire_ops::attest::attest_missing(&draft(cli), &libvirt(cli)?)? {
+        println!("attested {vm}, which had no attestation");
+    }
     rampire_ops::applied::snapshot(&draft(cli), staged)?;
     // Check the copy, so what is checked is exactly what is applied.
     let report = rampire_ops::check::run(staged)?;
@@ -973,6 +1075,10 @@ mod tests {
             Cli::try_parse_from(["rampire", "set", "web", "priority=150", "max_ram=12GB"]).unwrap();
         assert!(matches!(cli.command, Command::Set { ref changes, .. } if changes.len() == 2));
         assert!(Cli::try_parse_from(["rampire", "set", "web"]).is_err());
+        assert!(Cli::try_parse_from(["rampire", "vm", "attest", "web", "--restart"]).is_ok());
+        assert!(Cli::try_parse_from(["rampire", "vm", "attest", "--drifted"]).is_ok());
+        assert!(Cli::try_parse_from(["rampire", "vm", "attest"]).is_err());
+        assert!(Cli::try_parse_from(["rampire", "vm", "attest", "web", "--drifted"]).is_err());
     }
 
     #[test]
