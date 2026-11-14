@@ -7,7 +7,9 @@ for a hobbyist with one host, and simple to script and automate for a
 large fleet. Work the previous roadmap had open is parked in
 [After this roadmap](#after-this-roadmap).
 
-Nothing here starts until this roadmap has been reviewed.
+**Closed on 2026-11-14.** Every task below is built. What is left to show
+on real hosts and VMs, and the owner's setup for the first release, moved
+to [the next roadmap](roadmap_next.md).
 
 ## Goal
 
@@ -226,8 +228,8 @@ happens here, once, before the command is built on top of it.
   - ~~the compatibility tables in [administration](administration.md)~~
     (done in R7), and an old serde alias in qualification records.
 - [x] **R7** The README, documentation and repository name. Remove the
-  links to the deleted `prior-art.md`. Renaming the GitHub repository is
-  done by the owner, and is still to do. O5 rewrites the guides around
+  links to the deleted `prior-art.md`. The owner renamed the GitHub
+  repository to `macg4dave/RAMpire`. O5 rewrites the guides around
   `rampire`; R7 only brings them up to date.
 
 Exit: the workspace builds and passes the gate under the new names with
@@ -331,8 +333,8 @@ version.
   `safe_vm_4`, `minecraft101`) have the new port in their saved
   definitions and converted settings in `/etc/rampire/parked/`, to be
   attested when next started (judgment call: they were off, on a host
-  short of memory). The old install is backed up in
-  `~/scratch/old-install-20261114` on pc101.
+  short of memory). Bringing them back is next-roadmap S4. The old
+  install is backed up in `~/scratch/old-install-20261114` on pc101.
 
 Exit: on the development host, changing a priority, viewing the pool and
 recovering a latch each take one command, with no build and no instance
@@ -365,8 +367,15 @@ unit; it wasn't tried on the shared host.
   - it keeps `/etc/rampire` and `/var/lib/rampire`;
   - purging removes both.
 - [x] **O2.6** A guest RPM beside the guest `.deb`.
-- [ ] **O2.7** Signed package repositories (COPR, and an apt
+- [x] **O2.7** Signed package repositories (COPR, and an apt
   repository), so installs and upgrades go through `dnf` and `apt`.
+  Built in CI ([releasing](releasing.md)). A tag publishes a signed apt
+  repository to GitHub Pages and sends a source RPM
+  (`packaging/rampire.spec.in`) to COPR. The release's RPMs are signed
+  with `rpmsign`. A run by hand checks all of it with a throwaway key,
+  including an `apt-get install` from the repository, and checks that
+  the RPMs built from the spec match the nfpm RPMs. The owner's key,
+  Pages and COPR project are next-roadmap S5.
 - [x] **O2.8** A static (musl) tarball for hosts without a package.
 - [x] **O2.9** `CHANGELOG.md`, and the version-skew test from
   [Versions and releases](#versions-and-releases).
@@ -375,14 +384,13 @@ Exit: release 0.1.0. A clean host of each supported family goes from
 nothing to a running controller, managing no VMs yet, with the package
 manager and `rampire init`. A guest installs with one package command.
 
-Status, 2026-11-14: everything but O2.7 is built. Packages are made with
+Status, 2026-11-14: everything is built. Packages are made with
 nfpm from `packaging/` by `packaging/build.sh`; CI builds and lists them
 when run and, on a `v*` tag, signs `SHA256SUMS` with cosign (keyless)
 and publishes a GitHub release. The binary is `/usr/bin/rampire` for
-development installs too. Left for the owner: O2.7 (a COPR project, an
-apt repository and their signing keys), signing the packages themselves
-with that key, tagging `v0.1.0`, and installing on a clean host of each
-family.
+development installs too. The exit moved to the next roadmap: a clean
+host of each family with `cargo xtask testvm` (S1), and the owner's
+release setup and `v0.1.0` (S5).
 
 ### O3 — Adding and removing VMs
 
@@ -428,7 +436,8 @@ missing NUMA cell or `maxMemory` is reported with the XML to add, not
 edited. The kernel release (`--kernel`) is asked when a new review is
 written. Attestations stay in the draft's `attestations/`, which every
 applied copy carries, rather than a separate `/var/lib/rampire`
-folder. Not yet tried end to end on a VM with no device.
+folder. Trying it end to end on a VM with no device is next-roadmap S2.
+Since closing, `vm add` takes a VM's file back from `parked/`.
 
 ### O4 — Fleets
 
@@ -455,8 +464,8 @@ Status, 2026-11-14: O4.1 to O4.5 are built. A reload was tried live on
 pc101 (`rampire set safe_vm priority=110` reloaded the controller under the
 same PID). The role passes Ansible's syntax check and reports "changed"
 from `apply --detailed-exitcode`'s exit code 2, but it hasn't been run
-against a host: there is no package repository to install from yet
-(O2.7).
+against a host. That is next-roadmap S3 (the `ansible-almalinux10`
+scenario).
 
 ### O5 — Documentation
 

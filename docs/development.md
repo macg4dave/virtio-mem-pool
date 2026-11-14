@@ -1,7 +1,8 @@
 # Development
 
 How to build, check and test this repository, and which checks need which
-platform. [The roadmap](roadmap.md) holds intended design and open work;
+platform. [The roadmap](roadmap.md) holds intended design; open work is in
+[the next roadmap](roadmap_next.md);
 [the Rust standards](../.github/prompts/rust.md) hold coding rules;
 [administration](administration.md) covers installing and running the
 product; the roadmap also holds
