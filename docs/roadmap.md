@@ -322,14 +322,27 @@ version.
   ([development](development.md#installing-a-development-build)). Adding a
   VM and re-attesting after a cold restart are by hand until `vm add` and
   `vm attest --restart` (O3).
-- [ ] **O1.11** Remove the old installs from the development host and
+- [x] **O1.11** Remove the old installs from the development host and
   the test VMs, and install them again with `rampire`. The VMs get the
   new control channel port, are attested again and are restarted cold.
+  Done on pc101 on 2026-11-14: `rampire.service` manages `safe_vm` (new
+  guest service, new port, cold restart, attested); `doctor` passes all
+  seven checks. The VMs that were shut off (`debian13`, `safe_vm_1` to
+  `safe_vm_4`, `minecraft101`) have the new port in their saved
+  definitions and converted settings in `/etc/rampire/parked/`, to be
+  attested when next started (judgment call: they were off, on a host
+  short of memory). The old install is backed up in
+  `~/scratch/old-install-20261114` on pc101.
 
 Exit: on the development host, changing a priority, viewing the pool and
 recovering a latch each take one command, with no build and no instance
 name. A typo in a settings file leaves the controller running on its
 last applied configuration, through a restart and through a reboot.
+
+Met on 2026-11-14 (`rampire set safe_vm priority=120`, `rampire top`,
+`rampire recover`; a typo was refused by `apply`, and the controller ran
+its last applied copy through a restart). A reboot follows from the same
+unit; it wasn't tried on the shared host.
 
 ### O2 — Packages and releases
 
