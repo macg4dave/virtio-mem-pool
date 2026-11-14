@@ -459,11 +459,15 @@ against a host: there is no package repository to install from yet
 
 ### O5 — Documentation
 
-- [ ] **O5.1** Rewrite the guides around `rampire`:
+- [x] **O5.1** Rewrite the guides around `rampire`:
   - Quick start: about ten minutes from install to a managed VM;
   - Everyday use: today's [usage](usage.md);
   - Reference: every setting and command;
   - Running a fleet.
+
+  Done: [quick start](quick-start.md), [usage](usage.md),
+  [reference](reference.md), [running a fleet](fleet.md);
+  [administration](administration.md) stays as the deep reference.
 
 ### Later, optional
 

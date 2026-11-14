@@ -71,9 +71,10 @@ QEMU, `virsh` on the path, polkit, and Rust to build the controller.
 
 3. Prepare each VM and attest it ([Adding a VM](#adding-a-vm)).
 
-4. Install the controller. Until there are packages (roadmap O2), build
-   and install from a checkout
-   ([development](development.md#installing-a-development-build)), then:
+4. Install the controller from its package (`dnf install` or
+   `apt install`, see the [quick start](quick-start.md)), or, on a
+   development host, from a checkout
+   ([development](development.md#installing-a-development-build)). Then:
 
    ```bash
    sudo rampire apply                    # check the draft and switch to it
@@ -196,6 +197,11 @@ VM's settings needs only a controller install, never a guest change.
 
 ## Adding a VM
 
+`sudo rampire vm add VM --fix-xml` does every step below in one guided
+command: it checks and fixes the definition, writes the review and the
+settings, restarts the VM if its definition changed, and applies. The steps
+are what it does, for doing them by hand or in a fleet.
+
 1. **Device.** Give the domain a virtio-mem device with a stable alias and
    the options the controller requires. The device's `requested` size in
    the saved definition should be zero: the guest asks for what it needs.
@@ -250,12 +256,11 @@ VM's settings needs only a controller install, never a guest change.
    `viomem` driver version on Windows and the kernel release on Linux.
    `workload_reviewed` can only be confirmed by a person.
 
-4. **Attest.** With the VM running in its final configuration:
-
-   ```bash
-   cargo xtask attestation VM ALIAS CONFIG_DIR/reviews/NAME.toml \
-     --output CONFIG_DIR/attestations/VM.attestation.json --command-timeout-seconds 60
-   ```
+4. **Attest.** With the VM running in its final configuration,
+   `sudo rampire apply` attests a VM whose file names a review profile and
+   has no attestation yet. After a change to its definition, attest it
+   again with `sudo rampire vm attest VM` (`--restart` cold-restarts it
+   first).
 
    The attestation binds the review to hashes of the live domain XML, QEMU's
    arguments and versions, and the device options. Every resize checks them
@@ -285,8 +290,9 @@ has no configuration file.
 | Durable request state | `/var/lib/rampire-guest/control.json.request-state` |
 | Control files, without the channel | `/var/lib/rampire-guest/control.json` and `control.json.host-status` |
 
-Install with the Debian package (`cargo xtask linux package`), or on a
-development VM with `cargo xtask linux deploy` ([tools](tools.md)).
+Install with the `rampire-guest` package (`.deb` or RPM), or on a
+development VM with `cargo xtask linux deploy` ([tools](tools.md)). The
+package puts the binary in `/usr/libexec/rampire-guest`.
 
 At start the service checks and logs its readiness: virtio-mem driver bound,
 pressure stall information and its trigger, how hot-plugged memory is

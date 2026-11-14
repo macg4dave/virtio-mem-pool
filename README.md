@@ -53,7 +53,10 @@ See [development](docs/development.md) for setup and platform details.
 
 | Document | Covers |
 |---|---|
-| [docs/usage.md](docs/usage.md) | Start here: plain-language guide to the settings, changing them, and checking it works |
+| [docs/quick-start.md](docs/quick-start.md) | Start here: from install to a managed VM in about ten minutes |
+| [docs/usage.md](docs/usage.md) | Everyday use, in plain language: the settings, changing them, and checking it works |
+| [docs/reference.md](docs/reference.md) | Every command and setting |
+| [docs/fleet.md](docs/fleet.md) | Running many hosts: configuration management, metrics, scripting |
 | [docs/administration.md](docs/administration.md) | Installing the controller, adding VMs, guest services, recovery, upgrades |
 | [docs/development.md](docs/development.md) | Building, the gate, which checks need which platform |
 | [docs/tools.md](docs/tools.md) | `watch`, `metrics` and `qualification` |
