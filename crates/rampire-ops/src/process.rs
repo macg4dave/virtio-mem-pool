@@ -73,7 +73,7 @@ pub fn bounded_text(
 pub fn elevated_text(args: &[OsString], cwd: &Path, timeout: Duration) -> Result<String, String> {
     let mut command = Command::new("sudo");
     command.args(args).current_dir(cwd);
-    let output = rampire::virsh::bounded_interactive_output(&mut command, timeout)
+    let output = rampire_host::virsh::bounded_interactive_output(&mut command, timeout)
         .map_err(|error| format!("elevated command: {error}"))?;
     if !output.status.success() {
         return Err(format!("elevated command failed with {}", output.status));
@@ -121,7 +121,7 @@ where
 
 /// Use the same output and descendant lifetime bounds as host commands.
 fn bounded(mut command: Command, name: &str, timeout: Duration) -> Result<Output, String> {
-    rampire::virsh::bounded_output(&mut command, timeout)
+    rampire_host::virsh::bounded_output(&mut command, timeout)
         .map_err(|error| format!("{name}: {error}"))
 }
 
@@ -168,8 +168,23 @@ pub fn read_file(path: &Path) -> Result<String, String> {
 
 /// Wall-clock Unix time in milliseconds, for evidence and log names.
 pub fn unix_millis() -> Result<u64, String> {
-    use rampire::guest_channel::{SystemUnixClock, UnixClock};
+    use rampire_host::guest_channel::{SystemUnixClock, UnixClock};
     SystemUnixClock.now_unix_millis()
+}
+
+/// The caller's effective user ID; `u32::MAX` where there is none.
+#[cfg(unix)]
+pub fn effective_uid() -> u32 {
+    unsafe extern "C" {
+        fn geteuid() -> u32;
+    }
+    // SAFETY: `geteuid` has no arguments and returns the caller's effective UID.
+    unsafe { geteuid() }
+}
+
+#[cfg(not(unix))]
+pub fn effective_uid() -> u32 {
+    u32::MAX
 }
 
 #[cfg(test)]

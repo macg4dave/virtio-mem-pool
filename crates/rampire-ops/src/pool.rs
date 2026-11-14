@@ -16,10 +16,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use rampire::config::HostSettings;
-use rampire::guest_channel::publication_copy_path;
-use rampire::virsh::Virsh;
 use rampire_core::{RawTelemetryEnvelope, VirtioMemState};
+use rampire_host::config::HostSettings;
+use rampire_host::guest_channel::publication_copy_path;
+use rampire_host::virsh::Virsh;
 
 use crate::dashboard::{
     clock, gib, host_name, load_colour, mib, terminal_columns, Frame, BACKGROUND, CYAN, DIM, GIB,
@@ -197,13 +197,13 @@ impl Session {
     }
 }
 
-pub fn run(command: &Command, repo: &Path) -> Result<(), String> {
+pub fn run(command: &Command, cwd: &Path) -> Result<(), String> {
     let resolved;
     let command = if command.unit_named {
         command
     } else {
         resolved = Command {
-            unit: crate::host_deploy::installed_controller_unit(&command.unit, repo),
+            unit: crate::units::installed_controller_unit(&command.unit, cwd),
             ..command.clone()
         };
         &resolved
@@ -252,7 +252,7 @@ pub fn run(command: &Command, repo: &Path) -> Result<(), String> {
             if history.len() > HISTORY_SAMPLES {
                 history.pop_front();
             }
-            let events = read_events(command, repo);
+            let events = read_events(command, cwd);
             let width = terminal_columns()
                 .map_or(100, |columns| columns.saturating_sub(1))
                 .clamp(80, 140);
@@ -316,7 +316,7 @@ struct PoolEvent {
 /// outside `systemd-journal` gets no lines at all, not an error. Only event
 /// lines are asked for, so a burst of other controller output (libvirt's
 /// own error lines) cannot push every event out of the window.
-fn read_events(command: &Command, repo: &Path) -> Result<Vec<PoolEvent>, String> {
+fn read_events(command: &Command, cwd: &Path) -> Result<Vec<PoolEvent>, String> {
     let arguments: Vec<OsString> = [
         "-u",
         &command.unit,
@@ -332,17 +332,13 @@ fn read_events(command: &Command, repo: &Path) -> Result<Vec<PoolEvent>, String>
     .map(process::os)
     .collect();
     const UNREADABLE: &str = "journal unreadable: run with sudo or join the systemd-journal group";
-    match process::bounded_text("journalctl", &arguments, repo, COMMAND_TIMEOUT) {
+    match process::bounded_text("journalctl", &arguments, cwd, COMMAND_TIMEOUT) {
         Ok(journal) if journal.lines().any(|line| line.contains(" event=")) => {
             Ok(parse_events(&journal, command.events))
         }
-        Ok(_) if crate::controller_status::effective_uid() == 0 => Ok(Vec::new()),
+        Ok(_) if process::effective_uid() == 0 => Ok(Vec::new()),
         // journalctl exits 1 when --grep matches nothing.
-        Err(error)
-            if crate::controller_status::effective_uid() == 0 && error.contains("status 1") =>
-        {
-            Ok(Vec::new())
-        }
+        Err(error) if process::effective_uid() == 0 && error.contains("status 1") => Ok(Vec::new()),
         Ok(_) => Err(UNREADABLE.to_owned()),
         Err(error) if error.contains("permission") => Err(UNREADABLE.to_owned()),
         Err(error) => Err(error),
@@ -842,9 +838,8 @@ mod tests {
     use crate::dashboard::MIB;
 
     fn fixture() -> String {
-        crate::repo_root()
-            .expect("repository root")
-            .join("fixtures/config")
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/config")
             .to_string_lossy()
             .into_owned()
     }

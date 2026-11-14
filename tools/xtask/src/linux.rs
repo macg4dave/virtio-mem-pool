@@ -14,7 +14,7 @@ use std::process::{Command, Stdio};
 
 use serde::Serialize;
 
-use crate::process;
+use rampire_ops::process;
 
 const GUEST_PACKAGE: &str = "rampire-guest-linux";
 const GUEST_BINARY: &str = "rampire-guest";

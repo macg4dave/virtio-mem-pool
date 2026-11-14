@@ -3,13 +3,13 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use rampire::attestation::{AttestedCompatibilitySource, CompatibilityAttestation};
-use rampire::compatibility_source::CompatibilitySource;
-use rampire::config::{HostConfig, HostSettings};
-use rampire::virsh::Virsh;
+use rampire_host::attestation::{AttestedCompatibilitySource, CompatibilityAttestation};
+use rampire_host::compatibility_source::CompatibilitySource;
+use rampire_host::config::{HostConfig, HostSettings};
+use rampire_host::virsh::Virsh;
 use serde::Serialize;
 
-use crate::process;
+use rampire_ops::process;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Command {
@@ -56,50 +56,6 @@ struct AttestationEvidence {
 /// Where host-deploy installs the configuration, with the attestations in
 /// their own folder inside it; the unit's ExecStart names this directory.
 const CONFIG_DIRECTORY: &str = "/etc/rampire";
-
-/// The deployment layout: unit `rampire@INSTANCE.service` runs the
-/// configuration in `/etc/rampire`.
-/// Returns INSTANCE for a controller unit name.
-pub fn controller_instance(unit: &str) -> Result<&str, String> {
-    unit.strip_prefix("rampire@")
-        .and_then(|rest| rest.strip_suffix(".service"))
-        .filter(|instance| validate_identity(instance).is_ok())
-        .ok_or_else(|| format!("{unit} is not a rampire@INSTANCE.service unit"))
-}
-
-/// The controller unit to observe when none was named: the one
-/// `rampire@INSTANCE` unit systemd knows on this host, since one
-/// controller manages every VM in its configuration. With none or several,
-/// `fallback` (the unit named after the VM) is kept.
-pub fn installed_controller_unit(fallback: &str, repo: &Path) -> String {
-    let listing = process::bounded_text(
-        "systemctl",
-        &[
-            process::os("list-units"),
-            process::os("--all"),
-            process::os("--plain"),
-            process::os("--no-legend"),
-            process::os("rampire@*.service"),
-        ],
-        repo,
-        Duration::from_secs(10),
-    );
-    // Best effort: without systemctl the fallback is what was used before.
-    listing.map_or_else(
-        |_| fallback.to_owned(),
-        |text| only_controller_unit(&text).unwrap_or_else(|| fallback.to_owned()),
-    )
-}
-
-/// The single controller unit in a `systemctl list-units --plain` listing.
-fn only_controller_unit(listing: &str) -> Option<String> {
-    let mut units = listing
-        .lines()
-        .filter_map(|line| line.split_whitespace().next())
-        .filter(|unit| controller_instance(unit).is_ok());
-    let unit = units.next()?;
-    units.next().is_none().then(|| unit.to_owned())
-}
 
 pub fn parse(args: &[String]) -> Result<Command, String> {
     let instance = args
@@ -305,7 +261,7 @@ fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
     )?;
     // Snapshot the attestations with the settings, so an install from the
     // installed directory itself never copies a file onto itself.
-    let attestation_snapshot = config_source.join(rampire::config::ATTESTATION_DIRECTORY);
+    let attestation_snapshot = config_source.join(rampire_host::config::ATTESTATION_DIRECTORY);
     for attestation in &mut attestations {
         let bytes = std::fs::read(&attestation.source).map_err(|error| {
             format!(
@@ -443,8 +399,10 @@ fn pair_attestations(
                     ))
                 }
             };
-            let target =
-                rampire::config::attestation_path(Path::new(CONFIG_DIRECTORY), &config.vm_name);
+            let target = rampire_host::config::attestation_path(
+                Path::new(CONFIG_DIRECTORY),
+                &config.vm_name,
+            );
             Ok(DeployedAttestation {
                 vm_name: config.vm_name.clone(),
                 source,
@@ -551,7 +509,7 @@ fn install(
     )?;
     install_directory(
         &Path::new(CONFIG_DIRECTORY)
-            .join(rampire::config::ATTESTATION_DIRECTORY)
+            .join(rampire_host::config::ATTESTATION_DIRECTORY)
             .display()
             .to_string(),
         "root",
@@ -838,18 +796,13 @@ fn resolve(repo: &Path, path: &Path) -> PathBuf {
     }
 }
 fn validate_identity(value: &str) -> Result<(), String> {
-    if !value.is_empty()
-        && !value.starts_with('-')
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
-    {
+    if rampire_ops::units::valid_instance(value) {
         Ok(())
     } else {
         Err("host-deploy INSTANCE contains unsafe characters".to_owned())
     }
 }
-use crate::process::unix_millis as now_millis;
+use rampire_ops::process::unix_millis as now_millis;
 
 unsafe extern "C" {
     fn geteuid() -> u32;
@@ -1005,35 +958,5 @@ mod tests {
         std::fs::remove_dir_all(&root).expect("remove");
         assert_eq!(found, Ok(vec![root.join("vms.d/old.toml")]));
         assert_eq!(absent, Ok(Vec::new()));
-    }
-
-    #[test]
-    fn controller_units_name_a_deployment_instance() {
-        assert_eq!(controller_instance("rampire@pool.service"), Ok("pool"));
-        for unit in [
-            "rampire@.service",
-            "rampire@a/b.service",
-            "other@pool.service",
-            "rampire@pool",
-        ] {
-            assert!(controller_instance(unit).is_err(), "{unit}");
-        }
-    }
-
-    #[test]
-    fn the_only_installed_controller_is_the_default_one() {
-        let one = "rampire@main.service loaded active running Virtio-mem controller for main\n";
-        assert_eq!(
-            only_controller_unit(one).as_deref(),
-            Some("rampire@main.service")
-        );
-        // Several controllers, or none, leave the choice to the caller.
-        let two = format!("{one}rampire@lab.service loaded inactive dead x\n");
-        assert_eq!(only_controller_unit(&two), None);
-        assert_eq!(only_controller_unit(""), None);
-        assert_eq!(
-            only_controller_unit("other@main.service loaded active running x\n"),
-            None
-        );
     }
 }

@@ -31,15 +31,19 @@ Reviewed by the owner on 2026-11-14 (decisions D20 to D22 in the
 ## Crates
 
 The workspace directories `host/`, `guest-linux/`, `guest-windows/` and
-`tools/xtask/` keep their names; they don't carry ours. The directories
+`tools/xtask/` keep their names; they don't carry ours. The host package
+is split in two because the `rampire` binary depends on `rampire-ops`,
+which depends on the controller library: one package holding both would
+be a dependency cycle. The directories
 under `crates/` follow their crate names.
 
 | Directory | Now | New | Contents |
 |---|---|---|---|
 | `crates/virtio-mem-core` → `crates/rampire-core` | `virtio-mem-core` | `rampire-core` | Protocol, settings, pool, units, shared by every side |
 | `crates/virtio-mem-guest` → `crates/rampire-guest` | `virtio-mem-guest` | `rampire-guest` | Shared guest code (library) |
-| `crates/rampire-ops` (new, O1.1) | — | `rampire-ops` | Operator views: `status`, `top` (today's `pool` and `watch`), controller status. No dependency on a checkout. Used by `rampire` and by `xtask` |
-| `host/` | `virtio-mem-host` | `rampire` | The host binary: `rampire daemon` and every operator command (D7) |
+| `crates/rampire-ops` (new, O1.1) | — | `rampire-ops` | Operator views: the pool (`top`, today's `pool`) and one VM live (`watch`), with unit discovery and bounded commands. No dependency on a checkout. Used by `rampire` and by `xtask` |
+| `host/` | `virtio-mem-host` (library part) | `rampire-host` | The controller library: settings resolution, runtime, libvirt, attestation |
+| `rampire/` (new, O1.1) | `virtio-mem-host` (binary part) | `rampire` | The one binary: `rampire daemon` and every operator command (D7) |
 | `guest-linux/` | `virtio-mem-guest-linux` | `rampire-guest-linux` | Linux guest service |
 | `guest-windows/` | `virtio-mem-guest-windows` | `rampire-guest-windows` | Windows guest service (parked) |
 | `tools/xtask/` | `virtio-mem-xtask` | `xtask` | Development only |

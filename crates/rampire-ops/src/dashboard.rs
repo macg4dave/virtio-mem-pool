@@ -4,41 +4,41 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub(crate) const MIB: u64 = 1 << 20;
-pub(crate) const GIB: u64 = 1 << 30;
+pub const MIB: u64 = 1 << 20;
+pub const GIB: u64 = 1 << 30;
 
 // 256-colour palette on a navy background.
-pub(crate) const BACKGROUND: u8 = 17;
-pub(crate) const BAR_BACKGROUND: u8 = 25;
-pub(crate) const FRAME: u8 = 45;
-pub(crate) const TITLE: u8 = 231;
-pub(crate) const LABEL: u8 = 250;
-pub(crate) const VALUE: u8 = 231;
-pub(crate) const DIM: u8 = 67;
-pub(crate) const GREEN: u8 = 46;
-pub(crate) const YELLOW: u8 = 226;
-pub(crate) const RED: u8 = 196;
-pub(crate) const CYAN: u8 = 51;
-pub(crate) const MAGENTA: u8 = 213;
-pub(crate) const TRACK: u8 = 24;
+pub const BACKGROUND: u8 = 17;
+pub const BAR_BACKGROUND: u8 = 25;
+pub const FRAME: u8 = 45;
+pub const TITLE: u8 = 231;
+pub const LABEL: u8 = 250;
+pub const VALUE: u8 = 231;
+pub const DIM: u8 = 67;
+pub const GREEN: u8 = 46;
+pub const YELLOW: u8 = 226;
+pub const RED: u8 = 196;
+pub const CYAN: u8 = 51;
+pub const MAGENTA: u8 = 213;
+pub const TRACK: u8 = 24;
 
-pub(crate) struct Glyphs {
-    pub(crate) top_left: &'static str,
-    pub(crate) top_right: &'static str,
-    pub(crate) bottom_left: &'static str,
-    pub(crate) bottom_right: &'static str,
-    pub(crate) horizontal: &'static str,
-    pub(crate) vertical: &'static str,
-    pub(crate) rule: &'static str,
-    pub(crate) full: &'static str,
-    pub(crate) empty: &'static str,
-    pub(crate) mark: &'static str,
-    pub(crate) axis: &'static str,
-    pub(crate) corner: &'static str,
-    pub(crate) dot: &'static str,
+pub struct Glyphs {
+    pub top_left: &'static str,
+    pub top_right: &'static str,
+    pub bottom_left: &'static str,
+    pub bottom_right: &'static str,
+    pub horizontal: &'static str,
+    pub vertical: &'static str,
+    pub rule: &'static str,
+    pub full: &'static str,
+    pub empty: &'static str,
+    pub mark: &'static str,
+    pub axis: &'static str,
+    pub corner: &'static str,
+    pub dot: &'static str,
 }
 
-pub(crate) const UNICODE: Glyphs = Glyphs {
+pub const UNICODE: Glyphs = Glyphs {
     top_left: "╔",
     top_right: "╗",
     bottom_left: "╚",
@@ -54,7 +54,7 @@ pub(crate) const UNICODE: Glyphs = Glyphs {
     dot: "●",
 };
 
-pub(crate) const ASCII: Glyphs = Glyphs {
+pub const ASCII: Glyphs = Glyphs {
     top_left: "+",
     top_right: "+",
     bottom_left: "+",
@@ -71,15 +71,15 @@ pub(crate) const ASCII: Glyphs = Glyphs {
 };
 
 /// Lines of coloured segments, rendered as ANSI or plain ASCII text.
-pub(crate) struct Frame {
-    pub(crate) width: usize,
-    pub(crate) ansi: bool,
-    pub(crate) glyphs: &'static Glyphs,
-    pub(crate) lines: Vec<Vec<(String, u8, u8)>>,
+pub struct Frame {
+    pub width: usize,
+    pub ansi: bool,
+    pub glyphs: &'static Glyphs,
+    pub lines: Vec<Vec<(String, u8, u8)>>,
 }
 
 impl Frame {
-    pub(crate) fn new(width: usize, ansi: bool) -> Self {
+    pub fn new(width: usize, ansi: bool) -> Self {
         Self {
             width,
             ansi,
@@ -88,15 +88,15 @@ impl Frame {
         }
     }
 
-    pub(crate) fn line(&mut self) {
+    pub fn line(&mut self) {
         self.lines.push(Vec::new());
     }
 
-    pub(crate) fn add(&mut self, text: impl Into<String>, colour: u8) {
+    pub fn add(&mut self, text: impl Into<String>, colour: u8) {
         self.add_on(text, colour, BACKGROUND);
     }
 
-    pub(crate) fn add_on(&mut self, text: impl Into<String>, colour: u8, background: u8) {
+    pub fn add_on(&mut self, text: impl Into<String>, colour: u8, background: u8) {
         let text = text.into();
         if text.is_empty() {
             return;
@@ -108,18 +108,18 @@ impl Frame {
         }
     }
 
-    pub(crate) fn length(&self) -> usize {
+    pub fn length(&self) -> usize {
         self.lines.last().map_or(0, |line| {
             line.iter().map(|(text, _, _)| text.chars().count()).sum()
         })
     }
 
-    pub(crate) fn pad_to(&mut self, column: usize, background: u8) {
+    pub fn pad_to(&mut self, column: usize, background: u8) {
         let missing = column.saturating_sub(self.length());
         self.add_on(" ".repeat(missing), LABEL, background);
     }
 
-    pub(crate) fn bar(&mut self, left: &str, right: &str) {
+    pub fn bar(&mut self, left: &str, right: &str) {
         self.line();
         self.add_on(format!(" {left}"), TITLE, BAR_BACKGROUND);
         let used = left.chars().count() + right.chars().count() + 2;
@@ -131,7 +131,7 @@ impl Frame {
         self.add_on(format!("{right} "), TITLE, BAR_BACKGROUND);
     }
 
-    pub(crate) fn top(&mut self, title: &str, detail: &str) {
+    pub fn top(&mut self, title: &str, detail: &str) {
         let g = self.glyphs;
         self.line();
         self.add(format!("{}{}", g.top_left, g.horizontal), FRAME);
@@ -144,13 +144,13 @@ impl Frame {
         self.add(g.top_right, FRAME);
     }
 
-    pub(crate) fn row(&mut self) {
+    pub fn row(&mut self) {
         self.line();
         self.add(format!("{} ", self.glyphs.vertical), FRAME);
     }
 
     /// Clips overlong content inside the frame, pads and closes the row.
-    pub(crate) fn end_row(&mut self) {
+    pub fn end_row(&mut self) {
         let limit = self.width - 2;
         let line = self.lines.last_mut().expect("a row was started");
         let mut used = 0;
@@ -166,7 +166,7 @@ impl Frame {
         self.add(format!(" {}", self.glyphs.vertical), FRAME);
     }
 
-    pub(crate) fn bottom(&mut self) {
+    pub fn bottom(&mut self) {
         let g = self.glyphs;
         self.line();
         self.add(
@@ -180,7 +180,7 @@ impl Frame {
         );
     }
 
-    pub(crate) fn meter(&mut self, label: &str, fraction: f64, detail: &str, colour: Option<u8>) {
+    pub fn meter(&mut self, label: &str, fraction: f64, detail: &str, colour: Option<u8>) {
         const WIDTH: usize = 36;
         let fraction = fraction.clamp(0.0, 1.0);
         let filled = (fraction * WIDTH as f64).round() as usize;
@@ -194,7 +194,7 @@ impl Frame {
         self.end_row();
     }
 
-    pub(crate) fn metric(&mut self, label: &str, now: &str, detail: &str, colour: u8) {
+    pub fn metric(&mut self, label: &str, now: &str, detail: &str, colour: u8) {
         self.row();
         self.add(format!("{label:<22}"), LABEL);
         self.add(format!("{now:>14}"), colour);
@@ -203,13 +203,13 @@ impl Frame {
         self.end_row();
     }
 
-    pub(crate) fn message(&mut self, text: &str, colour: u8) {
+    pub fn message(&mut self, text: &str, colour: u8) {
         self.row();
         self.add(text, colour);
         self.end_row();
     }
 
-    pub(crate) fn render(&self) -> String {
+    pub fn render(&self) -> String {
         if !self.ansi {
             let mut plain = self
                 .lines
@@ -235,7 +235,7 @@ impl Frame {
     }
 }
 
-pub(crate) fn load_colour(fraction: f64) -> u8 {
+pub fn load_colour(fraction: f64) -> u8 {
     if fraction >= 0.9 {
         RED
     } else if fraction >= 0.7 {
@@ -245,22 +245,22 @@ pub(crate) fn load_colour(fraction: f64) -> u8 {
     }
 }
 
-pub(crate) fn gib(bytes: u64) -> String {
+pub fn gib(bytes: u64) -> String {
     format!("{:.3} GiB", bytes as f64 / GIB as f64)
 }
 
-pub(crate) fn mib(bytes: u64) -> u64 {
+pub fn mib(bytes: u64) -> u64 {
     bytes / MIB
 }
 
-pub(crate) fn host_name() -> String {
+pub fn host_name() -> String {
     std::fs::read_to_string("/proc/sys/kernel/hostname")
         .map(|name| name.trim().to_owned())
         .unwrap_or_else(|_| "host".to_owned())
 }
 
 /// Local wall-clock time as HH:MM:SS, using the system's UTC offset.
-pub(crate) fn clock() -> String {
+pub fn clock() -> String {
     let seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs() as i64)
@@ -308,7 +308,7 @@ fn local_offset_seconds() -> i64 {
 }
 
 #[cfg(unix)]
-pub(crate) fn terminal_columns() -> Option<usize> {
+pub fn terminal_columns() -> Option<usize> {
     #[repr(C)]
     struct WindowSize {
         rows: u16,
@@ -332,6 +332,6 @@ pub(crate) fn terminal_columns() -> Option<usize> {
 }
 
 #[cfg(not(unix))]
-pub(crate) fn terminal_columns() -> Option<usize> {
+pub fn terminal_columns() -> Option<usize> {
     None
 }

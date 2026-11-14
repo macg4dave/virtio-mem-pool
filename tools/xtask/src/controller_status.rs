@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use rampire::config::HostConfig;
+use rampire_host::config::HostConfig;
 
-use crate::process;
+use rampire_ops::process;
 
 const EVIDENCE_VERSION: u16 = 1;
 const DEFAULT_CONNECTION: &str = "qemu:///system";
@@ -133,7 +133,7 @@ pub fn run(command: &Command, repo: &Path) -> Result<(), String> {
         );
         return Ok(());
     }
-    if command.elevated_child && effective_uid() != 0 {
+    if command.elevated_child && process::effective_uid() != 0 {
         return Err("controller-status --elevated-child requires effective uid 0".to_owned());
     }
     if !command.elevated_child {
@@ -334,20 +334,6 @@ fn validate_identity(value: &str) -> Result<(), String> {
     } else {
         Err("controller-status INSTANCE or VM contains unsafe characters".to_owned())
     }
-}
-
-#[cfg(unix)]
-pub(crate) fn effective_uid() -> u32 {
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
-    // SAFETY: `geteuid` has no arguments and returns the caller's effective UID.
-    unsafe { geteuid() }
-}
-
-#[cfg(not(unix))]
-pub(crate) fn effective_uid() -> u32 {
-    u32::MAX
 }
 
 #[cfg(test)]

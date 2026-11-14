@@ -1,12 +1,16 @@
 use std::path::Path;
 
-use crate::process;
+use rampire_ops::process;
 
 const PACKAGES: &[&str] = &[
     "-p",
     "rampire-core",
     "-p",
     "rampire-guest",
+    "-p",
+    "rampire-host",
+    "-p",
+    "rampire-ops",
     "-p",
     "rampire",
     "-p",

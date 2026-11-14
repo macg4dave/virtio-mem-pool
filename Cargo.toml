@@ -1,3 +1,3 @@
 [workspace]
-members = ["guest-windows", "guest-linux", "host", "crates/rampire-core", "crates/rampire-guest", "tools/xtask"]
+members = ["guest-windows", "guest-linux", "host", "rampire", "crates/rampire-core", "crates/rampire-guest", "crates/rampire-ops", "tools/xtask"]
 resolver = "2"

@@ -12,10 +12,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use rampire::host_memory::{HostMemorySource, ProcMeminfoSource};
+use rampire_host::host_memory::{HostMemorySource, ProcMeminfoSource};
 use signal_hook::consts::signal::{SIGINT, SIGTERM};
 
-use crate::process;
+use rampire_ops::process;
 
 /// How long the daemon may take to stop after SIGTERM before this runner
 /// gives up waiting and reports it.
@@ -265,7 +265,7 @@ fn record(log: &Mutex<File>, line: &str) {
 }
 
 fn now_millis() -> u64 {
-    crate::process::unix_millis().unwrap_or_default()
+    rampire_ops::process::unix_millis().unwrap_or_default()
 }
 
 fn resolve(repo: &Path, path: &Path) -> PathBuf {

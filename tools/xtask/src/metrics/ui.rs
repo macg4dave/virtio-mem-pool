@@ -18,7 +18,7 @@ use ratatui::widgets::{
 use ratatui::{DefaultTerminal, Frame};
 
 use super::{lock, mib, signal_name, unix_millis, Command, JournalEvent, Live, Point, Stat, MIB};
-use crate::watch;
+use rampire_ops::watch;
 
 /// Periods the sample and guest-read keys step through.
 const PERIODS: [f64; 10] = [0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0];

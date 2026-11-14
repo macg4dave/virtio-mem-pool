@@ -13,12 +13,14 @@ product; the roadmap also holds
 |---|---|---|---|
 | `rampire-core` | `crates/rampire-core` | any | Policy, request protocol, wire and settings formats |
 | `rampire-guest` | `crates/rampire-guest` | any | Guest request store, worker, transports, service loop |
-| `rampire` | `host/` | Linux | Controller daemon and its CLI |
+| `rampire-host` | `host/` | Linux | The controller: settings resolution, runtime, libvirt, attestation, the CLI until O1.2 |
+| `rampire-ops` | `crates/rampire-ops` | Linux | Operator views: controller status, the pool, one VM live |
+| `rampire` | `rampire/` | Linux | The `rampire` binary: the daemon and operator commands |
 | `rampire-guest-linux` | `guest-linux/` | Linux | Linux guest service and `rampire-workload` |
 | `rampire-guest-windows` | `guest-windows/` | Windows (native) | Windows service and its workload |
 | `xtask` | `tools/xtask` | Linux | Gate, deploy, observe, qualify (`cargo xtask`) |
 
-`xtask` depends on the host crate, so it builds only on Linux. The core
+`xtask` depends on the host and operations crates, so it builds only on Linux. The core
 and shared guest crates build anywhere.
 
 ## The gate
@@ -60,7 +62,7 @@ checkout. `cargo xtask gate all` adds the native Windows gate below.
 cargo test -p rampire-core          # anywhere
 cargo test -p rampire-guest         # anywhere
 cargo test -p rampire-guest-windows # Windows
-cargo test -p rampire          # Linux
+cargo test -p rampire-host     # Linux
 ```
 
 Unit tests read only [fixtures](../fixtures/config) and temporary files.

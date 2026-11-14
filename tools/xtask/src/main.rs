@@ -1,19 +1,17 @@
 mod attestation;
 mod build_identity;
 mod controller_status;
-mod dashboard;
 mod debian;
 mod host_deploy;
 mod host_run;
 mod linux;
 mod local;
 mod metrics;
-mod pool;
 mod preflight;
-mod process;
 mod qualification;
-mod watch;
 mod windows;
+
+use rampire_ops::{pool, process, watch};
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;

@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::process;
+use rampire_ops::process;
 
 const PACKAGE: &str = "rampire-guest";
 const DEVELOPMENT_BINARY: &str = "/usr/local/libexec/rampire-guest";

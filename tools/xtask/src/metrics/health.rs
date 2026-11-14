@@ -15,13 +15,13 @@
 use std::collections::VecDeque;
 use std::path::Path;
 
-use rampire::virsh::{Virsh, VirshCommand};
 use rampire_core::RawTelemetryEnvelope;
+use rampire_host::virsh::{Virsh, VirshCommand};
 use serde_json::{json, Map, Value};
 
 use super::{iso_utc, JournalEvent, Sample};
-use crate::process;
-use crate::watch::COMMAND_TIMEOUT;
+use rampire_ops::process;
+use rampire_ops::watch::COMMAND_TIMEOUT;
 
 const UNIT_PROPERTIES: &str = "ActiveState,SubState,Result,MainPID,ExecMainPID,\
 ExecMainCode,ExecMainStatus,NRestarts,MemoryCurrent,CPUUsageNSec,InvocationID";

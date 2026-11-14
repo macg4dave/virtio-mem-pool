@@ -30,16 +30,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use rampire::config::HostConfig;
-use rampire::guest_channel::PublicationCopyFirst;
-use rampire::qga::{GuestFileReader, VirshGuestFiles};
-use rampire::virsh::Virsh;
 use rampire_core::{MemoryResourceNotificationState, RawTelemetryEnvelope, VirtioMemState};
+use rampire_host::config::HostConfig;
+use rampire_host::guest_channel::PublicationCopyFirst;
+use rampire_host::qga::{GuestFileReader, VirshGuestFiles};
+use rampire_host::virsh::Virsh;
 use serde_json::{json, Map, Value};
 
 use self::health::{BundleContext, CpuMeter, Incident, Lifecycle, UnitStatus};
-use crate::process;
-use crate::watch::{self, HostMemory, COMMAND_TIMEOUT, MAX_TELEMETRY_BYTES};
+use rampire_ops::process;
+use rampire_ops::watch::{self, HostMemory, COMMAND_TIMEOUT, MAX_TELEMETRY_BYTES};
 
 const MIB: u64 = 1 << 20;
 const SUMMARY_PERIOD: Duration = Duration::from_secs(60);
@@ -343,7 +343,7 @@ pub fn run(command: &Command, repo: &Path) -> Result<(), String> {
         command
     } else {
         resolved = Command {
-            unit: crate::host_deploy::installed_controller_unit(&command.unit, repo),
+            unit: rampire_ops::units::installed_controller_unit(&command.unit, repo),
             ..command.clone()
         };
         &resolved
@@ -621,7 +621,7 @@ fn write_error(error: std::io::Error) -> String {
 }
 
 fn unix_millis() -> u64 {
-    crate::process::unix_millis().unwrap_or_default()
+    rampire_ops::process::unix_millis().unwrap_or_default()
 }
 
 // ---- Guest ------------------------------------------------------------------

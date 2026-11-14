@@ -1,23 +1,18 @@
 [package]
-name = "rampire"
+name = "rampire-host"
 version = "0.1.0"
 edition = "2021"
 authors = ["macg4dave"]
 license = "GPL-3.0-or-later"
-description = "RAMpire host controller: resizes libvirt guests from a shared memory pool with virtio-mem"
+description = "RAMpire host controller library: resizes libvirt guests from a shared memory pool with virtio-mem"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 thiserror = "2.0.20"
-signal-hook = "0.3"
 quick-xml = "0.41.0"
 rampire-core = { path = "../crates/rampire-core" }
-
-[[bin]]
-name = "rampire"
-path = "src/main.rs"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use rampire::attestation::{
+use rampire_host::attestation::{
     read_review, CompatibilityAttestation, VirshCompatibilityEvidenceSource,
 };
-use rampire::virsh::Virsh;
+use rampire_host::virsh::Virsh;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Command {

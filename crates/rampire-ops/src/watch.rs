@@ -18,15 +18,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use rampire::config::HostConfig;
-use rampire::guest_channel::PublicationCopyFirst;
-use rampire::host_memory::meminfo_bytes;
-use rampire::qga::{GuestFileReader, VirshGuestFiles};
-use rampire::virsh::{Virsh, VirshCommand};
 use rampire_core::{
     parse_virtio_mem_xml_for_alias, MemoryResourceNotificationState, RawTelemetryEnvelope,
     VirtioMemState,
 };
+use rampire_host::config::HostConfig;
+use rampire_host::guest_channel::PublicationCopyFirst;
+use rampire_host::host_memory::meminfo_bytes;
+use rampire_host::qga::{GuestFileReader, VirshGuestFiles};
+use rampire_host::virsh::{Virsh, VirshCommand};
 
 use crate::dashboard::{
     clock, gib, host_name, mib, terminal_columns, Frame, BACKGROUND, CYAN, DIM, GIB, GREEN, LABEL,
@@ -34,8 +34,8 @@ use crate::dashboard::{
 };
 use crate::process;
 
-pub(crate) const MAX_TELEMETRY_BYTES: usize = 64 * 1024;
-pub(crate) const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
+pub const MAX_TELEMETRY_BYTES: usize = 64 * 1024;
+pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub const HELP: &str = "Watch options (read-only live dashboard):
   --config PATH                 Required host TOML; the VM, device alias,
@@ -142,13 +142,13 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
     Ok(command)
 }
 
-pub fn run(command: &Command, repo: &Path) -> Result<(), String> {
+pub fn run(command: &Command, cwd: &Path) -> Result<(), String> {
     let resolved;
     let command = if command.unit_named {
         command
     } else {
         resolved = Command {
-            unit: crate::host_deploy::installed_controller_unit(&command.unit, repo),
+            unit: crate::units::installed_controller_unit(&command.unit, cwd),
             ..command.clone()
         };
         &resolved
@@ -202,7 +202,7 @@ pub fn run(command: &Command, repo: &Path) -> Result<(), String> {
                 guest_age: guest_read.map(|read| started - read),
                 samples,
             };
-            let journal = read_journal(command, repo);
+            let journal = read_journal(command, cwd);
             let mut plain = Frame::new(width, false);
             build(&mut plain, command, &sample, &history, &journal);
             copyable = format!("{}{}", plain.render(), full_events(&journal.events));
@@ -244,14 +244,14 @@ struct Sample<'a> {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct HostMemory {
-    pub(crate) total: u64,
-    pub(crate) available: u64,
-    pub(crate) swap_total: u64,
-    pub(crate) swap_free: u64,
+pub struct HostMemory {
+    pub total: u64,
+    pub available: u64,
+    pub swap_total: u64,
+    pub swap_free: u64,
 }
 
-pub(crate) fn read_meminfo() -> Result<HostMemory, String> {
+pub fn read_meminfo() -> Result<HostMemory, String> {
     let text = std::fs::read_to_string("/proc/meminfo")
         .map_err(|error| format!("read /proc/meminfo: {error}"))?;
     Ok(parse_meminfo(&text))
@@ -267,7 +267,7 @@ fn parse_meminfo(text: &str) -> HostMemory {
     }
 }
 
-pub(crate) fn device_state(virsh: &Virsh, vm: &str, alias: &str) -> Option<VirtioMemState> {
+pub fn device_state(virsh: &Virsh, vm: &str, alias: &str) -> Option<VirtioMemState> {
     let xml = virsh.run(&["dumpxml".to_owned(), vm.to_owned()]).ok()?;
     parse_virtio_mem_xml_for_alias(&xml, alias)
         .ok()
@@ -313,7 +313,7 @@ struct Journal {
     last_result: Option<LastResult>,
 }
 
-fn read_journal(command: &Command, repo: &Path) -> Journal {
+fn read_journal(command: &Command, cwd: &Path) -> Journal {
     let arguments: Vec<OsString> = [
         "-u",
         &command.unit,
@@ -326,7 +326,7 @@ fn read_journal(command: &Command, repo: &Path) -> Journal {
     .iter()
     .map(process::os)
     .collect();
-    process::bounded_text("journalctl", &arguments, repo, COMMAND_TIMEOUT)
+    process::bounded_text("journalctl", &arguments, cwd, COMMAND_TIMEOUT)
         .map(|journal| Journal {
             events: parse_events(&journal, command.events),
             last_result: parse_last_result(&journal),
@@ -442,7 +442,7 @@ fn parse_events(journal: &str, count: usize) -> Vec<Event> {
 }
 
 /// Drops session IDs and shows `*bytes=N` values in MiB.
-pub(crate) fn shorten(text: &str) -> String {
+pub fn shorten(text: &str) -> String {
     text.split(' ')
         .filter(|word| !word.starts_with("session_id="))
         .map(|word| {
@@ -735,9 +735,7 @@ mod tests {
 
     #[test]
     fn reads_the_vm_from_the_host_config_and_options() {
-        let config = crate::repo_root()
-            .expect("repository root")
-            .join("fixtures/config");
+        let config = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/config");
         let config = config.to_str().expect("UTF-8 path");
         let expected = HostConfig::load_vm(Path::new(config), None).expect("tracked config");
         let defaults = parse(&["--config", config].map(str::to_owned)).expect("defaults");
@@ -839,9 +837,7 @@ mod tests {
 
     #[test]
     fn plain_frames_keep_every_line_within_the_width() {
-        let config = crate::repo_root()
-            .expect("repository root")
-            .join("fixtures/config");
+        let config = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/config");
         let command =
             parse(&["--config".to_owned(), config.to_string_lossy().into_owned()]).unwrap();
         let device = VirtioMemState {

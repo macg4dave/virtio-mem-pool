@@ -236,9 +236,14 @@ version.
 
 ### O1 — The `rampire` command
 
-- [ ] **O1.1** Move the operator views (`pool`, `watch`, controller
+- [x] **O1.1** Move the operator views (`pool`, `watch`, controller
   status) out of `xtask` into the operations library fixed in R1, with no
   dependence on a checkout. `xtask` keeps thin wrappers for development.
+  Done: `pool` and `watch` are in `rampire-ops`, and the host package is
+  split into the `rampire-host` library and the `rampire` binary. The
+  controller status view is `rampire status` itself; `xtask
+  controller-status`, which records evidence from a checkout build, stays
+  a development tool.
 - [ ] **O1.2** One binary (decision D7), with its command line defined in
   clap, so `--help`, shell completion and man pages come from one
   definition (decision D16). The unit runs `rampire daemon`. People run

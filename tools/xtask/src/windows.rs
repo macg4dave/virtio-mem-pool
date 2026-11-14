@@ -4,14 +4,14 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use rampire::qga::encode_base64;
 use rampire_core::settings::{self, VmSettings, CONTROL_PATH, SERVICE_NAME};
+use rampire_host::qga::encode_base64;
 use serde::Serialize;
 
 use crate::build_identity::{
     BuildIdentity, BuildRecord, InstalledBuild, Verdict, RECORD_FILE, STAMP_FILE,
 };
-use crate::process;
+use rampire_ops::process;
 
 const SERVICE_EXE: &str = "rampire-guest.exe";
 const WORKLOAD_EXE: &str = "rampire-workload.exe";
@@ -1377,7 +1377,7 @@ fn remote_powershell(config: &Config, repo: &Path, script: &str) -> Result<Strin
     result
 }
 
-use crate::process::unix_millis;
+use rampire_ops::process::unix_millis;
 
 fn ps_literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))

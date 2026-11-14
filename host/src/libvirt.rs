@@ -559,7 +559,7 @@ mod tests {
     }
 
     /// Live check against a running VM with a guest agent:
-    /// `RAMPIRE_LIVE_VM=<domain> cargo test -p rampire live_ -- --ignored`
+    /// `RAMPIRE_LIVE_VM=<domain> cargo test -p rampire-host live_ -- --ignored`
     #[test]
     #[ignore]
     fn live_session_matches_virsh_on_a_running_vm() {

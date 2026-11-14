@@ -526,14 +526,9 @@ dependencies = [
 name = "rampire"
 version = "0.1.0"
 dependencies = [
- "libc",
- "quick-xml",
  "rampire-core",
- "serde",
- "serde_json",
- "sha2",
+ "rampire-host",
  "signal-hook",
- "thiserror",
 ]
 
 [[package]]
@@ -577,6 +572,31 @@ dependencies = [
  "serde_json",
  "thiserror",
  "winapi",
+]
+
+[[package]]
+name = "rampire-host"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "quick-xml",
+ "rampire-core",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
+name = "rampire-ops"
+version = "0.1.0"
+dependencies = [
+ "rampire-core",
+ "rampire-host",
+ "serde",
+ "serde_json",
+ "signal-hook",
+ "wait-timeout",
 ]
 
 [[package]]
@@ -1038,8 +1058,9 @@ checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
- "rampire",
  "rampire-core",
+ "rampire-host",
+ "rampire-ops",
  "ratatui",
  "serde",
  "serde_json",

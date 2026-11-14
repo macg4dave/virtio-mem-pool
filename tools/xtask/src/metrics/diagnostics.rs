@@ -8,8 +8,8 @@ use serde_json::{json, Value};
 
 use super::health::{performance_incident, Observed};
 use super::{create, iso_utc, write_error, Command, JournalEvent, Sample};
-use crate::process;
-use crate::watch::COMMAND_TIMEOUT;
+use rampire_ops::process;
+use rampire_ops::watch::COMMAND_TIMEOUT;
 
 const HEARTBEAT_MS: u64 = 30_000;
 
@@ -41,7 +41,7 @@ pub(super) fn write_manifest(
     let settings = rampire_core::settings::load_configuration(&command.config_path)
         .map_err(|error| error.to_string())
         .map(|(global, vms)| json!({"global": global, "vms": vms}));
-    let config = rampire::config::HostConfig::load_vm(&command.config_path, Some(&command.vm))
+    let config = rampire_host::config::HostConfig::load_vm(&command.config_path, Some(&command.vm))
         .map_err(|error| error.to_string());
     let controller_pid = process::bounded_text(
         "systemctl",
@@ -385,7 +385,7 @@ mod tests {
         Sample {
             unix_millis: now,
             elapsed: Duration::from_millis(now),
-            host: crate::watch::HostMemory {
+            host: rampire_ops::watch::HostMemory {
                 available: 16 << 30,
                 ..Default::default()
             },
@@ -461,7 +461,7 @@ mod tests {
             let mut sample = Sample {
                 unix_millis: now,
                 elapsed: Duration::from_millis(now),
-                host: crate::watch::HostMemory {
+                host: rampire_ops::watch::HostMemory {
                     available: 16 << 30,
                     ..Default::default()
                 },

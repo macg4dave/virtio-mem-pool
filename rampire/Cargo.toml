@@ -1,0 +1,12 @@
+[package]
+name = "rampire"
+version = "0.1.0"
+edition = "2021"
+authors = ["macg4dave"]
+license = "GPL-3.0-or-later"
+description = "RAMpire: the host controller daemon and operator command"
+
+[dependencies]
+rampire-core = { path = "../crates/rampire-core" }
+rampire-host = { path = "../host" }
+signal-hook = "0.3"

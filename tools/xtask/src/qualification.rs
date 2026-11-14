@@ -8,18 +8,18 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use rampire::config::HostConfig;
-use rampire::guest_channel::PublicationCopyFirst;
-use rampire::host_memory::meminfo_bytes;
-use rampire::qga::{GuestFileReader, VirshGuestFiles};
-use rampire::virsh::Virsh;
 use rampire_core::settings::GuestOs;
 use rampire_core::{parse_virtio_mem_xml_for_alias, RawTelemetryEnvelope};
+use rampire_host::config::HostConfig;
+use rampire_host::guest_channel::PublicationCopyFirst;
+use rampire_host::host_memory::meminfo_bytes;
+use rampire_host::qga::{GuestFileReader, VirshGuestFiles};
+use rampire_host::virsh::Virsh;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use wait_timeout::ChildExt;
 
-use crate::process;
+use rampire_ops::process;
 
 const SCHEMA_VERSION: u32 = 4;
 const CONTROLLER_GUARD_ROOT: &str = "/run/rampire-qualification";
@@ -441,7 +441,7 @@ fn parse_start(args: &[String], repo: &Path) -> Result<StartOptions, String> {
     identifier(&controller_unit, "--controller-unit")?;
     identifier(&guest_service, "--guest-service")?;
     // The unit may run a shared config; the running config must contain the VM.
-    crate::host_deploy::controller_instance(&controller_unit)?;
+    rampire_ops::units::controller_instance(&controller_unit)?;
     if max_allocation_bytes == 0
         || peak_bytes == 0
         || peak_bytes > max_allocation_bytes
@@ -1860,7 +1860,7 @@ fn capture_privileged_sample(config: &Config, repo: &Path) -> Result<PrivilegedS
     );
     let bytes = reader.read_file(
         &config.telemetry_path,
-        rampire::guest_channel::MAX_RAW_TELEMETRY_FILE_BYTES,
+        rampire_host::guest_channel::MAX_RAW_TELEMETRY_FILE_BYTES,
     )?;
     let contents = String::from_utf8(bytes)
         .map_err(|error| format!("QGA raw telemetry is not valid UTF-8: {error}"))?;
@@ -2245,7 +2245,7 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
         .map_err(|e| format!("flush {}: {e}", path.display()))?;
     std::fs::rename(&temporary, path).map_err(|e| format!("publish {}: {e}", path.display()))
 }
-use crate::process::unix_millis as now_millis;
+use rampire_ops::process::unix_millis as now_millis;
 fn new_run_id() -> Result<String, String> {
     Ok(format!(
         "qualification-{}-{}",

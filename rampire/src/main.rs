@@ -4,27 +4,27 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use rampire::attestation::{read_attestation, AttestedCompatibilitySource};
-use rampire::cli::CliCommand;
-use rampire::config::{HostConfig, HostSettings};
-use rampire::control_channel::ControlChannel;
-use rampire::guest_channel::{publication_copy_path, GuestChannel};
-use rampire::host_memory::ProcMeminfoSource;
-use rampire::ownership::DeviceOwner;
-use rampire::qga::VirshGuestFiles;
-use rampire::resize_sink::VirshResizeSink;
-use rampire::runtime::{HostRuntime, VmController};
-use rampire::virsh::Virsh;
-use rampire::xml_source::VirshXmlSource;
+use rampire_host::attestation::{read_attestation, AttestedCompatibilitySource};
+use rampire_host::cli::CliCommand;
+use rampire_host::config::{HostConfig, HostSettings};
+use rampire_host::control_channel::ControlChannel;
+use rampire_host::guest_channel::{publication_copy_path, GuestChannel};
+use rampire_host::host_memory::ProcMeminfoSource;
+use rampire_host::ownership::DeviceOwner;
+use rampire_host::qga::VirshGuestFiles;
+use rampire_host::resize_sink::VirshResizeSink;
+use rampire_host::runtime::{HostRuntime, VmController};
+use rampire_host::virsh::Virsh;
+use rampire_host::xml_source::VirshXmlSource;
 use signal_hook::consts::signal::{SIGINT, SIGTERM};
 use signal_hook::flag;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let config_path = match rampire::cli::parse_args(&args) {
+    let config_path = match rampire_host::cli::parse_args(&args) {
         Ok(CliCommand::Run { config }) => config,
         Ok(command) => {
-            return match rampire::cli::run(command) {
+            return match rampire_host::cli::run(command) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
                     eprintln!("rampire CLI failed: {error}");
@@ -103,7 +103,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let events = match rampire::wake::MemoryEvents::start(&virsh) {
+    let events = match rampire_host::wake::MemoryEvents::start(&virsh) {
         Ok(events) => Some(events),
         Err(error) => {
             eprintln!("libvirt events unavailable; polling continues: {error}");

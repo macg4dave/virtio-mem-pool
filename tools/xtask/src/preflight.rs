@@ -1,15 +1,15 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use rampire::attestation::AttestedCompatibilitySource;
-use rampire::compatibility_source::CompatibilitySource;
-use rampire::guest_channel::{GuestChannel, GuestLink};
-use rampire::qga::VirshGuestFiles;
-use rampire::virsh::Virsh;
 use rampire_core::settings::GuestOs;
 use rampire_core::{
     parse_virtio_mem_xml_for_alias, MemoryRequest, RawTelemetryEnvelope, VirtioMemState,
 };
+use rampire_host::attestation::AttestedCompatibilitySource;
+use rampire_host::compatibility_source::CompatibilitySource;
+use rampire_host::guest_channel::{GuestChannel, GuestLink};
+use rampire_host::qga::VirshGuestFiles;
+use rampire_host::virsh::Virsh;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -118,7 +118,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
             .ok_or_else(|| format!("{name} requires a positive integer"))
     };
     let unit = required("--unit")?;
-    crate::host_deploy::controller_instance(&unit)?;
+    rampire_ops::units::controller_instance(&unit)?;
     let telemetry_path = required("--telemetry-path")?;
     if !telemetry_path
         .as_bytes()
@@ -335,7 +335,7 @@ fn controller_state(command: &Command, repo: &Path) -> Result<(String, String), 
 }
 
 fn host_mem_available() -> Result<u64, String> {
-    use rampire::host_memory::{HostMemorySource, ProcMeminfoSource};
+    use rampire_host::host_memory::{HostMemorySource, ProcMeminfoSource};
     ProcMeminfoSource::new().available_bytes()
 }
 
