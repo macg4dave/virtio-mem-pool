@@ -1,0 +1,8 @@
+---
+# ansible-playbook -i kvm-host.example, playbook.yml
+# files/ holds the host's configuration, kept in git.
+- name: RAMpire on the KVM hosts
+  hosts: all
+  become: true
+  roles:
+    - role: rampire

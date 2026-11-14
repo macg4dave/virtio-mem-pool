@@ -1,0 +1,64 @@
+---
+# Install RAMpire and apply this host's configuration. The play reports
+# "changed" only when the controller's configuration changed: `rampire
+# apply --detailed-exitcode` exits 0 for no change, 2 for a change and 1
+# on failure, and a failing configuration changes nothing.
+
+- name: Install RAMpire
+  ansible.builtin.package:
+    name: "{{ rampire_package }}"
+    state: present
+
+- name: The draft's folders
+  ansible.builtin.file:
+    path: "/etc/rampire/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: [vms.d, reviews, attestations]
+
+- name: Global settings
+  ansible.builtin.copy:
+    src: "{{ rampire_config_source }}/global.toml"
+    dest: /etc/rampire/global.toml
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: One file per VM, and the review profiles they name
+  ansible.builtin.copy:
+    src: "{{ rampire_config_source }}/{{ item }}/"
+    dest: "/etc/rampire/{{ item }}/"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: [vms.d, reviews]
+
+# Attestations are made on the host: `rampire apply` attests a running VM
+# that has none, and a person runs `rampire vm attest` after a change. Keep
+# them in git only if you copy them back from the host after each one.
+- name: Attestations kept in git
+  ansible.builtin.copy:
+    src: "{{ rampire_config_source }}/attestations/"
+    dest: /etc/rampire/attestations/
+    owner: root
+    group: root
+    mode: "0644"
+  when: rampire_manage_attestations | bool
+
+- name: Check the draft against the live VMs
+  ansible.builtin.command: rampire check
+  changed_when: false
+
+- name: Apply the draft
+  ansible.builtin.command: rampire apply --yes --detailed-exitcode
+  register: rampire_apply
+  changed_when: rampire_apply.rc == 2
+  failed_when: rampire_apply.rc not in [0, 2]
+
+- name: The controller runs
+  ansible.builtin.systemd_service:
+    name: rampire.service
+    enabled: true
+    state: started

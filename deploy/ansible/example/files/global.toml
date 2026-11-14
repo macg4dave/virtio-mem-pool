@@ -1,0 +1,42 @@
+# Settings for the whole host, shared by every VM.
+#
+# Lines starting with # are notes: the program ignores them.
+# A setting left out of this file uses its built-in default.
+#
+# Write sizes in quotes, for example "512MB", "128MiB", "3GB" or "1.5GB".
+# MB and MiB mean the same here (1 GB = 1024 MB).
+#
+# After changing this file, install it (see docs/usage.md). The running
+# program does not notice changes on its own.
+
+# --- The settings you are most likely to change ---
+
+# The pool: the total extra memory all the VMs may share, on top of the
+# memory each one starts with. Needed when there is more than one VM.
+# A good start: the host's memory, minus what the host keeps for itself
+# (below), minus the memory each VM starts with.
+pool = "16GB"
+
+# Memory the host always keeps free for itself. VMs are never given memory
+# that would take the host below this. "4GB" suits most hosts; raise it if
+# the host runs other programs.
+host_reserve = "4GB"
+
+# Trial mode. true: decide and log everything, but change no VM's memory.
+# false: normal use.
+observe_only = false
+
+# --- Technical settings: leave these alone unless told otherwise ---
+
+# Seconds between checks, 1 to 10.
+poll_interval_seconds = 1
+# Seconds any one command to libvirt may take.
+command_timeout_seconds = 10
+# Seconds a Windows VM may stop giving memory back before the program
+# accepts what it gave. (Linux VMs use a built-in time.)
+convergence_timeout_seconds = 300
+# The libvirt connection that runs the VMs.
+libvirt_uri = "qemu:///system"
+# How many applied copies of these settings, and records of what each
+# apply did, are kept under /var/lib/rampire. At least 2.
+retention = 10

@@ -1,0 +1,21 @@
+#cloud-config
+# A Linux guest RAMpire manages (roadmap O4.4). The VM's definition needs a
+# virtio-mem device and the control channel org.rampire.control.0; on the
+# host, `rampire vm add VM --fix-xml` adds both. Boot RAM can be small: the
+# guest grows on demand once its service runs. A workload that reserves a
+# large block up front may need vm.overcommit_memory=1 (see
+# docs/administration.md, Linux guests).
+#
+# Until there are package repositories, set the URL of the rampire-guest
+# .deb (Debian and Ubuntu) or RPM (RHEL family and Fedora) below.
+runcmd:
+  - |
+    set -e
+    url="https://github.com/macg4dave/rampire/releases/download/vVERSION/PACKAGE"
+    case "$url" in *VERSION*) echo "set the rampire-guest package URL" >&2; exit 1 ;; esac
+    package=/tmp/${url##*/}
+    curl -sSfL -o "$package" "$url"
+    case "$package" in
+      *.deb) apt-get install -y "$package" ;;
+      *.rpm) dnf install -y "$package" ;;
+    esac

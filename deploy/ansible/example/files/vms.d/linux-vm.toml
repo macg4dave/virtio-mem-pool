@@ -1,0 +1,45 @@
+# One Linux VM: its memory device, its priority and its memory limits.
+#
+# The file's name is the VM's name, exactly as `virsh list` shows it, with
+# .toml added: this file is for the VM linux-vm.
+#
+# Lines starting with # are notes: the program ignores them.
+#
+# Write sizes in quotes, for example "512MB", "128MiB", "3GB" or "1.5GB".
+# MB and MiB mean the same here (1 GB = 1024 MB). Use whole GB, or multiples
+# of 16 MB. A size that can't be used is reported when you install.
+#
+# After changing this file, install it (see docs/usage.md). The running
+# program does not notice changes on its own.
+
+# The name of the VM's memory device. Don't change it.
+alias = "ua-virtiomem0"
+
+# Priority: a whole number above zero. A higher number is more important.
+# - With plenty of free memory, priority makes no difference.
+# - When memory is short, the VM with the higher number is served first.
+# - Equal numbers are served in the order the VMs asked.
+# - Memory is never taken away from one VM to give to another.
+# Spacing the numbers out (100, 50, 10) leaves room for VMs in between.
+priority = 100
+
+# The review profile this VM is attested with: reviews/linux-standard.toml.
+review = "linux-standard"
+
+# The VM's operating system. Don't change it.
+guest_os = "linux"
+
+# The smallest this VM is ever made. Memory below this is never taken back.
+# Usually the memory the VM starts with.
+min_ram = "2GB"
+
+# The largest this VM may ever grow.
+# Keep it no more than about four times the memory the VM starts with, so
+# the VM can always give memory back.
+max_ram = "8GB"
+
+# Spare memory the VM keeps ready. It asks for more when its spare falls
+# below this, and gives memory back when it has more spare than this.
+# "512MB" to "1GB" suits most VMs. More reacts faster to sudden demand;
+# less shares memory more tightly.
+free_ram = "512MB"

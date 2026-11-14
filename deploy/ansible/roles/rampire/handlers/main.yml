@@ -1,0 +1,3 @@
+---
+# No handlers: `rampire apply` restarts the controller itself, and only
+# when the configuration changed.

@@ -1,0 +1,11 @@
+---
+# The folder, beside the playbook, holding this host's configuration as
+# kept in git: global.toml, vms.d/NAME.toml and reviews/. A VM removed
+# from git is removed from the host with `rampire vm remove`, not by this
+# role.
+rampire_config_source: "files"
+# The package to install. Until there are package repositories, point it
+# at a downloaded RPM or .deb.
+rampire_package: rampire
+# Copy attestations/ from git too. Off: the host makes them.
+rampire_manage_attestations: false
