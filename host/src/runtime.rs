@@ -99,6 +99,15 @@ struct Ready {
     admission: RequestAdmission,
 }
 
+/// The metrics file and what it needs between rounds.
+struct MetricsFile {
+    path: std::path::PathBuf,
+    build: String,
+    rounds: u64,
+    /// A write failure is logged once, not every round.
+    failure_reported: bool,
+}
+
 /// Host memory granted to growth within one round, so two VMs growing in the
 /// same round cannot both count the same available host RAM.
 struct HostBudget {
@@ -176,6 +185,8 @@ pub struct HostRuntime<G, S, R, H> {
     /// device and the host reserve.
     pool_bytes: Option<u64>,
     poll_interval: Duration,
+    /// Where each round's metrics go, if anywhere.
+    metrics: Option<MetricsFile>,
     #[cfg(unix)]
     controls: Vec<std::sync::Arc<crate::control_channel::ControlChannel>>,
     #[cfg(unix)]
@@ -204,6 +215,7 @@ where
             host_memory,
             pool_bytes,
             poll_interval,
+            metrics: None,
             #[cfg(unix)]
             controls: Vec::new(),
             #[cfg(unix)]
@@ -242,6 +254,55 @@ where
         Ok(())
     }
 
+    /// Write each round's metrics to `path` (roadmap O4.2).
+    pub fn with_metrics(mut self, path: std::path::PathBuf, build: String) -> Self {
+        self.metrics = Some(MetricsFile {
+            path,
+            build,
+            rounds: 0,
+            failure_reported: false,
+        });
+        self
+    }
+
+    fn write_metrics(&mut self, observed: &[Observed]) {
+        let Some(file) = self.metrics.as_mut() else {
+            return;
+        };
+        file.rounds += 1;
+        let vms: Vec<_> = self
+            .vms
+            .iter()
+            .zip(observed)
+            .map(|(vm, seen)| crate::metrics::VmMetrics {
+                name: vm.config.vm_name.clone(),
+                priority: vm.config.priority,
+                charged_bytes: match seen {
+                    Observed::Held { charge } => charge.map(|(bytes, _)| bytes),
+                    Observed::Ready(ready) => {
+                        Some(ready.state.current_bytes.max(ready.state.requested_bytes))
+                    }
+                    Observed::Stop(_) => None,
+                },
+                max_ram_bytes: vm.config.max_ram,
+                stopped: vm.stopped,
+                latched: vm.control.latched(),
+            })
+            .collect();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs());
+        let text = crate::metrics::render(&file.build, self.pool_bytes, file.rounds, now, &vms);
+        match crate::metrics::write(&file.path, &text) {
+            Ok(()) => file.failure_reported = false,
+            Err(error) if !file.failure_reported => {
+                eprintln!("rampire: event=metrics_unwritten reason={error}");
+                file.failure_reported = true;
+            }
+            Err(_) => {}
+        }
+    }
+
     /// Observe every VM, allocate the pool, then execute each ready request,
     /// highest priority first. A VM that fails (a resize that never
     /// converges, an unknown growth outcome) is latched and stops; the others
@@ -271,6 +332,7 @@ where
             return Ok(Step::Wait);
         }
         let ceilings = self.allocate(&observed)?;
+        self.write_metrics(&observed);
         // The same order the pool used: priority, then first come, first
         // served, then configuration order.
         let mut order = (0..self.vms.len()).collect::<Vec<_>>();

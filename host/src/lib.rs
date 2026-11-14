@@ -11,6 +11,7 @@ pub mod guest_channel;
 pub mod host_memory;
 #[cfg(unix)]
 pub mod libvirt;
+pub mod metrics;
 pub mod ownership;
 pub mod qga;
 pub mod resize_sink;

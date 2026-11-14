@@ -111,7 +111,10 @@ pub fn run(config_path: &Path) -> ExitCode {
             None
         }
     };
-    runtime = runtime.with_wake(controls, events);
+    runtime = runtime.with_wake(controls, events).with_metrics(
+        std::path::PathBuf::from(rampire_host::metrics::METRICS_PATH),
+        crate::version(),
+    );
     let result = runtime.run(&stop);
     drop(owners);
     match result {
