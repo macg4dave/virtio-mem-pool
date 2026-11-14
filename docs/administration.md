@@ -419,6 +419,13 @@ sudo rampire logs --follow  # the controller's journal
 cargo xtask metrics --config /etc/rampire
 ```
 
+Each round the controller writes Prometheus metrics to
+`/run/rampire/metrics.prom`: its build, rounds, the pool, and for each VM
+its pool charge, `max_ram`, priority and whether it is stopped or
+latched. There is no listening socket. To collect them with
+node_exporter's textfile collector, add its user to the `rampire` group
+and point `--collector.textfile.directory` at `/run/rampire`.
+
 The controller logs every decision to the journal
 (`sudo rampire logs`). See [tools](tools.md) for the
 recorder's files and incident bundles.

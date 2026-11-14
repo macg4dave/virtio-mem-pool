@@ -112,6 +112,14 @@ pub fn write(path: &Path, text: &str) -> Result<(), String> {
     let temporary: PathBuf = path.with_extension("prom.tmp");
     std::fs::write(&temporary, text)
         .map_err(|error| format!("write {}: {error}", temporary.display()))?;
+    // Readable by the rampire group, so a collector added to it can read
+    // the file; the unit's UMask would make it the service account's alone.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o640))
+            .map_err(|error| format!("set mode of {}: {error}", temporary.display()))?;
+    }
     std::fs::rename(&temporary, path).map_err(|error| format!("write {}: {error}", path.display()))
 }
 
