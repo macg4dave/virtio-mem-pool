@@ -172,7 +172,7 @@ happens here, once, before the command is built on top of it.
   | Trademark | No mark found by web search. Not yet checked in the USPTO, EUIPO or UKIPO registers directly |
 
   The owner accepted the name on 2026-11-14 on these results.
-- [ ] **R1** A names table, reviewed before any code changes, covering:
+- [x] **R1** A names table, reviewed before any code changes, covering:
   - the project and repository;
   - the crate layout, including the new operations library from O1.1, so
     crates are renamed and restructured once;
@@ -186,7 +186,7 @@ happens here, once, before the command is built on top of it.
   model, its alias, the driver), it stays: that is the device's real
   name, not ours.
 
-  Draft: [names](names.md), waiting for review.
+  Done: [names](names.md), reviewed 2026-11-14.
 - [ ] **R2** Rename and restructure the workspace following R1: crates,
   binary, units, paths and environment variables.
 - [ ] **R3** Rename the wire identifiers (decision D8): the control
@@ -417,6 +417,9 @@ Made by the owner on 2026-11-14:
 | D17 | Setting names drop their `_bytes` suffixes in the clean break |
 | D18 | `vm remove` leaves the VM at its current size |
 | D19 | The milestone order stays R, O1, O2, O3, O4, O5. CI arrives in O2, and the test fleet is installed again at the end of O1 |
+| D20 | Every JSON document names its schema (`"schema": "rampire.NAME"`) beside its version |
+| D21 | The Windows guest service is `RampireGuest` |
+| D22 | The operator views get their own crate, `rampire-ops` |
 
 ## After this roadmap
 

@@ -4,8 +4,8 @@ The names table for the clean break ([roadmap](roadmap.md) R1). R2 and R3
 rename everything to the right-hand column, once. Nothing is kept under an
 old name (decision D9).
 
-Status: **draft, waiting for review.** No code changes until it's
-reviewed. The questions at the end need an answer first.
+Reviewed by the owner on 2026-11-14 (decisions D20 to D22 in the
+[roadmap](roadmap.md#decisions)).
 
 ## Rule
 
@@ -100,21 +100,25 @@ under `crates/` follow their crate names.
 | Guest device path | `/dev/virtio-ports/org.virtio-mem.control.0` | `/dev/virtio-ports/org.rampire.control.0` |
 | Build stamp file | `virtio-mem-build.json` | `rampire-build.json` |
 
-Every schema version restarts at 1:
+Every JSON document gains a `schema` field naming it, beside its
+`version`, and every version restarts at 1 (decision D20):
 
-| Schema | Constant | Now |
-|---|---|---|
-| Guest publication (raw telemetry) | `RAW_TELEMETRY_VERSION` | 6 |
-| Guest settings | `GUEST_SETTINGS_VERSION` | 6 |
-| Memory request | `MEMORY_REQUEST_VERSION` | 1 |
-| Controller (host) status | `CONTROLLER_STATUS_VERSION` | 5 |
-| Attestation | `COMPATIBILITY_ATTESTATION_VERSION` | 2 |
-| Checkpoint (durable state) | `CHECKPOINT_VERSION` | 2 |
-| Windows service configuration | `WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION` | 9 |
-| Build record | `RECORD_SCHEMA_VERSION` | 1 |
-| Controller status evidence | `EVIDENCE_VERSION` | 1 |
-| Linux deploy evidence | `EVIDENCE_SCHEMA_VERSION` | 1 |
-| Qualification summary | `SCHEMA_VERSION` | 4 |
+| Document | `schema` | Constant | Version now |
+|---|---|---|---|
+| Guest publication (raw telemetry) | `rampire.publication` | `RAW_TELEMETRY_VERSION` | 6 |
+| Guest settings | `rampire.guest-settings` | `GUEST_SETTINGS_VERSION` | 6 |
+| Memory request | `rampire.request` | `MEMORY_REQUEST_VERSION` | 1 |
+| Controller (host) status | `rampire.status` | `CONTROLLER_STATUS_VERSION` | 5 |
+| Attestation | `rampire.attestation` | `COMPATIBILITY_ATTESTATION_VERSION` | 2 |
+| Checkpoint (durable state) | `rampire.checkpoint` | `CHECKPOINT_VERSION` | 2 |
+| Windows service configuration | `rampire.windows-config` | `WINDOWS_SERVICE_CONFIG_SCHEMA_VERSION` | 9 |
+| Build record | `rampire.build` | `RECORD_SCHEMA_VERSION` | 1 |
+| Controller status evidence | `rampire.status-evidence` | `EVIDENCE_VERSION` | 1 |
+| Linux deploy evidence | `rampire.deploy-evidence` | `EVIDENCE_SCHEMA_VERSION` | 1 |
+| Qualification summary | `rampire.qualification` | `SCHEMA_VERSION` | 4 |
+
+A reader refuses a document whose `schema` or `version` it doesn't
+know.
 
 ## Environment variables
 
@@ -134,18 +138,10 @@ for example `VIRTIO_MEM_BUILD_ID` → `RAMPIRE_BUILD_ID`, apart from these:
 | `virtio-mem-qualification-artifacts-*` | `rampire-qualification-artifacts-*` |
 | Test fixture port `org.virtio-mem.other.0` | `org.rampire.other.0` |
 
-## Questions for review
+## Decisions
 
-1. **Schema names.** Today a document carries only a `version` number.
-   Nothing in it says what kind of document it is. D8 and R3 talk about
-   renaming schema names, but there are none to rename. Recommended: add
-   `"schema": "rampire.NAME"` beside `"version": 1` in every JSON document
-   (`rampire.publication`, `rampire.request`, `rampire.status`,
-   `rampire.attestation`, `rampire.checkpoint`, `rampire.evidence`), so
-   tools and the `--json` schemas in O4.1 can tell documents apart.
-2. **The Windows service name.** `RampireGuest`, or `RAMpire` to match the
-   install directory? It only shows in `services.msc` and `sc.exe`.
-3. **The operations library.** A separate `rampire-ops` crate, as above,
-   lets `xtask` use the views without building the daemon. The other way
-   is to keep them in the `rampire` crate's library, which is one crate
-   fewer.
+| ID | Decision |
+|---|---|
+| D20 | Every JSON document carries `"schema": "rampire.NAME"` beside `"version"` |
+| D21 | The Windows service is `RampireGuest` |
+| D22 | The operator views live in their own crate, `rampire-ops` |
