@@ -12,7 +12,7 @@ use crate::attestation::AttestedCompatibilitySource;
 use crate::checkpoint::{actuation_latched, clear_actuation_latch, read_controller_status};
 use crate::compatibility_source::CompatibilitySource;
 use crate::config::HostConfig;
-use crate::guest_channel::{GuestChannel, GuestLink, SystemUnixClock, UnixClock};
+use crate::guest_channel::{GuestChannel, PublicationCopyFirst, SystemUnixClock, UnixClock};
 use crate::qga::VirshGuestFiles;
 use crate::resize_sink::VirshResizeSink;
 use crate::runtime::{MemoryStateSource, ResizeSink};
@@ -143,15 +143,20 @@ pub fn status<W: Write>(target: &Target, output: &mut W) -> Result<(), String> {
     let (config, virsh) = load(target)?;
     let live = VirshXmlSource::new(virsh.clone(), config.vm_name.clone(), config.alias.clone())
         .memory_state()?;
+    // The controller keeps a copy of each publication it reads, whichever
+    // route it came on; the guest agent is read only without one.
     let guest_input = match GuestChannel::new(
-        VirshGuestFiles::new(virsh, config.vm_name.clone()),
+        PublicationCopyFirst::new(
+            &config.vm_name,
+            VirshGuestFiles::new(virsh, config.vm_name.clone()),
+        ),
         &config.raw_telemetry_path,
         &config.vm_name,
         &config.raw_telemetry_service_name,
         config.raw_telemetry_max_age,
         config.raw_telemetry_future_tolerance,
     )
-    .read()
+    .read_publication()
     {
         Ok(envelope) => GuestInputStatus {
             error: None,

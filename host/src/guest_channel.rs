@@ -211,6 +211,12 @@ impl<Q, T> GuestChannel<Q, T> {
 }
 
 impl<Q: GuestFileReader, T: UnixClock> GuestChannel<Q, T> {
+    /// The latest valid publication, read without writing anything: for
+    /// tools beside the controller.
+    pub fn read_publication(&self) -> Result<RawTelemetryEnvelope, String> {
+        self.read_route()
+    }
+
     /// The latest valid publication, from the control channel or the files.
     fn read_route(&self) -> Result<RawTelemetryEnvelope, String> {
         // A guest on the channel is read there while its publications stay
