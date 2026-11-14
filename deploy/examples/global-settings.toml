@@ -26,7 +26,7 @@ host_min_headroom_bytes = "4GB"
 observe_only = false
 
 # Periodic fallback seconds between host polls and guest samples (1–10).
-# Native pressure, virtio-serial hints and libvirt size events can wake earlier.
+# Native pressure, control-channel records and libvirt events can wake earlier.
 # Freshness and maximum sample gaps are derived from this interval.
 # Reclaim needs 1 second of continuous qualifying history.
 poll_interval_seconds = 1

@@ -124,9 +124,9 @@ impl Virsh {
     #[cfg(unix)]
     pub(crate) fn event_command(&self) -> Command {
         self.command(&[
+            // Every event, for memory-device-size-change and lifecycle.
             "event".to_owned(),
-            "--event".to_owned(),
-            "memory-device-size-change".to_owned(),
+            "--all".to_owned(),
             "--loop".to_owned(),
         ])
     }

@@ -117,6 +117,23 @@ impl ControlChannel {
         }
     }
 
+    pub fn vm(&self) -> &str {
+        &self.vm
+    }
+
+    /// The domain has just started, so its channel socket now exists: look
+    /// it up again at once rather than after the reconnect interval.
+    pub fn domain_started(&self) {
+        let reconnect = {
+            let mut state = self.state();
+            state.retry_after = None;
+            state.stream.is_none()
+        };
+        if reconnect {
+            self.connect();
+        }
+    }
+
     pub fn connected(&self) -> bool {
         self.state().stream.is_some()
     }

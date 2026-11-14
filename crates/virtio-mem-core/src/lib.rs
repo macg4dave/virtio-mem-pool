@@ -35,7 +35,7 @@ pub use memory_request::{
     bounded_reason, host_status_path, request_state_path, GuestSettings, HostMemoryStatus,
     MemoryOperation, MemoryOutcome, MemoryRequest, MemoryRequestJournal, MemoryResult,
     RequestAdmission, RequestIdentity, MAX_HOST_STATUS_BYTES, MAX_REQUEST_LIFETIME_MILLIS,
-    MEMORY_REQUEST_VERSION, MEMORY_WAKE_CHANNEL_NAME,
+    MEMORY_REQUEST_VERSION,
 };
 pub use pool::{allocate_pool, service_order, PoolAllocation, PoolError, PoolMember};
 pub use stream::{

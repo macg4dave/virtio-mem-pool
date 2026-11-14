@@ -1,24 +1,27 @@
-//! Virtio-serial wake hints. The existing validated file protocol remains the
-//! authority; disconnected or missing channels retain bounded polling.
-use std::io::{self, Read, Write};
+//! What wakes the controller before its poll interval: a record on a
+//! guest's control channel, or a libvirt domain event. Polling remains the
+//! fallback; neither carries any authority of its own.
+use std::io::{self, Read};
 use std::os::fd::AsRawFd;
-use std::os::unix::net::UnixStream;
 use std::process::{Child, ChildStdout, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use quick_xml::{events::Event, Reader};
-use virtio_mem_core::MEMORY_WAKE_CHANNEL_NAME;
 
-use crate::virsh::{Virsh, VirshCommand};
+use crate::virsh::Virsh;
 
-/// Read-only libvirt events accelerate observation of resize convergence.
-/// The runtime owns and reaps the subscription process.
+/// Libvirt domain events: a device size change speeds up observing a
+/// resize, and a domain start lets its control channel connect at once
+/// instead of after the reconnect interval. The runtime owns and reaps the
+/// subscription process.
 pub struct MemoryEvents {
     child: Child,
     output: ChildStdout,
     closed: bool,
+    /// Output after the last complete line.
+    partial: Vec<u8>,
 }
 impl MemoryEvents {
     pub fn start(command: &Virsh) -> io::Result<Self> {
@@ -50,23 +53,61 @@ impl MemoryEvents {
             child,
             output,
             closed: false,
+            partial: Vec::new(),
         })
     }
-    fn drain(&mut self) {
+
+    /// Reads what the subscription has written and returns the domains it
+    /// reported started.
+    fn drain(&mut self) -> Vec<String> {
         let mut bytes = [0; 4096];
-        match self.output.read(&mut bytes) {
-            Ok(0) => {
-                self.closed = true;
-                eprintln!("libvirt event subscription ended; polling continues");
+        loop {
+            match self.output.read(&mut bytes) {
+                Ok(0) => {
+                    self.closed = true;
+                    eprintln!("libvirt event subscription ended; polling continues");
+                    break;
+                }
+                Ok(count) => self.partial.extend_from_slice(&bytes[..count]),
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+                Err(error) => {
+                    self.closed = true;
+                    eprintln!("libvirt event read failed; polling continues: {error}");
+                    break;
+                }
             }
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
-            Err(error) => {
-                self.closed = true;
-                eprintln!("libvirt event read failed; polling continues: {error}");
+        }
+        started_domains(&mut self.partial)
+    }
+}
+
+/// Takes the complete lines from `output` and returns the domains whose
+/// lifecycle event is `Started`. Libvirt prints
+/// `event 'lifecycle' for domain 'NAME': Started Booted`. An overlong
+/// unterminated line is dropped, so the buffer stays bounded.
+fn started_domains(output: &mut Vec<u8>) -> Vec<String> {
+    const PREFIX: &str = "event 'lifecycle' for domain '";
+    let mut started = Vec::new();
+    let complete = output
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |end| end + 1);
+    for line in String::from_utf8_lossy(&output[..complete]).lines() {
+        if let Some((name, state)) = line
+            .strip_prefix(PREFIX)
+            .and_then(|rest| rest.rsplit_once("': "))
+        {
+            if state.starts_with("Started") {
+                started.push(name.to_owned());
             }
         }
     }
+    output.drain(..complete);
+    if output.len() > 64 * 1024 {
+        output.clear();
+    }
+    started
 }
 impl Drop for MemoryEvents {
     fn drop(&mut self) {
@@ -87,145 +128,30 @@ impl Drop for MemoryEvents {
     }
 }
 
-#[derive(Debug)]
-pub struct WakePeer {
-    command: Virsh,
-    vm: String,
-    stream: Mutex<Option<UnixStream>>,
-    reported: AtomicBool,
-    /// No reconnect attempt (a domain XML read) before this instant: an
-    /// absent channel would otherwise be looked up every poll.
-    retry_after: Mutex<Option<Instant>>,
-}
-
-/// How long a missing or failed wake channel waits before the next lookup.
-const RECONNECT_INTERVAL: Duration = Duration::from_secs(30);
-
-impl WakePeer {
-    pub fn new(command: Virsh, vm: String) -> Arc<Self> {
-        Arc::new(Self {
-            command,
-            vm,
-            stream: Mutex::new(None),
-            reported: AtomicBool::new(false),
-            retry_after: Mutex::new(None),
-        })
-    }
-
-    fn stream(&self) -> MutexGuard<'_, Option<UnixStream>> {
-        self.stream.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    fn connect(&self) {
-        if self.stream().is_some() {
-            return;
-        }
-        let mut retry_after = self
-            .retry_after
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        if retry_after.is_some_and(|instant| Instant::now() < instant) {
-            return;
-        }
-        *retry_after = Instant::now().checked_add(RECONNECT_INTERVAL);
-        drop(retry_after);
-        let attempt = || -> Result<UnixStream, String> {
-            let xml = self
-                .command
-                .run(&["dumpxml".to_owned(), self.vm.clone()])
-                .map_err(|e| e.to_string())?;
-            let path = channel_path(&xml, MEMORY_WAKE_CHANNEL_NAME)?
-                .ok_or("virtio-serial wake channel is absent")?;
-            let stream = UnixStream::connect(path).map_err(|e| e.to_string())?;
-            stream.set_nonblocking(true).map_err(|e| e.to_string())?;
-            Ok(stream)
-        };
-        match attempt() {
-            Ok(stream) => {
-                eprintln!("virtio-mem-host: vm={} event=wake_connected", self.vm);
-                *self.stream() = Some(stream);
-                self.reported.store(false, Ordering::Relaxed);
-                // A later disconnect may reconnect straight away.
-                *self
-                    .retry_after
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner) = None;
-            }
-            Err(error) => {
-                if !self.reported.swap(true, Ordering::Relaxed) {
-                    eprintln!("virtio-mem-host: vm={} event=wake_unavailable fallback=poll reason={error}", self.vm);
-                }
-            }
-        }
-    }
-
-    pub fn notify(&self) {
-        let mut slot = self.stream();
-        if let Some(stream) = slot.as_mut() {
-            match stream.write(b"\x01") {
-                Ok(1) => {}
-                // A queued hint already wakes the peer; no authority is lost.
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
-                _ => {
-                    *slot = None;
-                }
-            }
-        }
-    }
-
-    fn drain(&self) {
-        let mut slot = self.stream();
-        if let Some(stream) = slot.as_mut() {
-            let mut hints = [0; 4096];
-            match stream.read(&mut hints) {
-                Ok(0) => {
-                    *slot = None;
-                }
-                Ok(_) => {}
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
-                Err(_) => {
-                    *slot = None;
-                }
-            }
-        }
-    }
-}
-
-/// Wait for a hint or a control record from any VM, or the periodic
-/// fallback, with bounded stop latency. Either only accelerates a complete,
+/// Wait for a control record from any VM, a libvirt event, or the periodic
+/// fallback, with bounded stop latency. Each only accelerates a complete,
 /// guarded controller round.
 pub fn wait(
-    peers: &[Arc<WakePeer>],
     controls: &[Arc<crate::control_channel::ControlChannel>],
     mut events: Option<&mut MemoryEvents>,
     stop: &AtomicBool,
     timeout: Duration,
 ) {
-    for peer in peers {
-        peer.connect();
-    }
     for control in controls {
         control.connect();
     }
     let started = Instant::now();
     while !stop.load(Ordering::Acquire) && started.elapsed() < timeout {
-        let mut descriptors: Vec<_> = peers
+        let mut descriptors: Vec<_> = controls
             .iter()
-            .filter_map(|peer| {
-                peer.stream().as_ref().map(|s| libc::pollfd {
-                    fd: s.as_raw_fd(),
+            .filter_map(|control| {
+                control.raw_fd().map(|fd| libc::pollfd {
+                    fd,
                     events: libc::POLLIN,
                     revents: 0,
                 })
             })
             .collect();
-        descriptors.extend(controls.iter().filter_map(|control| {
-            control.raw_fd().map(|fd| libc::pollfd {
-                fd,
-                events: libc::POLLIN,
-                revents: 0,
-            })
-        }));
         if let Some(events) = events.as_ref().filter(|e| !e.closed) {
             descriptors.push(libc::pollfd {
                 fd: events.output.as_raw_fd(),
@@ -237,7 +163,7 @@ pub fn wait(
             .saturating_sub(started.elapsed())
             .min(Duration::from_millis(100));
         // SAFETY: descriptors is a live, uniquely borrowed array of pollfd;
-        // all file descriptors remain owned by peers during this call.
+        // all file descriptors remain owned by their channels during this call.
         let result = unsafe {
             libc::poll(
                 descriptors.as_mut_ptr(),
@@ -247,10 +173,11 @@ pub fn wait(
         };
         if result > 0 {
             if let Some(events) = events.as_mut().filter(|e| !e.closed) {
-                events.drain();
-            }
-            for peer in peers {
-                peer.drain();
+                for domain in events.drain() {
+                    for control in controls.iter().filter(|c| c.vm() == domain) {
+                        control.domain_started();
+                    }
+                }
             }
             for control in controls {
                 control.pump();
@@ -322,45 +249,28 @@ mod tests {
     use super::*;
     #[test]
     fn discovers_only_the_dedicated_channel() {
-        let xml = "<domain><devices><channel type='unix'><source path='/qga'/><target type='virtio' name='org.qemu.guest_agent.0'/></channel><channel type='unix'><source path='/wake'/><target type='virtio' name='org.virtio-mem.wake.0'/></channel></devices></domain>";
+        let xml = "<domain><devices><channel type='unix'><source path='/qga'/><target type='virtio' name='org.qemu.guest_agent.0'/></channel><channel type='unix'><source path='/control'/><target type='virtio' name='org.virtio-mem.control.0'/></channel></devices></domain>";
         assert_eq!(
-            channel_path(xml, MEMORY_WAKE_CHANNEL_NAME),
-            Ok(Some("/wake".to_owned()))
+            channel_path(xml, "org.virtio-mem.control.0"),
+            Ok(Some("/control".to_owned()))
         );
-        assert_eq!(channel_path(xml, "org.virtio-mem.control.0"), Ok(None));
+        assert_eq!(channel_path(xml, "org.virtio-mem.other.0"), Ok(None));
         assert_eq!(
-            channel_path("<domain/>", MEMORY_WAKE_CHANNEL_NAME),
+            channel_path("<domain/>", "org.virtio-mem.control.0"),
             Ok(None)
         );
     }
 
     #[test]
-    fn socket_hint_wakes_without_waiting_for_poll_and_handles_disconnect() {
-        let (ours, mut guest) = UnixStream::pair().unwrap();
-        ours.set_nonblocking(true).unwrap();
-        let peer = Arc::new(WakePeer {
-            command: Virsh::new("unused", Duration::from_secs(1)),
-            vm: "guest".to_owned(),
-            stream: Mutex::new(Some(ours)),
-            reported: AtomicBool::new(false),
-            retry_after: Mutex::new(None),
-        });
-        guest.write_all(b"hint").unwrap();
-        let started = Instant::now();
-        wait(
-            &[Arc::clone(&peer)],
-            &[],
-            None,
-            &AtomicBool::new(false),
-            Duration::from_secs(5),
-        );
-        assert!(started.elapsed() < Duration::from_secs(1));
-        peer.notify();
-        let mut byte = [0];
-        guest.read_exact(&mut byte).unwrap();
-        assert_eq!(byte, [1]);
-        drop(guest);
-        peer.drain();
-        assert!(peer.stream().is_none());
+    fn reports_started_domains_from_complete_event_lines() {
+        let mut output = b"event 'memory-device-size-change' for domain 'a':\nalias: ua-virtiomem0\nsize: 524288\nevent 'lifecycle' for domain 'safe_vm_2': Started Booted\nevent 'lifecycle' for domain 'b': Stopped Shutdown\nevent 'lifecycle' for domain 'd': Started Restored\nevent 'lifecycle' for domain 'c': Sta".to_vec();
+        assert_eq!(started_domains(&mut output), ["safe_vm_2", "d"]);
+        // The unfinished line waits for the rest.
+        output.extend_from_slice(b"rted Booted\n");
+        assert_eq!(started_domains(&mut output), ["c"]);
+        assert!(output.is_empty());
+        let mut endless = vec![b'x'; 70 * 1024];
+        assert!(started_domains(&mut endless).is_empty());
+        assert!(endless.is_empty());
     }
 }

@@ -68,8 +68,6 @@ pub struct GuestChannel<Q, T = SystemUnixClock> {
     future_tolerance: Duration,
     clock: T,
     #[cfg(unix)]
-    wake: Option<std::sync::Arc<crate::wake::WakePeer>>,
-    #[cfg(unix)]
     control: Option<std::sync::Arc<crate::control_channel::ControlChannel>>,
     /// The last publication read came over the control channel.
     via_control: std::cell::Cell<bool>,
@@ -105,12 +103,6 @@ impl<Q> GuestChannel<Q, SystemUnixClock> {
 }
 
 impl<Q, T> GuestChannel<Q, T> {
-    #[cfg(unix)]
-    pub fn with_wake(mut self, wake: std::sync::Arc<crate::wake::WakePeer>) -> Self {
-        self.wake = Some(wake);
-        self
-    }
-
     #[cfg(unix)]
     pub fn with_control(
         mut self,
@@ -188,8 +180,6 @@ impl<Q, T> GuestChannel<Q, T> {
             max_age,
             future_tolerance,
             clock,
-            #[cfg(unix)]
-            wake: None,
             #[cfg(unix)]
             control: None,
             via_control: std::cell::Cell::new(false),
@@ -338,10 +328,6 @@ impl<Q: GuestFileReader + GuestFileWriter, T: UnixClock> GuestLink for GuestChan
         written?;
         self.last_write.set(Some(Instant::now()));
         if changed {
-            #[cfg(unix)]
-            if let Some(wake) = &self.wake {
-                wake.notify();
-            }
             *self.last_status.borrow_mut() = Some(status.clone());
         }
         Ok(())

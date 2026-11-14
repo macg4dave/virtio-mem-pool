@@ -7,10 +7,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::VirtioMemState;
 
-/// Optional virtio-serial doorbell. Bytes only request a fresh observation;
-/// they never authorise a resize or acknowledge a durable request.
-pub const MEMORY_WAKE_CHANNEL_NAME: &str = "org.virtio-mem.wake.0";
-
 pub const MEMORY_REQUEST_VERSION: u16 = 1;
 /// Admission freshness. Execution/result resolution may outlive this interval.
 pub const MAX_REQUEST_LIFETIME_MILLIS: u64 = 60_000;

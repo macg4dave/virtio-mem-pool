@@ -180,8 +180,6 @@ pub struct HostRuntime<G, S, R, H> {
     pool_bytes: Option<u64>,
     poll_interval: Duration,
     #[cfg(unix)]
-    wake: Vec<std::sync::Arc<crate::wake::WakePeer>>,
-    #[cfg(unix)]
     controls: Vec<std::sync::Arc<crate::control_channel::ControlChannel>>,
     #[cfg(unix)]
     memory_events: Option<crate::wake::MemoryEvents>,
@@ -210,8 +208,6 @@ where
             pool_bytes,
             poll_interval,
             #[cfg(unix)]
-            wake: Vec::new(),
-            #[cfg(unix)]
             controls: Vec::new(),
             #[cfg(unix)]
             memory_events: None,
@@ -221,11 +217,9 @@ where
     #[cfg(unix)]
     pub fn with_wake(
         mut self,
-        peers: Vec<std::sync::Arc<crate::wake::WakePeer>>,
         controls: Vec<std::sync::Arc<crate::control_channel::ControlChannel>>,
         events: Option<crate::wake::MemoryEvents>,
     ) -> Self {
-        self.wake = peers;
         self.controls = controls;
         self.memory_events = events;
         self
@@ -237,9 +231,8 @@ where
                 return Err(error);
             }
             #[cfg(unix)]
-            if !self.wake.is_empty() || !self.controls.is_empty() {
+            if !self.controls.is_empty() {
                 crate::wake::wait(
-                    &self.wake,
                     &self.controls,
                     self.memory_events.as_mut(),
                     stop,
