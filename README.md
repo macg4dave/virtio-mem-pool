@@ -1,4 +1,8 @@
-# virtio-mem-pool
+# RAMpire
+
+<p align="center">
+  <img src="docs/Mascot/Hero_Logo_Rampire.png" alt="RAMpire" width="480">
+</p>
 
 One controller on a KVM host shares a pool of RAM between many VMs. Each
 guest works out when it needs more or less memory and asks for it. The host
@@ -12,7 +16,7 @@ Hyper-V Dynamic Memory (see [the roadmap](docs/roadmap.md), milestone W).
 
 | Part | State |
 |---|---|
-| Host controller (`virtio-mem-host`) | Working on RHEL 10 / libvirt / QEMU, managing several Linux VMs from one pool |
+| Host controller (`rampire`) | Working on RHEL 10 / libvirt / QEMU, managing several Linux VMs from one pool |
 | Linux guest service | Working: PSI pressure triggers, cache floor, readiness report, control channel |
 | Windows guest service | Built on the shared guest crate, not deployed. Its virtio-mem path is paused because of an upstream `viomem` driver bug; see [archive/viomem](archive/viomem/README.md) |
 | Windows on Hyper-V Dynamic Memory | Not started |
@@ -24,8 +28,8 @@ before running it on a host you care about.
 
 | Path | What it is |
 |---|---|
-| [crates/virtio-mem-core](crates/virtio-mem-core) | Policy, request protocol, wire and settings formats (any platform) |
-| [crates/virtio-mem-guest](crates/virtio-mem-guest) | Shared guest code: request store, worker, transports, service loop |
+| [crates/rampire-core](crates/rampire-core) | Policy, request protocol, wire and settings formats (any platform) |
+| [crates/rampire-guest](crates/rampire-guest) | Shared guest code: request store, worker, transports, service loop |
 | [host](host) | The controller daemon and its CLI (Linux) |
 | [guest-linux](guest-linux) | Linux guest service, workload tool and Debian package |
 | [guest-windows](guest-windows) | Windows guest service and workload tool |
@@ -53,8 +57,8 @@ See [development](docs/development.md) for setup and platform details.
 | [docs/administration.md](docs/administration.md) | Installing the controller, adding VMs, guest services, recovery, upgrades |
 | [docs/development.md](docs/development.md) | Building, the gate, which checks need which platform |
 | [docs/tools.md](docs/tools.md) | `watch`, `metrics` and `qualification` |
-| [docs/roadmap.md](docs/roadmap.md) | Goals, blockers and open work |
-| [docs/prior-art.md](docs/prior-art.md) | Related projects, their licenses, and the rule for importing code |
+| [docs/roadmap.md](docs/roadmap.md) | Goals, open work, decisions and the rule for importing third-party code |
+| [docs/names.md](docs/names.md) | Every name RAMpire uses, and what it replaced |
 
 ## License
 

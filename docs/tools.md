@@ -2,16 +2,16 @@
 
 Observation and development tools. Run `watch`, `metrics` and
 `qualification` on the KVM host; they read the controller's journal,
-libvirt and each guest's publication. `CONFIG` below is the host list the
-controller runs (installed as `/etc/virtio-mem-host/host_list.toml`); with
+libvirt and each guest's publication. `CONFIG` below is the configuration
+directory the controller runs (installed as `/etc/rampire`); with
 several VMs, `--vm NAME` picks one. They follow the one
-`virtio-mem-host@INSTANCE` unit installed on the host, or the one named
+`rampire@INSTANCE` unit installed on the host, or the one named
 with `--instance INSTANCE`.
 
 ## Guest publications
 
 While the controller runs it keeps each guest's latest validated
-publication in `/run/virtio-mem-host/<vm_name>.publication.json`, readable
+publication in `/run/rampire/<vm_name>.publication.json`, readable
 by any local user. The tools read that copy first. Without it (the
 controller stopped) they read the guest's control file through the QEMU
 guest agent, which works only for a guest on the control files: a guest on
@@ -32,7 +32,7 @@ guest's latest publication and the controller's events.
 cargo xtask pool --config CONFIG
 ```
 
-A live view of every VM in the host list on one screen, read-only like
+A live view of every VM in the configuration on one screen, read-only like
 `watch`:
 
 - **Pool**: one bar split into each VM's charge (`max(requested,
@@ -69,9 +69,9 @@ powershell -ExecutionPolicy Bypass -File tools\windows\Watch-Pool.ps1 [-NewWindo
 
 `Watch-Pool.ps1` connects with `ssh -t`, builds xtask in a checkout of
 this repository on the KVM host as the SSH user, then runs it through
-`sudo` so it can read `/etc/virtio-mem-host/` and the controller's
+`sudo` so it can read `/etc/rampire/` and the controller's
 journal. The host and checkout are site values: pass `-HostName` and
-`-Checkout`, set `VIRTIO_MEM_POOL_HOST` and `VIRTIO_MEM_POOL_CHECKOUT`,
+`-Checkout`, set `RAMPIRE_POOL_HOST` and `RAMPIRE_POOL_CHECKOUT`,
 or copy [deploy/examples/pool.env.example](../deploy/examples/pool.env.example)
 to `site/pool.env`. `-NewWindow` opens a separate 140-column window,
 `-Update` fast-forwards the host's checkout before building, and
@@ -126,7 +126,7 @@ writes one directory under `.artifacts/metrics/<vm_name>-<UTC time>/` (or
 
 | File | Contents |
 |---|---|
-| `samples.csv` | Every sample period (`--interval-seconds`): host total/available RAM, headroom over `host_min_headroom_bytes`, swap used, QEMU RSS, controller active, device size/requested/current. Every guest read (`--guest-interval-seconds`, default 5): agent read time and success, publication age, guest available RAM, load, commit and commit headroom, cache, memory signal, pending request. Appended after those: controller unit state, pid, memory, CPU % and restart count; QEMU pid; libvirt domain state (`virsh domstate --reason`); and per guest read the service session, commit peak and kernel paged/non-paged pools. Sizes in MiB. |
+| `samples.csv` | Every sample period (`--interval-seconds`): host total/available RAM, headroom over `host_reserve`, swap used, QEMU RSS, controller active, device size/requested/current. Every guest read (`--guest-interval-seconds`, default 5): agent read time and success, publication age, guest available RAM, load, commit and commit headroom, cache, memory signal, pending request. Appended after those: controller unit state, pid, memory, CPU % and restart count; QEMU pid; libvirt domain state (`virsh domstate --reason`); and per guest read the service session, commit peak and kernel paged/non-paged pools. Sizes in MiB. |
 | `events.jsonl` | Every controller journal entry written during the run, with its fields split out, plus markers and `metrics_*` lifecycle events: controller failed/stopped/started/restarted, QEMU exited/started/restarted, domain state changes, guest service session changes, guest publication stalled/resumed, guest agent lost/restored and publication read failed/restored. |
 | `incidents.jsonl` | One record per incident, with its bundle path, pid and details (exit status, systemd result, panic text, last controller lines, core dump flag, publication gap). Empty when nothing crashed. |
 | `incidents/NNN-TIME-COMPONENT.txt` | Evidence bundle per incident, collected at detection: panic text and last controller lines, `systemctl status`, `coredumpctl info` when the controller dumped core, the unit's last 400 journal lines, the QEMU log tail (root only) for VM incidents, the guest's last and first publication around a service restart, and the 60 `samples.csv` rows before detection. |
@@ -193,12 +193,9 @@ for another 30. Five or more zero grants or rejected commands within a minute
 must persist as a condition for 30 seconds. Bundles are emitted once per episode
 and rearm after recovery. Durations use the recorder's monotonic clock.
 
-Guests now publish version 6, which means the guest takes its settings
-from the host. Hosts accept versions 4 to 6 and send settings only to a
-version 6 guest or one that has published nothing yet. Upgrade the host
-before either guest service. The durable memory request and host-status schemas are
-unchanged; diagnostic fields never authorise memory changes. Existing captures
-without diagnostic fields remain readable.
+Every guest takes its settings from the host. Each publication names its
+schema (`rampire.publication`) and version 1, and the host refuses any
+other. Diagnostic fields never authorise memory changes.
 
 
 ## Watching guest RAM
@@ -221,8 +218,8 @@ cargo xtask linux uninstall SSH_DESTINATION --output PATH [--apply] [--discard-s
 Install, inspect or remove the Linux guest service on a development guest
 over SSH (the account needs passwordless `sudo`). Deploy builds the stamped
 binary first, installs it with the unit, the RAM monitor
-(`virtio-mem-watch-ram`) and the qualification workload
-(`virtio-mem-workload`), restarts the service and checks what it reads back.
+(`rampire-watch-ram`) and the qualification workload
+(`rampire-workload`), restarts the service and checks what it reads back.
 Without `--apply` they only record what they would do. Uninstall keeps the
 durable request state unless told to discard it.
 

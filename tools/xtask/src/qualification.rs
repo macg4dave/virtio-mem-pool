@@ -137,7 +137,6 @@ struct PrivilegedSample {
     block_size_bytes: u64,
     host_mem_available_bytes: Option<u64>,
     guest_dommemstat_kib: serde_json::Map<String, Value>,
-    #[serde(alias = "windows_raw_telemetry")]
     guest_raw_telemetry: RawTelemetryEnvelope,
     qga_reply: String,
 }

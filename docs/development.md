@@ -4,19 +4,19 @@ How to build, check and test this repository, and which checks need which
 platform. [The roadmap](roadmap.md) holds intended design and open work;
 [the Rust standards](../.github/prompts/rust.md) hold coding rules;
 [administration](administration.md) covers installing and running the
-product; [prior art](prior-art.md) lists related projects, their licenses
-and the rule for importing third-party code.
+product; the roadmap also holds
+[the rule for importing third-party code](roadmap.md#importing-third-party-code).
 
 ## Workspace
 
 | Crate | Path | Builds on | Owns |
 |---|---|---|---|
-| `virtio-mem-core` | `crates/virtio-mem-core` | any | Policy, request protocol, wire and settings formats |
-| `virtio-mem-guest` | `crates/virtio-mem-guest` | any | Guest request store, worker, transports, service loop |
-| `virtio-mem-host` | `host/` | Linux | Controller daemon and its CLI |
-| `virtio-mem-guest-linux` | `guest-linux/` | Linux | Linux guest service and `virtio-mem-workload` |
-| `virtio-mem-guest-windows` | `guest-windows/` | Windows (native) | Windows service and its workload |
-| `virtio-mem-xtask` | `tools/xtask` | Linux | Gate, deploy, observe, qualify (`cargo xtask`) |
+| `rampire-core` | `crates/rampire-core` | any | Policy, request protocol, wire and settings formats |
+| `rampire-guest` | `crates/rampire-guest` | any | Guest request store, worker, transports, service loop |
+| `rampire` | `host/` | Linux | Controller daemon and its CLI |
+| `rampire-guest-linux` | `guest-linux/` | Linux | Linux guest service and `rampire-workload` |
+| `rampire-guest-windows` | `guest-windows/` | Windows (native) | Windows service and its workload |
+| `xtask` | `tools/xtask` | Linux | Gate, deploy, observe, qualify (`cargo xtask`) |
 
 `xtask` depends on the host crate, so it builds only on Linux. The core
 and shared guest crates build anywhere.
@@ -42,9 +42,9 @@ needs a Linux build host, named in the environment or in `site/gate.env`
 
 | Variable | Meaning |
 |---|---|
-| `VIRTIO_MEM_GATE_HOST` | SSH destination of the Linux build host |
-| `VIRTIO_MEM_GATE_DIR` | Absolute directory on it that the gate owns: `src/` is replaced each run, `target/` is kept |
-| `VIRTIO_MEM_SSH` | SSH client to use, if not `ssh` |
+| `RAMPIRE_GATE_HOST` | SSH destination of the Linux build host |
+| `RAMPIRE_GATE_DIR` | Absolute directory on it that the gate owns: `src/` is replaced each run, `target/` is kept |
+| `RAMPIRE_SSH` | SSH client to use, if not `ssh` |
 
 The working tree is sent as it is, uncommitted and untracked (not ignored)
 files included, with the repository's line endings. The build host needs
@@ -57,10 +57,10 @@ checkout. `cargo xtask gate all` adds the native Windows gate below.
 ### Checking one crate
 
 ```bash
-cargo test -p virtio-mem-core          # anywhere
-cargo test -p virtio-mem-guest         # anywhere
-cargo test -p virtio-mem-guest-windows # Windows
-cargo test -p virtio-mem-host          # Linux
+cargo test -p rampire-core          # anywhere
+cargo test -p rampire-guest         # anywhere
+cargo test -p rampire-guest-windows # Windows
+cargo test -p rampire          # Linux
 ```
 
 Unit tests read only [fixtures](../fixtures/config) and temporary files.
@@ -92,10 +92,10 @@ A deployed binary names the exact source it came from. The identity is the
 commit (`<12 hex>`), or for a working tree that differs from it
 `<commit>-dirty.<12 hex of the source digest>`: a SHA-256 over every
 tracked and untracked, non-ignored file. The build compiles it in through
-`VIRTIO_MEM_BUILD_ID`; a build without it reports `unversioned`.
+`RAMPIRE_BUILD_ID`; a build without it reports `unversioned`.
 
 - Linux guest: `cargo xtask linux build` builds the release binary and
-  checks that `virtio-mem-guest version` reports the checkout's identity.
+  checks that `rampire-guest version` reports the checkout's identity.
 - Windows guest: `sync` stamps the remote workspace, `build` compiles the
   stamp in, `fetch` verifies the binaries by SHA-256 and writes
   `build.json`. `make windows-status` compares the installed service with

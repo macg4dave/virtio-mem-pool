@@ -1,14 +1,14 @@
 # Administration
 
-How to install the virtio-mem pool controller on a KVM host, add VMs to it,
+How to install the RAMpire controller on a KVM host, add VMs to it,
 install the guest services, recover from faults and upgrade. Development
 builds and checks are in [development](development.md); the observation
 tools are in [tools](tools.md).
 
 ## How it fits together
 
-One controller (`virtio-mem-host`) runs on the KVM host as the systemd unit
-`virtio-mem-host@INSTANCE.service`. It manages every VM in its host list
+One controller (`rampire`) runs on the KVM host as the systemd unit
+`rampire@INSTANCE.service`. It manages every VM in its configuration
 from one pool of virtio-mem device memory. In each VM a guest service
 decides when it needs more or less memory and asks; the controller admits
 the request within the pool, the VM's limits and the host's own reserve,
@@ -25,19 +25,20 @@ Run one controller per host: separate controllers cannot share a pool.
 
 | Item | Location |
 |---|---|
-| Controller binary | `/usr/local/libexec/virtio-mem-host` |
-| Unit | `/etc/systemd/system/virtio-mem-host@.service` |
-| libvirt access rule | `/etc/polkit-1/rules.d/50-virtio-mem-host.rules` |
-| Configuration | `/etc/virtio-mem-host/` (`global-settings.toml`, `host_list.toml`, `<vm_name>_settings.toml`) |
-| Attestations | `/etc/virtio-mem-host/attestations/<vm_name>.attestation.json`, apart from the settings |
-| Durable request state | `/var/lib/virtio-mem-host/state/<vm_name>-requests.json` (the unit's `StateDirectory`) |
-| Guest publications for tools | `/run/virtio-mem-host/<vm_name>.publication.json` |
-| Deployment backups | `/var/lib/virtio-mem-host/deployment-backups/` |
+| Controller binary | `/usr/local/bin/rampire` |
+| Unit | `/etc/systemd/system/rampire@.service` |
+| libvirt access rule | `/etc/polkit-1/rules.d/50-rampire.rules` |
+| Configuration | `/etc/rampire/` (`global.toml`, `vms.d/<vm_name>.toml`) |
+| Attestations | `/etc/rampire/attestations/<vm_name>.attestation.json`, apart from the settings |
+| Durable request state | `/var/lib/rampire/state/<vm_name>-requests.json` (the unit's `StateDirectory`) |
+| Guest publications for tools | `/run/rampire/<vm_name>.publication.json` |
+| Deployment backups | `/var/lib/rampire/deployment-backups/` |
 
 A site with another layout overrides `ExecStart` in a drop-in
-(`systemctl edit virtio-mem-host@.service`). The controller takes its
-attestations from the `attestations/` folder beside the host list and its
-state from the unit's `StateDirectory`, so they follow.
+(`systemctl edit rampire@.service`). `--config` names the configuration
+directory; the controller takes its attestations from the `attestations/`
+folder in it and its state from the unit's `StateDirectory`, so they
+follow.
 
 ## Installing the controller
 
@@ -47,7 +48,7 @@ QEMU, `virsh` on the path, polkit, and Rust to build the controller.
 1. Create the service account once:
 
    ```bash
-   sudo useradd --system --no-create-home --shell /sbin/nologin virtio-mem-host
+   sudo useradd --system --no-create-home --shell /sbin/nologin rampire
    ```
 
    The unit adds the `qemu` group, which owns libvirt's channel sockets.
@@ -68,40 +69,43 @@ QEMU, `virsh` on the path, polkit, and Rust to build the controller.
    attestation against the live VMs, installs binary, unit, polkit rule,
    configuration and attestations, keeping a backup of what it replaces,
    and writes JSON evidence under `.artifacts/deploy/`. The script then
-   enables and starts the unit. Every VM in the host list needs exactly one
+   enables and starts the unit. Every VM in `vms.d/` needs exactly one
    attestation: `CONFIG_DIR/attestations/<vm_name>.attestation.json`,
    unless a `VM=ATTESTATION` argument names another file.
 
    The settings files are installed byte for byte, so their comments and
-   sizes such as `"3GB"` stay as written. An install from before this
-   kept attestations beside the settings; the next install moves them
-   into `attestations/`, keeping the old copies in the deployment backup.
+   sizes such as `"3GB"` stay as written. A VM file the new configuration
+   no longer has is removed from `/etc/rampire/vms.d/`, with a copy in the
+   deployment backup.
 
 A controller that is running does not reload its configuration. To
 change it, edit the installed files and install from them:
 
 ```bash
-sudo nano /etc/virtio-mem-host/VM_settings.toml
-deploy/scripts/install-host.sh /etc/virtio-mem-host INSTANCE
+sudo nano /etc/rampire/vms.d/VM.toml
+deploy/scripts/install-host.sh /etc/rampire INSTANCE
 ```
 
 [Usage](usage.md) walks through this for people new to the program.
 
 ## Configuration
 
-Three kinds of file, in one directory, with each VM's review and
-attestation in its `attestations/` folder. Comments (`#`) are kept when
-installed. Unknown or misspelt keys are rejected. Memory sizes are binary
+One directory holds `global.toml`, one file per VM in `vms.d/`, review
+profiles in `reviews/` and attestations in `attestations/`. A missing
+`global.toml` means every default. An empty `vms.d/` is valid: the
+controller runs and logs that it manages no VMs. Only `vms.d/*.toml` files
+are read, so editor backups and `.rpmnew` files there are ignored.
+Comments (`#`) are kept when installed. Unknown or misspelt keys are rejected. Memory sizes are binary
 whatever the spelling (`"1GB"` = `"1GiB"` = 2^30 bytes, `"128MB"` =
 `"128MiB"`); fractional sizes such as `"8.5GB"` and plain byte counts are
 accepted.
 
-### `global-settings.toml`
+### `global.toml`
 
 | Key | Default | Meaning |
 |---|---|---|
-| `pool_bytes` | none | Device memory shared by every VM, excluding fixed boot RAM. Required with more than one VM |
-| `host_min_headroom_bytes` | `4GB` | `MemAvailable` the host keeps. Growth is reduced or refused rather than cross it |
+| `pool` | none | Device memory shared by every VM, excluding fixed boot RAM. Required with more than one VM |
+| `host_reserve` | `4GB` | `MemAvailable` the host keeps. Growth is reduced or refused rather than cross it |
 | `observe_only` | `false` | Evaluate and log requests, but refuse each one before resizing |
 | `poll_interval_seconds` | `5` | Host poll and guest sample interval, 1–10. Freshness bounds are six polls |
 | `command_timeout_seconds` | `10` | Limit on each `virsh` command |
@@ -117,31 +121,27 @@ later movement. It is built in, from the driver's schedule.
 
 Each VM occupies `max(requested, current)` bytes of the pool. Growth uses
 only free pool capacity, highest priority first; among equal priorities the
-request the guest issued first is served first, then entry order. The
+request the guest issued first is served first, then VM name order. The
 controller never takes memory from one VM to give to another. Admission
-also keeps 256 MiB above `host_min_headroom_bytes` for changes between
+also keeps 256 MiB above `host_reserve` for changes between
 planning and resizing.
 
-### `host_list.toml`
+### `vms.d/<vm_name>.toml`
 
-One `[[vm]]` per VM:
+One file per VM. The file's name is the libvirt domain name with `.toml`
+added: lower-case ASCII letters, digits, `-` and `_`, at most 64
+characters. The name isn't repeated inside.
 
 | Key | Meaning |
 |---|---|
-| `vm_name` | The libvirt domain name: lower-case ASCII letters, digits, `-` and `_`, at most 64 characters |
 | `alias` | The virtio-mem device's alias in the domain XML |
-| `priority` | Positive; higher is served first from free pool memory, ties in list order |
-| `telemetry_path` | Optional host file for a diagnostic copy of each publication |
-
-### `<vm_name>_settings.toml`
-
-| Key | Meaning |
-|---|---|
-| `vm_name` | Must match the filename and the host list |
+| `priority` | Positive; higher is served first from free pool memory |
 | `min_ram`, `max_ram` | Limits on total guest RAM, fixed boot RAM included, aligned to the device block size |
 | `free_ram` | The memory the guest keeps free above what it uses. A multiple of eight device blocks |
 | `guest_os` | `"linux"`, or omitted for Windows |
 | `install_path`, `service_account` | Windows only: where the service is installed and the account it runs as |
+| `review` | Optional: the review profile in `reviews/` the VM is attested with |
+| `telemetry_path` | Optional host file for a diagnostic copy of each publication |
 
 `free_ram` is the only policy size. The guest asks for more when free
 memory falls below it and returns memory when it has more than that spare.
@@ -192,34 +192,29 @@ VM's settings needs only a controller install, never a guest change.
    XML. Without the channel the guest agent must run in the guest with file
    commands allowed (RHEL-family guests block them by default).
 
-3. **Review.** Write the compatibility review for the VM,
-   `CONFIG_DIR/attestations/VM.review.json`, a JSON file that records what
-   you checked:
+3. **Review.** Write a review profile, `CONFIG_DIR/reviews/NAME.toml`,
+   that records what you checked, starting from
+   [deploy/examples/reviews/linux-standard.toml](../deploy/examples/reviews/linux-standard.toml),
+   and name it in the VM's file with `review = "NAME"`. Each answer says
+   whether tooling detected it or a person confirmed it:
 
-   ```json
-   {
-     "guest_os": "linux",
-     "workload_reviewed": true,
-     "no_vdpa": true,
-     "no_rdma_migration": true,
-     "no_vfio_nvme": true,
-     "no_mlock": true,
-     "no_secure_virtualization": true,
-     "no_unsupported_vhost_user": true,
-     "balloon_resize_inactive": true,
-     "memory_slot_budget": 1,
-     "vfio_mapping_budget": 1,
-     "guest_driver_version": "linux 6.12.86+deb13-amd64"
-   }
+   ```toml
+   version = 1
+   guest_os = "linux"
+   workload_reviewed = { value = true, source = "confirmed" }
+   no_vdpa = { value = true, source = "confirmed" }
+   # ... and the rest, as in the example
+   guest_driver_version = { value = "linux 6.12.86+deb13-amd64", source = "confirmed" }
    ```
 
    `guest_os` must match the VM's settings. `guest_driver_version` is the
    `viomem` driver version on Windows and the kernel release on Linux.
+   `workload_reviewed` can only be confirmed by a person.
 
 4. **Attest.** With the VM running in its final configuration:
 
    ```bash
-   cargo xtask attestation VM ALIAS CONFIG_DIR/attestations/VM.review.json \
+   cargo xtask attestation VM ALIAS CONFIG_DIR/reviews/NAME.toml \
      --output CONFIG_DIR/attestations/VM.attestation.json --command-timeout-seconds 60
    ```
 
@@ -233,8 +228,8 @@ VM's settings needs only a controller install, never a guest change.
    cold-restarts a VM (so a saved definition takes effect), attests it and
    installs the controller in one step.
 
-5. **Settings.** Add the VM to `host_list.toml`, write its
-   `<vm_name>_settings.toml` and install the controller
+5. **Settings.** Write `CONFIG_DIR/vms.d/<vm_name>.toml` and install the
+   controller
    (`install-host.sh CONFIG_DIR INSTANCE`), which takes every VM's
    attestation from `CONFIG_DIR/attestations/`.
 
@@ -243,15 +238,15 @@ VM's settings needs only a controller install, never a guest change.
 
 ## Linux guests
 
-The guest service is `virtio-mem-guest`, run by systemd as an unprivileged
-dynamic user ([unit](../guest-linux/systemd/virtio-mem-guest.service)). It
+The guest service is `rampire-guest`, run by systemd as an unprivileged
+dynamic user ([unit](../guest-linux/systemd/rampire-guest.service)). It
 has no configuration file.
 
 | Item | Location |
 |---|---|
-| Binary | `/usr/local/libexec/virtio-mem-guest` |
-| Durable request state | `/var/lib/virtio-mem-guest/control.json.request-state` |
-| Control files, without the channel | `/var/lib/virtio-mem-guest/control.json` and `control.json.host-status` |
+| Binary | `/usr/local/libexec/rampire-guest` |
+| Durable request state | `/var/lib/rampire-guest/control.json.request-state` |
+| Control files, without the channel | `/var/lib/rampire-guest/control.json` and `control.json.host-status` |
 
 Install with the Debian package (`cargo xtask linux package`), or on a
 development VM with `cargo xtask linux deploy` ([tools](tools.md)).
@@ -328,10 +323,10 @@ memory, so it must be among the last processes the kernel kills.
 
 ## Windows guests
 
-The Windows service is `VirtioMemService`
-(`C:\Program Files\VirtioMemService\virtio-mem-service.exe`, running as
+The Windows service is `RampireGuest`
+(`C:\Program Files\RAMpire\rampire-guest.exe`, running as
 LocalService). Its install configuration is
-`C:\ProgramData\VirtioMemService\config.json`; limits and policy come from
+`C:\ProgramData\RAMpire\config.json`; limits and policy come from
 the host as for Linux. Deploy it with `make windows-deploy` from a checkout
 whose `site/windows-build.mk` names the VM. Deployment gives LocalService
 access to the control channel's device instance
@@ -351,13 +346,13 @@ see [the roadmap](roadmap.md), milestone W.
 ## Observing
 
 ```bash
-cargo xtask watch --config /etc/virtio-mem-host/host_list.toml
-cargo xtask metrics --config /etc/virtio-mem-host/host_list.toml
-virtio-mem-host status --config /etc/virtio-mem-host/host_list.toml --vm VM
+cargo xtask watch --config /etc/rampire
+cargo xtask metrics --config /etc/rampire
+rampire status --config /etc/rampire --vm VM
 ```
 
 The controller logs every decision to the journal
-(`journalctl -u virtio-mem-host@INSTANCE`). See [tools](tools.md) for the
+(`journalctl -u rampire@INSTANCE`). See [tools](tools.md) for the
 recorder's files and incident bundles.
 
 ## Recovering
@@ -371,10 +366,11 @@ current controller and attestation, then:
 deploy/scripts/recover-latch.sh INSTANCE "why it is safe to resume"
 ```
 
-It stops the unit, runs `virtio-mem-host clear-latch`, which first settles a
+It stops the unit, runs `rampire clear-latch`, which first settles a
 stuck shrink at what the guest kept and records the reason in the state,
-and starts the unit again. `VIRTIO_MEM_HOST_BIN`, `VIRTIO_MEM_HOST_CONFIG`
-and `VIRTIO_MEM_CONNECT` override the installed paths and libvirt URI.
+and starts the unit again. `RAMPIRE_HOST_BIN`, `RAMPIRE_HOST_CONFIG`
+(the configuration directory) and `RAMPIRE_CONNECT` override the installed
+paths and libvirt URI.
 
 **A stopped controller.** The unit is fail-stop (`Restart=no`): a failure
 needs a person to look. Read `systemctl status` and the journal, fix the
@@ -396,38 +392,16 @@ Do not clear request state to reduce RAM.
 
 ## Upgrading
 
-Order: **controller first, then guest services.** A new controller serves
-every older guest; a new guest under an older controller may wait for
-settings that never come, and says so in its log.
+Order: **controller first, then guest services.** Every document the
+controller and the guests exchange or keep names its schema and version,
+and every one is at version 1. A reader refuses a schema or version it
+doesn't know, so it never guesses. Until the first release, install the
+controller and the guests from the same build; from release 0.1.0 a
+controller serves guests from its own minor release and the one before it
+(see [the roadmap](roadmap.md#versions-and-releases)).
 
 1. Stop nothing by hand: `install-host.sh` stops and restarts the unit.
 2. If the release notes say the attestation format changed, attest every
-   VM again first. Version 2 (2026-11-13) replaced `trusted_development_guest`
-   with `guest_os` in the review; update each review file accordingly.
+   VM again first.
 3. Install the controller.
 4. Upgrade each guest service (package or `make windows-deploy`).
-
-### Compatibility
-
-What each side reads and sends is versioned, and each rule is enforced by
-the protocol.
-
-| Guest | Publishes | Needs a controller that | Under an older controller |
-|---|---|---|---|
-| Windows, before 2026-11-13 | version 4 or 5, control files, own `config.json` | reads versions 4–6 (all current) | — |
-| Linux or Windows, control files | version 6 | publishes settings with its status | waits for settings, logs that it is waiting |
-| Linux or Windows, control channel | version 6 | answers on the control channel | after 30 s without settings on the channel, uses the control files if a fresh status with settings is there (the older controller writes it through the guest agent, which must allow file commands); otherwise keeps waiting |
-
-The controller sends settings only to a guest whose last publication is
-version 6 or that has published nothing yet, so a guest built before
-settings were published keeps its own configuration. It answers a guest on
-whichever route the guest's publications arrive on, and sends every status
-over a connected control channel, so a guest waiting there for its first
-settings receives them.
-
-| File | Version | Read by |
-|---|---|---|
-| Compatibility attestation | 2 | Controller and `host-deploy`; version 1 is refused with a message to attest again |
-| Host status, memory request | 1 | Both sides |
-| Guest publication | 6 (reads 4–6) | Controller and tools |
-| Windows `config.json` | schema 9 | Windows service |

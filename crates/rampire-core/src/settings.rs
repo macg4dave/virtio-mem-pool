@@ -15,8 +15,8 @@ use crate::{
 };
 
 pub const SERVICE_NAME: &str = "RampireGuest";
-// The control channel is required for memory requests, independently of optional
-// diagnostic output. Keep its historical path to retain durable pending requests.
+// The Windows guest's control publication; host status and durable request
+// state are derived beside it, as on Linux.
 pub const CONTROL_PATH: &str = r"C:\ProgramData\RAMpire\telemetry.json";
 /// The Linux guest service's wire identity and systemd unit name.
 pub const LINUX_SERVICE_NAME: &str = "rampire-guest";

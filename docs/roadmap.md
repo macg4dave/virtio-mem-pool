@@ -219,14 +219,16 @@ happens here, once, before the command is built on top of it.
   `workload_reviewed` must be confirmed. `guest_driver_version` is still
   per guest, so until O3.2 detects it a Linux profile serves VMs on one
   kernel release.
-- [ ] **R6** Delete the compatibility code the clean break leaves unused:
+- [x] **R6** Delete the compatibility code the clean break leaves unused:
   - ~~`host-deploy`'s move of attestations from the old layout~~ (done in R4);
   - ~~readers for publication versions older than current~~ (done in R3);
   - ~~the `windows_driver_version` review alias~~ (done in R5);
-  - the compatibility tables in [administration](administration.md).
-- [ ] **R7** The README, documentation and repository name. Remove the
+  - ~~the compatibility tables in [administration](administration.md)~~
+    (done in R7), and an old serde alias in qualification records.
+- [x] **R7** The README, documentation and repository name. Remove the
   links to the deleted `prior-art.md`. Renaming the GitHub repository is
-  done by the owner.
+  done by the owner, and is still to do. O5 rewrites the guides around
+  `rampire`; R7 only brings them up to date.
 
 Exit: the workspace builds and passes the gate under the new names with
 the new layout and formats, and no code reads an old name, layout or
