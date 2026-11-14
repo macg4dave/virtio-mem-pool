@@ -412,7 +412,7 @@ family.
 - [ ] **O3.7** `vm remove NAME` stops managing the VM at once. The VM
   keeps the memory it has until its next cold start, which begins on boot
   RAM alone (decision D18).
-- [ ] **O3.8** A managed VM that libvirt no longer knows fails `check`,
+- [x] **O3.8** A managed VM that libvirt no longer knows fails `check`,
   which names `vm remove NAME` as the fix (X15).
 
 Exit: a VM with no virtio-mem device goes from `vm add` to managed in one

@@ -45,6 +45,12 @@ pub fn run(directory: &Path) -> Result<Report, String> {
 }
 
 fn check_vm(config: &HostConfig) -> Result<(), String> {
+    if !domain_exists(config)? {
+        return Err(format!(
+            "libvirt has no domain {name}; stop managing it with: rampire vm remove {name}",
+            name = config.vm_name
+        ));
+    }
     let path = Path::new(&config.compatibility_attestation_path);
     let text = std::fs::read_to_string(path)
         .map_err(|error| format!("read attestation {}: {error}", path.display()))?;
@@ -65,9 +71,42 @@ fn check_vm(config: &HostConfig) -> Result<(), String> {
     .map_err(|error| format!("live compatibility: {error}"))
 }
 
+/// Whether libvirt knows the VM. Any other failure to ask is an error.
+fn domain_exists(config: &HostConfig) -> Result<bool, String> {
+    let output = std::process::Command::new(&config.virsh_binary)
+        .args(["-c", &config.libvirt_uri, "domstate", &config.vm_name])
+        .output()
+        .map_err(|error| format!("run virsh: {error}"))?;
+    if output.status.success() {
+        return Ok(true);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if is_missing_domain(&stderr) {
+        Ok(false)
+    } else {
+        Err(format!("ask libvirt about the domain: {}", stderr.trim()))
+    }
+}
+
+/// libvirt's answer for a name it doesn't know.
+fn is_missing_domain(stderr: &str) -> bool {
+    stderr.contains("failed to get domain") || stderr.contains("Domain not found")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recognises_libvirts_answer_for_an_unknown_domain() {
+        assert!(is_missing_domain(
+            "error: failed to get domain 'gone'
+error: Domain not found: no domain with matching name 'gone'"
+        ));
+        assert!(!is_missing_domain(
+            "error: failed to connect to the hypervisor"
+        ));
+    }
 
     #[test]
     fn an_empty_configuration_passes() {
@@ -82,14 +121,13 @@ mod tests {
     }
 
     #[test]
-    fn a_vm_without_an_attestation_is_a_problem_not_an_error() {
+    fn a_vm_that_fails_is_a_problem_not_an_error() {
+        // The fixture VM isn't a libvirt domain here and has no attestation:
+        // whichever check meets it first, it fails as a problem in the report.
         let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/config");
         let report = run(&fixture).expect("fixture loads");
         assert_eq!(report.vms.len(), 1);
         assert!(!report.passed());
-        assert!(report.vms[0]
-            .problem
-            .as_deref()
-            .is_some_and(|problem| problem.contains("attestation")));
+        assert!(report.vms[0].problem.is_some());
     }
 }
