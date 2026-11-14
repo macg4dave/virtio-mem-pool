@@ -1,0 +1,21 @@
+# A clean Debian 13 KVM host: libvirt from the distribution, then RAMpire's host
+# package with apt, `rampire init`, and a controller running with no VMs
+# (the roadmap's O2 exit). Pass the host .deb with --file:
+#
+#   sudo -E target/debug/xtask testvm up tools/testvm/clean-host-debian13.toml \
+#     --name clean-debian13 --file dist/rampire_VERSION_amd64.deb --apply
+image = "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-amd64.qcow2"
+boot_mib = 2048
+disk_gib = 12
+nested = true
+timeout_minutes = 30
+commands = [
+  "apt-get install -y libvirt-daemon-system qemu-system-x86",
+  "apt-get install -y $SEED/rampire_*_amd64.deb",
+  # Before init the only problem is that nothing is applied yet.
+  "rampire doctor || [ $? -eq 1 ]",
+  "rampire init --yes",
+  "systemctl enable --now rampire",
+  "rampire status",
+  "rampire doctor",
+]

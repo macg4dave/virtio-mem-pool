@@ -9,6 +9,7 @@ mod local;
 mod metrics;
 mod preflight;
 mod qualification;
+mod testvm;
 mod windows;
 
 use rampire_ops::{pool, process, watch};
@@ -42,6 +43,7 @@ Usage:
   cargo xtask watch [OPTIONS]
   cargo xtask metrics [OPTIONS]
   cargo xtask pool [OPTIONS]
+  cargo xtask testvm <up|down|list> ...
 
 Attestation options:
   --output PATH                 Required generated attestation path.
@@ -161,7 +163,13 @@ fn execute(arguments: &[String]) -> Result<(), String> {
     let repo = repo_root()?;
     match arguments.first().map(String::as_str) {
         Some("help" | "--help" | "-h") | None => {
-            print!("{HELP}\n{}\n{}\n{}", watch::HELP, pool::HELP, metrics::HELP);
+            print!(
+                "{HELP}\n{}\n{}\n{}\n{}",
+                watch::HELP,
+                pool::HELP,
+                metrics::HELP,
+                testvm::HELP
+            );
             Ok(())
         }
         Some("gate") => gate(&arguments[1..], &repo),
@@ -184,6 +192,7 @@ fn execute(arguments: &[String]) -> Result<(), String> {
         Some("watch") => watch::run(&watch::parse(&arguments[1..])?, &repo),
         Some("pool") => pool::run(&pool::parse(&arguments[1..])?, &repo),
         Some("metrics") => metrics::execute(&arguments[1..], &repo),
+        Some("testvm") => testvm::run(&testvm::parse(&arguments[1..])?, &repo),
         Some(command) => Err(format!("unknown command: {command}\n\n{HELP}")),
     }
 }

@@ -1,0 +1,25 @@
+# The example Ansible role (deploy/ansible) run on a clean AlmaLinux 10 KVM
+# host, against itself: the first run installs RAMpire and reports
+# "changed", a second run of the same configuration reports no change, and
+# a run after a settings change reports "changed" again (the roadmap's O4
+# exit). Pass the role and the host RPM with --file:
+#
+#   sudo -E target/debug/xtask testvm up tools/testvm/ansible-almalinux10.toml \
+#     --name t-ansible --file deploy/ansible --file dist/rampire-VERSION.x86_64.rpm --apply
+image = "https://repo.almalinux.org/almalinux/10/cloud/x86_64/images/AlmaLinux-10-GenericCloud-latest.x86_64.qcow2"
+boot_mib = 2048
+disk_gib = 12
+nested = true
+timeout_minutes = 30
+commands = [
+  "dnf install -y libvirt-daemon-kvm qemu-kvm ansible-core",
+  "systemctl enable --now virtqemud.socket",
+  # The host's configuration as it would be kept in git: no VMs yet.
+  "mkdir -p /root/site/vms.d /root/site/reviews && printf 'pool = \"512MB\"\\nhost_reserve = \"1GB\"\\n' > /root/site/global.toml",
+  "cp -r $SEED/ansible /root/ansible",
+  "cd /root/ansible/example && ansible-playbook -i localhost, -c local -e rampire_package=$(ls $SEED/rampire-[0-9]*.x86_64.rpm) -e rampire_config_source=/root/site playbook.yml | tee /root/run-1.txt && grep -Eq 'changed=[1-9][0-9]* +unreachable=0 +failed=0' /root/run-1.txt",
+  "cd /root/ansible/example && ansible-playbook -i localhost, -c local -e rampire_package=$(ls $SEED/rampire-[0-9]*.x86_64.rpm) -e rampire_config_source=/root/site playbook.yml | tee /root/run-2.txt && grep -Eq 'changed=0 +unreachable=0 +failed=0' /root/run-2.txt",
+  "printf 'retention = 5\\n' >> /root/site/global.toml",
+  "cd /root/ansible/example && ansible-playbook -i localhost, -c local -e rampire_package=$(ls $SEED/rampire-[0-9]*.x86_64.rpm) -e rampire_config_source=/root/site playbook.yml | tee /root/run-3.txt && grep -Eq 'changed=[1-9][0-9]* +unreachable=0 +failed=0' /root/run-3.txt",
+  "rampire status",
+]

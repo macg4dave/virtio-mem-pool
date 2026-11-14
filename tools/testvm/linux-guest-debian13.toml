@@ -1,0 +1,18 @@
+# A Debian 13 VM with the guest package installed and room for a
+# virtio-mem device, but no device and no control channel: what
+# `rampire vm add VM --fix-xml` starts from (the roadmap's O3 exit). Keep
+# it, then add it on the host:
+#
+#   sudo -E target/debug/xtask testvm up tools/testvm/linux-guest-debian13.toml \
+#     --name t-guest --file dist/rampire-guest_VERSION_amd64.deb --keep --apply
+#   sudo rampire vm add t-guest --fix-xml --review linux-standard --yes
+#   sudo -E target/debug/xtask testvm down t-guest --apply
+image = "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-amd64.qcow2"
+boot_mib = 1024
+hotplug_mib = 4096
+timeout_minutes = 20
+commands = [
+  "apt-get install -y $SEED/rampire-guest_*_amd64.deb",
+  "systemctl is-enabled rampire-guest",
+  "uname -r",
+]

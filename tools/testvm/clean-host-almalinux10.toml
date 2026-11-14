@@ -1,0 +1,22 @@
+# A clean AlmaLinux 10 KVM host: libvirt from the distribution, then RAMpire's host
+# package with dnf, `rampire init`, and a controller running with no VMs
+# (the roadmap's O2 exit). Pass the host RPM with --file:
+#
+#   sudo -E target/debug/xtask testvm up tools/testvm/clean-host-almalinux10.toml \
+#     --name clean-almalinux10 --file dist/rampire-VERSION.x86_64.rpm --apply
+image = "https://repo.almalinux.org/almalinux/10/cloud/x86_64/images/AlmaLinux-10-GenericCloud-latest.x86_64.qcow2"
+boot_mib = 2048
+disk_gib = 12
+nested = true
+timeout_minutes = 30
+commands = [
+  "dnf install -y libvirt-daemon-kvm qemu-kvm",
+  "systemctl enable --now virtqemud.socket",
+  "dnf install -y $SEED/rampire-[0-9]*.x86_64.rpm",
+  # Before init the only problem is that nothing is applied yet.
+  "rampire doctor || [ $? -eq 1 ]",
+  "rampire init --yes",
+  "systemctl enable --now rampire",
+  "rampire status",
+  "rampire doctor",
+]
