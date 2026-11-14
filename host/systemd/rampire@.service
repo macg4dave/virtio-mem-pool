@@ -15,11 +15,11 @@ SupplementaryGroups=qemu
 # libvirt_uri in global.toml.
 Environment=HOME=/run/rampire
 Environment=XDG_CACHE_HOME=/run/rampire/.cache
-# A site with another layout overrides ExecStart in a drop-in
-# (systemctl edit rampire@.service). The configuration directory holds
-# global.toml, vms.d/ and attestations/; durable state goes in the
-# StateDirectory below.
-ExecStart=/usr/local/bin/rampire daemon --config /etc/rampire
+# The controller runs only the copy `rampire apply` checked (decision D10),
+# never the draft in /etc/rampire: a mistake there can't reach it, through
+# a restart or a reboot. The copy holds global.toml, vms.d/ and
+# attestations/; durable state goes in the StateDirectory below.
+ExecStart=/usr/local/bin/rampire daemon --config /var/lib/rampire/applied/current
 # Failure is fail-stop. Deployment monitoring decides when a reviewed restart
 # is appropriate; the unit does not create an automatic restart loop.
 Restart=no

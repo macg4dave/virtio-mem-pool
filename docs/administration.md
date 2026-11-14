@@ -28,17 +28,16 @@ Run one controller per host: separate controllers cannot share a pool.
 | Controller binary | `/usr/local/bin/rampire` |
 | Unit | `/etc/systemd/system/rampire@.service` |
 | libvirt access rule | `/etc/polkit-1/rules.d/50-rampire.rules` |
-| Configuration | `/etc/rampire/` (`global.toml`, `vms.d/<vm_name>.toml`) |
+| Configuration (the draft) | `/etc/rampire/` (`global.toml`, `vms.d/<vm_name>.toml`, `reviews/`) |
 | Attestations | `/etc/rampire/attestations/<vm_name>.attestation.json`, apart from the settings |
+| Applied copies | `/var/lib/rampire/applied/<id>/`, with `current` naming the one the controller runs |
 | Durable request state | `/var/lib/rampire/state/<vm_name>-requests.json` (the unit's `StateDirectory`) |
 | Guest publications for tools | `/run/rampire/<vm_name>.publication.json` |
 | Deployment backups | `/var/lib/rampire/deployment-backups/` |
 
-A site with another layout overrides `ExecStart` in a drop-in
-(`systemctl edit rampire@.service`). `--config` names the configuration
-directory; the controller takes its attestations from the `attestations/`
-folder in it and its state from the unit's `StateDirectory`, so they
-follow.
+The unit runs `rampire daemon --config /var/lib/rampire/applied/current`.
+The controller takes its attestations from the `attestations/` folder of
+the copy it runs and its state from the unit's `StateDirectory`.
 
 ## Installing the controller
 
@@ -69,7 +68,8 @@ QEMU, `virsh` on the path, polkit, and Rust to build the controller.
    attestation against the live VMs, installs binary, unit, polkit rule,
    configuration and attestations, keeping a backup of what it replaces,
    and writes JSON evidence under `.artifacts/deploy/`. The script then
-   enables and starts the unit. Every VM in `vms.d/` needs exactly one
+   runs `rampire apply --yes`, so the unit has an applied copy to run,
+   and enables and starts the unit. Every VM in `vms.d/` needs exactly one
    attestation: `CONFIG_DIR/attestations/<vm_name>.attestation.json`,
    unless a `VM=ATTESTATION` argument names another file.
 
@@ -78,13 +78,30 @@ QEMU, `virsh` on the path, polkit, and Rust to build the controller.
    no longer has is removed from `/etc/rampire/vms.d/`, with a copy in the
    deployment backup.
 
-A controller that is running does not reload its configuration. To
-change it, edit the installed files and install from them:
+### Changing the configuration
+
+`/etc/rampire` is a draft. The controller runs only a copy that
+`rampire apply` has checked (decision D10), so a mistake in the draft
+never reaches it, through a restart or a reboot:
 
 ```bash
 sudo nano /etc/rampire/vms.d/VM.toml
-deploy/scripts/install-host.sh /etc/rampire INSTANCE
+sudo rampire diff       # what would change
+sudo rampire apply      # check, then switch
+sudo rampire rollback   # back to the copy before
 ```
+
+`apply` copies the draft, checks the copy like `rampire check` (the
+settings and every VM's attestation against the live VM) while the
+controller keeps running, shows the difference and asks. Only then does
+it keep the copy under `/var/lib/rampire/applied/`, point `current` at it
+and restart the controller. A draft that fails changes nothing.
+`--detailed-exitcode` exits 0 when nothing changed, 2 when something
+changed and 1 on failure. `rollback` returns to the copy before the
+current one, through the same checks.
+
+The daemon resolves `current` once when it starts, so an apply never
+changes the files under a running controller.
 
 [Usage](usage.md) walks through this for people new to the program.
 

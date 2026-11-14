@@ -24,6 +24,20 @@ use signal_hook::flag;
 /// `rampire daemon`: run the controller on the configuration in
 /// `config_path` until SIGTERM or SIGINT.
 pub fn run(config_path: &Path) -> ExitCode {
+    // Resolve the applied copy's `current` link once: a later apply then
+    // can't change the files under a running controller, which keeps the
+    // copy it started on until it restarts.
+    let config_path = match config_path.canonicalize() {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!(
+                "rampire configuration error: {}: {error} (has `rampire apply` run?)",
+                config_path.display()
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+    let config_path = config_path.as_path();
     let settings = match HostSettings::load(config_path) {
         Ok(settings) => settings,
         Err(error) => {

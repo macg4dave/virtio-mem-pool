@@ -266,7 +266,7 @@ version.
   Done for the commands O1.2 built; `apply --detailed-exitcode` comes
   with `apply` in O1.4. The contract is in
   [administration](administration.md#the-rampire-command).
-- [ ] **O1.4** The applied configuration (decision D10, X12):
+- [x] **O1.4** The applied configuration (decision D10, X12):
   - `/etc/rampire` is the draft that people and tools edit;
   - `apply` checks the draft while the controller keeps running (X2),
     then writes it to `/var/lib/rampire/applied/` and restarts the
@@ -275,6 +275,10 @@ version.
   - `diff` shows the draft against the applied copy;
   - `rollback` returns to the previous applied copy, through the same
     checks.
+
+  Done. Each applied copy holds `global.toml`, the VM files, their
+  attestations and the review profiles they name; attestations still come
+  from the draft's `attestations/` until O3 makes them.
 - [ ] **O1.5** Evidence: each apply records what it did under
   `/var/lib/rampire/evidence/`. A retention count, a setting with a
   documented default, prunes old evidence and old applied copies (X18).

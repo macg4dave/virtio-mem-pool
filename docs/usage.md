@@ -229,25 +229,26 @@ The steps are always the same: edit the file, apply the change, check it.
    `priority = 150`. Save with **Ctrl+O**, **Enter**, then leave with
    **Ctrl+X**.
 
-3. Apply the change. Use your own instance name in place of `main`:
+3. Apply the change:
 
    ```bash
-   cd ~/rampire
-   deploy/scripts/install-host.sh /etc/rampire main
+   sudo rampire apply
    ```
 
-   It asks for your `sudo` password, and can take a few minutes the
-   first time. It then:
-   1. briefly stops the controller,
-   2. checks all your settings,
-   3. installs them, keeping a backup of the old ones,
-   4. starts the controller again.
+   It:
+   1. checks all your settings and every VM, while the controller keeps
+      running,
+   2. shows you exactly what changes and asks you to confirm,
+   3. keeps a copy of the new settings for the controller, and restarts
+      the controller on them.
 
    Your VMs keep running throughout and keep the memory they have.
+   `sudo rampire diff` shows what an apply would change, without
+   changing anything.
 
-4. Check that it worked. The script ends by showing the controller's
-   state, which should say **`active (running)`** in green. Then look at
-   the pool ([Checking that it's working](#checking-that-its-working)).
+4. Check that it worked: `sudo rampire status` should show every VM, and
+   the pool view shows them live
+   ([Checking that it's working](#checking-that-its-working)).
 
 **Example: let `webserver` grow to 12 GB.** Run
 `sudo nano /etc/rampire/vms.d/webserver.toml`, change
@@ -257,11 +258,14 @@ step 3 above.
 ### If applying reports an error
 
 The message says which file and setting is wrong, for example a misspelt
-setting name or a size that can't be used. **The controller is left
-stopped** until a change is applied. Your VMs keep running with the
-memory they have, but they don't grow or shrink in the meantime.
+setting name or a size that can't be used. **Nothing changes**: the
+controller keeps running on the settings it had, and keeps them through a
+restart or a reboot until an apply succeeds.
 
 Open the file again, fix the mistake, save, and apply again (step 3).
+
+To go back to the settings before the last apply, use
+`sudo rampire rollback`.
 
 ## Checking that it's working
 

@@ -34,6 +34,8 @@ mod exit {
     pub const FAILURE: u8 = 1;
     /// The command line was wrong (clap's own code).
     pub const USAGE: u8 = 2;
+    /// `apply --detailed-exitcode`: the applied configuration changed.
+    pub const CHANGED: u8 = 2;
 }
 
 rampire_core::schema_name! {
@@ -135,6 +137,23 @@ enum Command {
     /// Check the configuration and every VM's attestation against the live
     /// VMs; changes nothing.
     Check,
+    /// Show what `apply` would change: the draft against the applied copy.
+    Diff,
+    /// Check the draft and, if it passes, make it what the controller runs.
+    ///
+    /// The draft (`--config`, normally /etc/rampire) is copied, the copy is
+    /// checked like `check` while the controller keeps running, and only
+    /// then does the controller restart on it. A draft that fails changes
+    /// nothing.
+    Apply {
+        /// Exit 0 when nothing changed, 2 when something changed and 1 on
+        /// failure, for configuration management.
+        #[arg(long)]
+        detailed_exitcode: bool,
+    },
+    /// Go back to the applied copy before the current one, through the same
+    /// checks as `apply`.
+    Rollback,
     /// Show the controller's journal.
     Logs {
         /// Keep showing new entries.
@@ -246,6 +265,9 @@ fn run(cli: &Cli) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         Command::Check => check(cli),
+        Command::Diff => diff(cli),
+        Command::Apply { detailed_exitcode } => apply(cli, *detailed_exitcode),
+        Command::Rollback => rollback(cli),
         Command::Logs { follow, since } => logs(*follow, since.as_deref()),
         Command::Recover { vm, reason } => recover(cli, vm, reason),
         Command::ClearLatch { vm, reason, apply } => {
@@ -423,6 +445,181 @@ fn check(cli: &Cli) -> Result<ExitCode, String> {
         }
     }
     Ok(code)
+}
+
+fn applied_root() -> &'static Path {
+    Path::new(rampire_ops::applied::APPLIED_ROOT)
+}
+
+fn print_check(report: &rampire_ops::check::Report) {
+    for vm in &report.vms {
+        if let Some(problem) = &vm.problem {
+            println!("problem: {}: {problem}", vm.vm_name);
+        }
+    }
+}
+
+/// Show the difference between two configuration directories, `None` being
+/// no configuration at all. Returns whether there is any.
+fn show_difference(from: Option<&Path>, to: &Path) -> Result<bool, String> {
+    let empty = std::env::temp_dir().join(format!("rampire-empty-{}", std::process::id()));
+    let from = match from {
+        Some(path) => path.to_path_buf(),
+        None => {
+            std::fs::create_dir_all(&empty).map_err(|error| error.to_string())?;
+            empty.clone()
+        }
+    };
+    let output = std::process::Command::new("diff")
+        .arg("-ruN")
+        .arg(&from)
+        .arg(to)
+        .output()
+        .map_err(|error| format!("run diff: {error}"));
+    let _ = std::fs::remove_dir(&empty);
+    let output = output?;
+    match output.status.code() {
+        Some(0) => Ok(false),
+        Some(1) => {
+            // Name the two sides, not the temporary paths behind them.
+            let text = String::from_utf8_lossy(&output.stdout)
+                .replace(&from.display().to_string(), "applied")
+                .replace(&to.display().to_string(), "draft");
+            print!("{text}");
+            Ok(true)
+        }
+        _ => Err(format!(
+            "diff failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+    }
+}
+
+fn diff(cli: &Cli) -> Result<ExitCode, String> {
+    let staged = std::env::temp_dir().join(format!("rampire-draft-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&staged);
+    let result = rampire_ops::applied::snapshot(&cli.config, &staged).and_then(|()| {
+        let current = rampire_ops::applied::current(applied_root())?;
+        show_difference(current.as_deref(), &staged)
+    });
+    let _ = std::fs::remove_dir_all(&staged);
+    if !result? {
+        println!("no changes: the draft is what the controller runs");
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn apply(cli: &Cli, detailed: bool) -> Result<ExitCode, String> {
+    let root = applied_root();
+    let staged = rampire_ops::applied::staging(root)?;
+    let result = stage_and_apply(cli, root, &staged);
+    if staged.exists() {
+        let _ = std::fs::remove_dir_all(&staged);
+    }
+    let changed = result?;
+    Ok(ExitCode::from(if changed && detailed {
+        exit::CHANGED
+    } else {
+        exit::SUCCESS
+    }))
+}
+
+/// Returns whether the applied configuration changed.
+fn stage_and_apply(cli: &Cli, root: &Path, staged: &Path) -> Result<bool, String> {
+    rampire_ops::applied::snapshot(&cli.config, staged)?;
+    // Check the copy, so what is checked is exactly what is applied.
+    let report = rampire_ops::check::run(staged)?;
+    if !report.passed() {
+        print_check(&report);
+        return Err("the draft did not pass its checks; nothing changed".to_owned());
+    }
+    let current = rampire_ops::applied::current(root)?;
+    if let Some(current) = &current {
+        if rampire_ops::applied::same(current, staged)? {
+            println!("nothing to apply: the draft is what the controller runs");
+            return Ok(false);
+        }
+    }
+    show_difference(current.as_deref(), staged)?;
+    let unit = controller_unit();
+    if !confirm(cli, &format!("Apply this and restart {unit}?"))? {
+        println!("nothing changed");
+        return Ok(false);
+    }
+    secure(staged)?;
+    let applied = rampire_ops::applied::install(root, staged, process::unix_millis()?)?;
+    println!("applied {}", applied.display());
+    restart_if_running(&unit)?;
+    Ok(true)
+}
+
+fn rollback(cli: &Cli) -> Result<ExitCode, String> {
+    let root = applied_root();
+    let current = rampire_ops::applied::current(root)?.ok_or("nothing has been applied yet")?;
+    let copies = rampire_ops::applied::copies(root)?;
+    let index = copies
+        .iter()
+        .position(|copy| copy == &current)
+        .ok_or("the current copy is missing from the applied copies")?;
+    let previous = index
+        .checked_sub(1)
+        .map(|index| copies[index].clone())
+        .ok_or("there is no earlier applied copy")?;
+    let report = rampire_ops::check::run(&previous)?;
+    if !report.passed() {
+        print_check(&report);
+        return Err(format!(
+            "{} no longer passes its checks; nothing changed",
+            previous.display()
+        ));
+    }
+    show_difference(Some(&current), &previous)?;
+    let unit = controller_unit();
+    if !confirm(
+        cli,
+        &format!("Go back to {} and restart {unit}?", previous.display()),
+    )? {
+        println!("nothing changed");
+        return Ok(ExitCode::SUCCESS);
+    }
+    rampire_ops::applied::make_current(root, &previous)?;
+    println!("rolled back to {}", previous.display());
+    restart_if_running(&unit)?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// The controller reads the copy as the service account; nobody else does.
+fn secure(copy: &Path) -> Result<(), String> {
+    let cwd = Path::new("/");
+    let timeout = std::time::Duration::from_secs(30);
+    for (program, args) in [
+        ("chgrp", ["-R", SERVICE_ACCOUNT]),
+        ("chmod", ["-R", "u=rwX,g=rX,o="]),
+    ] {
+        let mut arguments: Vec<_> = args.iter().map(process::os).collect();
+        arguments.push(copy.as_os_str().to_owned());
+        process::bounded_text(program, &arguments, cwd, timeout)?;
+    }
+    Ok(())
+}
+
+/// Restart a running controller on the new copy. One that isn't running is
+/// left alone: it starts on the new copy whenever it starts.
+fn restart_if_running(unit: &str) -> Result<(), String> {
+    let active = process::bounded_text(
+        "systemctl",
+        &[process::os("is-active"), process::os(unit)],
+        Path::new("/"),
+        std::time::Duration::from_secs(10),
+    )
+    .is_ok_and(|state| state.trim() == "active");
+    if active {
+        systemctl("restart", unit)?;
+        println!("{unit} restarted");
+    } else {
+        println!("{unit} is not running; it will use the new copy when it starts");
+    }
+    Ok(())
 }
 
 fn controller_unit() -> String {

@@ -54,5 +54,8 @@ target/release/xtask host-deploy "$instance" \
   "${attestations[@]}" \
   --output ".artifacts/deploy/host-deploy-$(date +%Y%m%dT%H%M%S).json" \
   --command-timeout-seconds 60 --apply --elevate
+# The unit runs the applied copy, so apply the installed draft before the
+# unit starts. It checks every VM again and changes nothing if one fails.
+sudo /usr/local/bin/rampire apply --yes
 sudo systemctl enable --now "$unit"
 systemctl status "$unit" --no-pager
