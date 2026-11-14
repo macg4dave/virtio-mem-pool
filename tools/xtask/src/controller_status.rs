@@ -181,7 +181,7 @@ fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
         command.timeout,
     )?;
     let properties = parse_properties(&properties)?;
-    let config_path = PathBuf::from("/etc/rampire/host_list.toml");
+    let config_path = PathBuf::from("/etc/rampire");
     let configured = HostConfig::load_vm(&config_path, command.vm.as_deref())
         .map_err(|error| format!("protected host instance configuration: {error}"))?;
     let environment = [

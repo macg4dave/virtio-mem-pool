@@ -176,7 +176,7 @@ mod tests {
         };
         config.validate().unwrap();
         config
-            .validate_paths(r"C:\ProgramData\RampireGuest\config.json")
+            .validate_paths(r"C:\ProgramData\RAMpire\config.json")
             .unwrap();
         let control = crate::settings::CONTROL_PATH;
         for path in [

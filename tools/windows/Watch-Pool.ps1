@@ -14,7 +14,7 @@ environment or in site/pool.env (untracked; copy
 deploy/examples/pool.env.example):
   RAMPIRE_POOL_HOST      SSH destination of the KVM host
   RAMPIRE_POOL_CHECKOUT  Path of this repository's checkout on that host
-  RAMPIRE_POOL_CONFIG    Host list; default /etc/rampire/host_list.toml
+  RAMPIRE_POOL_CONFIG    Configuration directory; default /etc/rampire
 .EXAMPLE
 .\Watch-Pool.ps1
 .EXAMPLE
@@ -57,7 +57,7 @@ function Resolve-Setting([string] $Value, [string] $Name, [string] $Default) {
 }
 $HostName = Resolve-Setting $HostName 'RAMPIRE_POOL_HOST' ''
 $Checkout = Resolve-Setting $Checkout 'RAMPIRE_POOL_CHECKOUT' ''
-$Config = Resolve-Setting $Config 'RAMPIRE_POOL_CONFIG' '/etc/rampire/host_list.toml'
+$Config = Resolve-Setting $Config 'RAMPIRE_POOL_CONFIG' '/etc/rampire'
 if (-not $HostName -or -not $Checkout) {
     throw 'Name the KVM host and its checkout: -HostName and -Checkout, ' +
         'RAMPIRE_POOL_HOST and RAMPIRE_POOL_CHECKOUT, or site/pool.env ' +

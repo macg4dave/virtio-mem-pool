@@ -1,5 +1,6 @@
+alias = "ua-virtiomem0"
+priority = 50
 min_ram = "2GB"
 max_ram = "5GB"
 free_ram = "512MB"
 guest_os = "linux"
-vm_name = "linux-guest"

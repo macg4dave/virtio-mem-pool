@@ -13,6 +13,6 @@ WINDOWS_ARTIFACTS ?= .artifacts/windows/windows-vm
 WINDOWS_CONNECT_TIMEOUT_SECONDS ?= 10
 WINDOWS_OPERATION_TIMEOUT_SECONDS ?= 1200
 # The VM settings file deployed by make windows-deploy.
-WINDOWS_MANIFEST ?= site/windows-vm_settings.toml
+WINDOWS_MANIFEST ?= site/vms.d/windows-vm.toml
 # Installed Windows service name.
 WINDOWS_SERVICE ?= RampireGuest

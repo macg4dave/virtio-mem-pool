@@ -1,6 +1,8 @@
 use std::path::Path;
 use std::process::ExitCode;
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
 use rampire::attestation::{read_attestation, AttestedCompatibilitySource};
 use rampire::cli::CliCommand;
@@ -42,24 +44,38 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    // virsh binary and timeouts are global settings, shared by every VM.
-    // Per-poll commands share one libvirt connection: one polkit check
-    // instead of several a second.
-    let first = &settings.vms[0];
-    let virsh = Virsh::persistent_with_connection(
-        first.virsh_binary.clone(),
-        first.command_timeout,
-        first.libvirt_uri.clone(),
-    );
-    if let Err(error) = virsh.require_management_access() {
-        eprintln!("rampire authorization error: {error}");
-        return ExitCode::FAILURE;
-    }
     let stop = Arc::new(AtomicBool::new(false));
     if let Err(error) = flag::register(SIGTERM, Arc::clone(&stop))
         .and_then(|_| flag::register(SIGINT, Arc::clone(&stop)))
     {
         eprintln!("rampire signal setup error: {error}");
+        return ExitCode::FAILURE;
+    }
+    if settings.vms.is_empty() {
+        // A configuration with no VMs is valid (decision D13): a freshly
+        // installed host runs, idle, until a VM is added.
+        eprintln!(
+            "event=no_vms rampire manages no VMs; add one to {} and restart",
+            config_path
+                .join(rampire_core::settings::VMS_DIRECTORY)
+                .display()
+        );
+        while !stop.load(Ordering::Acquire) {
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        eprintln!("rampire stopped");
+        return ExitCode::SUCCESS;
+    }
+    // Timeouts and the connection are global settings, shared by every VM.
+    // Per-poll commands share one libvirt connection: one polkit check
+    // instead of several a second.
+    let virsh = Virsh::persistent_with_connection(
+        settings.virsh_binary.clone(),
+        settings.command_timeout,
+        settings.libvirt_uri.clone(),
+    );
+    if let Err(error) = virsh.require_management_access() {
+        eprintln!("rampire authorization error: {error}");
         return ExitCode::FAILURE;
     }
     // Device owners are held until the runtime ends.

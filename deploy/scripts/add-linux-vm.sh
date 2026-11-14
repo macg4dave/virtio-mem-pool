@@ -7,9 +7,9 @@
 #
 # Usage: add-linux-vm.sh [--apply] CONFIG_DIR INSTANCE TEMPLATE_VM NEW_VM SSH_DESTINATION
 #   CONFIG_DIR       the site configuration install-host.sh takes; it must hold
-#                    TEMPLATE_VM_settings.toml, and in its attestations/ folder
+#                    vms.d/TEMPLATE_VM.toml, and in its attestations/ folder
 #                    TEMPLATE_VM.review.json and an attestation for every VM in
-#                    host_list.toml
+#                    vms.d
 #   SSH_DESTINATION  the copy, for an account with passwordless sudo
 # Without --apply it only checks the inputs and prints the plan.
 set -euo pipefail
@@ -34,23 +34,20 @@ ssh_guest=(ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=ac
 
 [[ $name =~ ^[a-z0-9][a-z0-9_-]*$ ]] || { echo "invalid VM name: $name" >&2; exit 1; }
 evidence=$config_dir/attestations
-for file in host_list.toml "${template}_settings.toml" "attestations/$template.review.json"; do
+for file in "vms.d/$template.toml" "attestations/$template.review.json"; do
   [[ -f $config_dir/$file ]] || { echo "missing $config_dir/$file" >&2; exit 1; }
 done
 "${virsh[@]}" dominfo "$name" >/dev/null
 alias=$("${virsh[@]}" dumpxml "$name" \
   | sed -n "/<memory model='virtio-mem'>/,/<\/memory>/s/.*<alias name='\([^']*\)'.*/\1/p")
 [[ -n $alias ]] || { echo "$name has no virtio-mem device alias" >&2; exit 1; }
-priority=$(awk -v vm="$template" '
-  /^\[\[vm\]\]/ { found = 0 }
-  $1 == "vm_name" && $3 == "\"" vm "\"" { found = 1 }
-  found && $1 == "priority" { print $3; exit }' "$config_dir/host_list.toml")
-[[ $priority =~ ^[0-9]+$ ]] || { echo "no priority for $template in host_list.toml" >&2; exit 1; }
+priority=$(awk '$1 == "priority" { print $3; exit }' "$config_dir/vms.d/$template.toml")
+[[ $priority =~ ^[0-9]+$ ]] || { echo "no priority in vms.d/$template.toml" >&2; exit 1; }
 listed=false
-grep -q "^vm_name = \"$name\"$" "$config_dir/host_list.toml" && listed=true
+[[ -f $config_dir/vms.d/$name.toml ]] && listed=true
 
 echo "add $name (alias $alias, priority $priority) to controller $instance via $destination"
-$listed && echo "  already in host_list.toml"
+$listed && echo "  already in vms.d"
 if ! $apply; then
   echo "dry run: pass --apply first to change anything"
   exit 0
@@ -76,13 +73,11 @@ mkdir -p ".artifacts/clones"
 cargo xtask linux deploy "$destination" --output ".artifacts/clones/$name.guest-deploy.json" --apply
 
 kernel=$("${ssh_guest[@]}" uname -r)
-sed "s/^vm_name = .*/vm_name = \"$name\"/" "$config_dir/${template}_settings.toml" \
-  > "$config_dir/${name}_settings.toml"
 sed "s/\"guest_driver_version\": \"[^\"]*\"/\"guest_driver_version\": \"linux $kernel\"/" \
   "$evidence/$template.review.json" > "$evidence/$name.review.json"
 if ! $listed; then
-  printf '\n[[vm]]\nvm_name = "%s"\nalias = "%s"\npriority = %s\n' \
-    "$name" "$alias" "$priority" >> "$config_dir/host_list.toml"
+  sed "s/^alias = .*/alias = \"$alias\"/" "$config_dir/vms.d/$template.toml" \
+    > "$config_dir/vms.d/$name.toml"
 fi
 "${virsh[@]}" update-memory-device "$name" --alias "$alias" --requested-size 0 --config
 cargo xtask attestation "$name" "$alias" "$evidence/$name.review.json" \

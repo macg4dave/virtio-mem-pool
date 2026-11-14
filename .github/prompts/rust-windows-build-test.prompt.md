@@ -38,8 +38,8 @@ before relying on them. Fixed product values:
 | --- | --- |
 | Libvirt connection | `qemu:///system` |
 | Native target | `x86_64-pc-windows-msvc` |
-| Service configuration | `C:\ProgramData\RampireGuest\config.json` |
-| Control file | `C:\ProgramData\RampireGuest\telemetry.json` |
+| Service configuration | `C:\ProgramData\RAMpire\config.json` |
+| Control file | `C:\ProgramData\RAMpire\telemetry.json` |
 
 The SSH alias and libvirt VM name are different identifiers. Do not substitute
 one for the other. Read the installed configuration to discover the actual

@@ -179,7 +179,7 @@ mod tests {
 
     fn installed(sha256: &str) -> InstalledBuild {
         InstalledBuild {
-            path: r"C:\Program Files\RampireGuest\rampire-guest.exe".to_owned(),
+            path: r"C:\Program Files\RAMpire\rampire-guest.exe".to_owned(),
             sha256: sha256.to_owned(),
             build_id: None,
         }

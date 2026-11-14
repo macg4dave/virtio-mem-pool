@@ -19,7 +19,7 @@ if [[ ! $instance =~ ^[[:alnum:]][[:alnum:]_.-]*$ ]]; then
   exit 1
 fi
 unit=rampire@$instance.service
-config=${RAMPIRE_HOST_CONFIG:-/etc/rampire/host_list.toml}
+config=${RAMPIRE_HOST_CONFIG:-/etc/rampire}
 binary=${RAMPIRE_HOST_BIN:-/usr/local/bin/rampire}
 connect=${RAMPIRE_CONNECT:-qemu:///system}
 host=(sudo -u rampire "$binary")

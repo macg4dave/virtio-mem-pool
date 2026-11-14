@@ -1,20 +1,22 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use rampire_core::settings::{self, GlobalSettings, GuestOs, HostVm, VmSettings};
+use rampire_core::settings::{self, GlobalSettings, GuestOs, VmSettings};
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum HostConfigError {
     #[error("invalid host configuration: {0}")]
     Parse(String),
-    #[error("host config lists {0} VMs; select one with --vm NAME")]
+    #[error("the configuration manages no VMs; add one to vms.d")]
+    NoVms,
+    #[error("the configuration has {0} VMs; select one with --vm NAME")]
     VmNotSelected(usize),
-    #[error("vm {0} is not in the host config")]
+    #[error("the configuration has no VM {0}")]
     UnknownVm(String),
 }
 
-/// One resolved runtime config from the global, host-list and per-VM files.
+/// One VM's resolved runtime config, from `global.toml` and its own file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostConfig {
     pub vm_name: String,
@@ -50,13 +52,21 @@ pub struct HostConfig {
     pub telemetry_path: Option<String>,
 }
 
-/// Every resolved VM plus the server pool budget.
+/// Every resolved VM, the server pool budget and the libvirt connection
+/// they share.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostSettings {
     /// Device bytes shared by every VM. Required with more than one VM.
     pub pool_bytes: Option<u64>,
+    pub virsh_binary: String,
+    pub libvirt_uri: String,
+    pub command_timeout: Duration,
+    /// In name order. Empty when the host manages no VMs yet.
     pub vms: Vec<HostConfig>,
 }
+
+/// virsh from PATH, as the attestation's evidence was collected.
+const VIRSH_BINARY: &str = "virsh";
 
 /// Where the controller keeps durable state when systemd does not say: the
 /// unit's `StateDirectory`, which systemd passes as `STATE_DIRECTORY`.
@@ -80,8 +90,8 @@ fn state_directory() -> PathBuf {
 /// they are kept apart from the settings files people edit.
 pub const ATTESTATION_DIRECTORY: &str = "attestations";
 
-/// A VM's compatibility attestation, in the attestation folder beside the host
-/// list that names it.
+/// A VM's compatibility attestation, in the configuration directory's
+/// attestation folder.
 pub fn attestation_path(config_directory: &Path, vm_name: &str) -> PathBuf {
     config_directory
         .join(ATTESTATION_DIRECTORY)
@@ -89,22 +99,24 @@ pub fn attestation_path(config_directory: &Path, vm_name: &str) -> PathBuf {
 }
 
 impl HostSettings {
-    /// A host list and its sibling global/per-VM files form one configuration.
-    pub fn load(path: &Path) -> Result<Self, HostConfigError> {
-        let (globals, list, settings) =
-            settings::load_configuration(path).map_err(HostConfigError::Parse)?;
+    /// The configuration in `directory`: `global.toml` and every
+    /// `vms.d/NAME.toml` (see `settings::load_configuration`).
+    pub fn load(directory: &Path) -> Result<Self, HostConfigError> {
+        let (globals, settings) =
+            settings::load_configuration(directory).map_err(HostConfigError::Parse)?;
         let paths = Paths {
-            config: path.parent().unwrap_or(Path::new(".")).to_path_buf(),
+            config: directory.to_path_buf(),
             state: state_directory(),
         };
-        let vms = list
-            .vms
+        let vms = settings
             .iter()
-            .zip(&settings)
-            .map(|(entry, vm)| HostConfig::resolve(&globals, entry, vm, &paths))
+            .map(|vm| HostConfig::resolve(&globals, vm, &paths))
             .collect();
         Ok(Self {
-            pool_bytes: globals.pool_bytes,
+            pool_bytes: globals.pool,
+            virsh_binary: VIRSH_BINARY.to_owned(),
+            libvirt_uri: globals.libvirt_uri.clone(),
+            command_timeout: Duration::from_secs(globals.command_timeout_seconds),
             vms,
         })
     }
@@ -116,24 +128,25 @@ struct Paths {
 }
 
 impl HostConfig {
-    pub fn load_vm(path: &Path, vm: Option<&str>) -> Result<Self, HostConfigError> {
-        let mut vms = HostSettings::load(path)?.vms;
+    pub fn load_vm(directory: &Path, vm: Option<&str>) -> Result<Self, HostConfigError> {
+        let mut vms = HostSettings::load(directory)?.vms;
         match vm {
             Some(name) => vms
                 .into_iter()
                 .find(|config| config.vm_name == name)
                 .ok_or_else(|| HostConfigError::UnknownVm(name.to_owned())),
             None if vms.len() == 1 => Ok(vms.remove(0)),
+            None if vms.is_empty() => Err(HostConfigError::NoVms),
             None => Err(HostConfigError::VmNotSelected(vms.len())),
         }
     }
 
-    fn resolve(globals: &GlobalSettings, entry: &HostVm, vm: &VmSettings, paths: &Paths) -> Self {
-        let name = &entry.vm_name;
+    fn resolve(globals: &GlobalSettings, vm: &VmSettings, paths: &Paths) -> Self {
+        let name = &vm.vm_name;
         Self {
             vm_name: name.clone(),
-            alias: entry.alias.clone(),
-            priority: entry.priority,
+            alias: vm.alias.clone(),
+            priority: vm.priority,
             policy_state_path: paths
                 .state
                 .join(format!("{name}-requests.json"))
@@ -149,20 +162,19 @@ impl HostConfig {
                 vm.guest_os
                     .removal_settle_seconds(globals.convergence_timeout_seconds),
             ),
-            // From PATH, as the attestation's evidence was collected.
-            virsh_binary: "virsh".to_owned(),
+            virsh_binary: VIRSH_BINARY.to_owned(),
             libvirt_uri: globals.libvirt_uri.clone(),
             raw_telemetry_path: vm.guest_os.control_path().to_owned(),
             raw_telemetry_service_name: vm.guest_os.service_name().to_owned(),
             guest_os: vm.guest_os,
             raw_telemetry_max_age: Duration::from_millis(globals.freshness_millis()),
             raw_telemetry_future_tolerance: Duration::from_secs(globals.poll_interval_seconds),
-            host_min_headroom_bytes: globals.host_min_headroom_bytes,
+            host_min_headroom_bytes: globals.host_reserve,
             observe_only: globals.observe_only,
             min_ram: vm.min_ram,
             max_ram: vm.max_ram,
             guest_settings: Some(vm.guest_settings(globals)),
-            telemetry_path: entry.telemetry_path.clone(),
+            telemetry_path: vm.telemetry_path.clone(),
         }
     }
 }
@@ -173,7 +185,7 @@ mod tests {
 
     #[test]
     fn fixture_configuration_loads_without_optional_telemetry() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/config/host_list.toml");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/config");
         let settings = HostSettings::load(&path).expect("fixture config");
         assert_eq!(settings.vms.len(), 1);
         assert!(settings.vms[0].telemetry_path.is_none());
@@ -184,7 +196,7 @@ mod tests {
         );
         assert_eq!(
             Path::new(&settings.vms[0].compatibility_attestation_path),
-            path.with_file_name("attestations/windows-guest.attestation.json")
+            path.join("attestations/windows-guest.attestation.json")
         );
         assert!(settings.vms[0]
             .policy_state_path
@@ -194,8 +206,23 @@ mod tests {
     }
 
     #[test]
+    fn a_configuration_with_no_vms_loads() {
+        let root = std::env::temp_dir().join(format!("rampire-no-vms-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(settings::VMS_DIRECTORY)).unwrap();
+        let settings = HostSettings::load(&root).expect("empty configuration");
+        assert!(settings.vms.is_empty());
+        assert_eq!(settings.libvirt_uri, "qemu:///system");
+        assert_eq!(
+            HostConfig::load_vm(&root, None),
+            Err(HostConfigError::NoVms)
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn documented_examples_load() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../deploy/examples/host_list.toml");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../deploy/examples");
         let settings = HostSettings::load(&path).expect("example config");
         let guests: Vec<_> = settings.vms.iter().map(|vm| vm.guest_os).collect();
         assert_eq!(guests, [GuestOs::Linux, GuestOs::Windows]);
@@ -205,19 +232,13 @@ mod tests {
     fn a_linux_guest_resolves_its_own_control_path_and_service_identity() {
         let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/config");
         let globals = settings::load_globals(&directory).expect("fixture globals");
-        let vm =
-            settings::load_vm(&directory.join("linux-guest_settings.toml")).expect("fixture VM");
-        let entry = HostVm {
-            vm_name: vm.vm_name.clone(),
-            alias: "ua-virtiomem0".to_owned(),
-            priority: 50,
-            telemetry_path: None,
-        };
+        let vm = settings::load_vm(&directory.join("linux-guest.toml")).expect("fixture VM");
+        assert_eq!((vm.vm_name.as_str(), vm.priority), ("linux-guest", 50));
         let paths = Paths {
             config: directory.clone(),
             state: PathBuf::from(DEFAULT_STATE_DIRECTORY),
         };
-        let config = HostConfig::resolve(&globals, &entry, &vm, &paths);
+        let config = HostConfig::resolve(&globals, &vm, &paths);
         assert_eq!(config.guest_os, GuestOs::Linux);
         assert_eq!(config.raw_telemetry_path, GuestOs::Linux.control_path());
         assert_eq!(
@@ -231,7 +252,7 @@ mod tests {
             Duration::from_secs(GuestOs::Linux.removal_settle_seconds(0))
         );
         assert_ne!(config.removal_settle, config.convergence_timeout);
-        let windows = HostSettings::load(&directory.join("host_list.toml")).expect("fixture");
+        let windows = HostSettings::load(&directory).expect("fixture");
         assert_eq!(
             windows.vms[0].removal_settle,
             windows.vms[0].convergence_timeout

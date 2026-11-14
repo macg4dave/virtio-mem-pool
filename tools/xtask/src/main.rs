@@ -51,8 +51,9 @@ Attestation options:
   --connect URI                 Libvirt URI; default qemu:///system.
 
 Host deployment options (INSTANCE names the unit; settings install under /etc/rampire/):
-  --config PATH                 Reviewed host_list.toml with sibling global/VM settings,
-                                installed exactly as written (comments and sizes kept).
+  --config DIR                  Reviewed configuration directory (global.toml and
+                                vms.d/NAME.toml), installed exactly as written
+                                (comments and sizes kept).
   --attestation-dir DIR         Folder holding <vm_name>.attestation.json for each VM.
   --attestation VM=PATH         One VM's attestation, overriding --attestation-dir.
                                 Every VM needs one; installed as

@@ -601,7 +601,7 @@ fn pool_panel(frame: &mut Frame, command: &Command, sample: &Sample, session: &S
             frame.metric(
                 "Charged",
                 &gib(charged),
-                "single-VM controller: no pool_bytes",
+                "single-VM controller: no pool",
                 VALUE,
             );
         }
@@ -844,7 +844,7 @@ mod tests {
     fn fixture() -> String {
         crate::repo_root()
             .expect("repository root")
-            .join("fixtures/config/host_list.toml")
+            .join("fixtures/config")
             .to_string_lossy()
             .into_owned()
     }
@@ -884,7 +884,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_every_vm_and_the_pool_from_the_host_list() {
+    fn reads_every_vm_and_the_pool_from_the_configuration() {
         let config = fixture();
         let settings = HostSettings::load(Path::new(&config)).expect("tracked config");
         let command = parse(&strings(&["--config", &config])).expect("defaults");

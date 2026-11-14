@@ -519,7 +519,7 @@ mod tests {
                 publication,
                 written: Mutex::default(),
             },
-            r"C:\ProgramData\RampireGuest\telemetry.json",
+            r"C:\ProgramData\RAMpire\telemetry.json",
             "guest",
             "RampireGuest",
             Duration::from_secs(60),
@@ -815,7 +815,7 @@ mod tests {
         assert_eq!(written.len(), 2);
         assert_eq!(
             written[0].0,
-            r"C:\ProgramData\RampireGuest\telemetry.json.host-status"
+            r"C:\ProgramData\RAMpire\telemetry.json.host-status"
         );
         assert_eq!(
             serde_json::from_slice::<HostMemoryStatus>(&written[0].1).expect("status"),

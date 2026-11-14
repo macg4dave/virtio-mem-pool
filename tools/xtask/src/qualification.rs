@@ -2418,7 +2418,7 @@ mod tests {
             "--guest-service",
             "ConfiguredService",
             "--telemetry-path",
-            r"C:\ProgramData\RampireGuest\telemetry.json",
+            r"C:\ProgramData\RAMpire\telemetry.json",
             "--telemetry-max-age-seconds",
             "30",
             "--telemetry-future-tolerance-seconds",

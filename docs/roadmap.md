@@ -196,7 +196,7 @@ happens here, once, before the command is built on top of it.
   attestations. Each schema version restarts at 1. Done as listed in
   [names](names.md#wire-identifiers-r3-decision-d8). The publication
   readers for older versions went with it.
-- [ ] **R4** The configuration layout (decision D5):
+- [x] **R4** The configuration layout (decision D5):
   - `global.toml`, and `vms.d/NAME.toml` holding one VM's alias,
     priority, limits and review profile;
   - the file name is the VM's name, so the name isn't repeated inside;
@@ -208,11 +208,15 @@ happens here, once, before the command is built on top of it.
     X13).
 
   `host_list.toml` and `NAME_settings.toml` are no longer read.
+  `--config` names the configuration directory. Only `vms.d/*.toml` files
+  are VM settings, so editor backups and `.rpmnew` files are ignored.
+  Attestations stay in `/etc/rampire/attestations/` until the applied
+  copy in O1.4 gives them their place under `/var/lib/rampire`.
 - [ ] **R5** The review profile format: `reviews/NAME.toml`, replacing the
   JSON review. Each answer records its source, detected from the domain
   or confirmed by a person, so O3.2 can fill it in.
 - [ ] **R6** Delete the compatibility code the clean break leaves unused:
-  - `host-deploy`'s move of attestations from the old layout;
+  - ~~`host-deploy`'s move of attestations from the old layout~~ (done in R4);
   - ~~readers for publication versions older than current~~ (done in R3);
   - the `windows_driver_version` review alias;
   - the compatibility tables in [administration](administration.md).

@@ -905,7 +905,7 @@ fn deploy(
     let manifest = settings::load_vm(&manifest_path)?;
     let service_config = manifest.service_config()?;
     service_config.validate()?;
-    service_config.validate_paths(r"C:\ProgramData\RampireGuest\config.json")?;
+    service_config.validate_paths(r"C:\ProgramData\RAMpire\config.json")?;
     let record = required_record(config)?;
 
     let candidate_path = release_path(config, SERVICE_EXE);
@@ -1267,7 +1267,7 @@ $service={service}
 $candidate={candidate}
 $install={install}
 $telemetry={telemetry}
-$config='C:\ProgramData\RampireGuest\config.json'
+$config='C:\ProgramData\RAMpire\config.json'
 $root='C:\ProgramData\RampireGuest'
 $backup=Join-Path $root ('deployment-backups\'+[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())
 $prior=Get-CimInstance Win32_Service -Filter ("Name='"+$service.Replace("'","''")+"'") -ErrorAction SilentlyContinue
@@ -1645,11 +1645,11 @@ mod tests {
     fn fixture_vm_deploys_without_optional_telemetry() {
         let path = crate::repo_root()
             .expect("repo")
-            .join("fixtures/config/windows-guest_settings.toml");
+            .join("fixtures/config/vms.d/windows-guest.toml");
         let vm = settings::load_vm(&path).expect("VM settings");
         let wire = vm.service_config().unwrap();
         wire.validate().expect("valid service config");
-        wire.validate_paths(r"C:\ProgramData\RampireGuest\config.json")
+        wire.validate_paths(r"C:\ProgramData\RAMpire\config.json")
             .expect("distinct paths");
         let script = deployment_powershell(&vm, "candidate.exe", "e30=");
         assert!(script.contains(CONTROL_PATH));

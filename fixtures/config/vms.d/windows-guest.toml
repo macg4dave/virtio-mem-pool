@@ -1,6 +1,7 @@
+alias = "memory0"
+priority = 100
 min_ram = "6GB"
 max_ram = "27GB"
 free_ram = "2GB"
-vm_name = "windows-guest"
-install_path = 'C:\Program Files\RampireGuest\rampire-guest.exe'
+install_path = 'C:\Program Files\RAMpire\rampire-guest.exe'
 service_account = 'NT AUTHORITY\LocalService'

@@ -1,5 +1,7 @@
-//! Administrator-owned TOML settings. Runtime wire files are generated from
-//! these three formats, never a second source of administrator settings.
+//! Administrator-owned TOML settings: `global.toml` and one
+//! `vms.d/NAME.toml` per VM, in one configuration directory (normally
+//! `/etc/rampire`). Runtime wire files are generated from these, never a
+//! second source of administrator settings.
 
 use std::collections::BTreeSet;
 use std::io::Read;
@@ -15,7 +17,7 @@ use crate::{
 pub const SERVICE_NAME: &str = "RampireGuest";
 // The control channel is required for memory requests, independently of optional
 // diagnostic output. Keep its historical path to retain durable pending requests.
-pub const CONTROL_PATH: &str = r"C:\ProgramData\RampireGuest\telemetry.json";
+pub const CONTROL_PATH: &str = r"C:\ProgramData\RAMpire\telemetry.json";
 /// The Linux guest service's wire identity and systemd unit name.
 pub const LINUX_SERVICE_NAME: &str = "rampire-guest";
 /// The Linux guest's control publication; host status and durable request
@@ -98,8 +100,10 @@ fn linux_removal_retry_after_seconds(retries: u32) -> u64 {
     elapsed
 }
 
-pub const GLOBAL_FILE: &str = "global-settings.toml";
-pub const HOST_LIST_FILE: &str = "host_list.toml";
+/// The global settings, in the configuration directory. It may be absent.
+pub const GLOBAL_FILE: &str = "global.toml";
+/// The folder of VM settings files, in the configuration directory.
+pub const VMS_DIRECTORY: &str = "vms.d";
 const GIB: u64 = 1 << 30;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,9 +114,10 @@ pub struct GlobalSettings {
         deserialize_with = "crate::units::byte_size::option::deserialize",
         skip_serializing_if = "Option::is_none"
     )]
-    pub pool_bytes: Option<u64>,
+    pub pool: Option<u64>,
+    /// Host memory kept free for the host itself: growth stops above it.
     #[serde(with = "crate::units::byte_size")]
-    pub host_min_headroom_bytes: u64,
+    pub host_reserve: u64,
     pub observe_only: bool,
     pub poll_interval_seconds: u64,
     pub command_timeout_seconds: u64,
@@ -124,8 +129,8 @@ pub struct GlobalSettings {
 impl Default for GlobalSettings {
     fn default() -> Self {
         Self {
-            pool_bytes: None,
-            host_min_headroom_bytes: 4 * GIB,
+            pool: None,
+            host_reserve: 4 * GIB,
             observe_only: false,
             poll_interval_seconds: 5,
             command_timeout_seconds: 10,
@@ -137,8 +142,8 @@ impl Default for GlobalSettings {
 
 impl GlobalSettings {
     pub fn validate(&self) -> Result<(), String> {
-        if self.pool_bytes == Some(0) || self.host_min_headroom_bytes == 0 {
-            return Err("pool_bytes and host_min_headroom_bytes must be positive".to_owned());
+        if self.pool == Some(0) || self.host_reserve == 0 {
+            return Err("pool and host_reserve must be positive".to_owned());
         }
         if !(1..=10).contains(&self.poll_interval_seconds) {
             return Err(
@@ -205,9 +210,18 @@ impl GlobalSettings {
     }
 }
 
+/// One VM's settings: the file `vms.d/NAME.toml`, where NAME is the libvirt
+/// domain. The name comes from the file, so it isn't repeated inside.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VmSettings {
+    /// The libvirt domain: the file's name without `.toml`.
+    #[serde(skip)]
+    pub vm_name: String,
+    /// The libvirt alias of the VM's virtio-mem device.
+    pub alias: String,
+    /// Pool priority; larger is served first when VMs contend.
+    pub priority: u32,
     #[serde(with = "crate::units::byte_size")]
     pub min_ram: u64,
     #[serde(with = "crate::units::byte_size")]
@@ -226,12 +240,28 @@ pub struct VmSettings {
     /// Windows only: the account the service runs as.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_account: Option<String>,
-    pub vm_name: String,
+    /// Optional host-local diagnostic copy of each guest publication.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telemetry_path: Option<String>,
+    /// The review profile, `reviews/NAME.toml`, the VM is attested with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review: Option<String>,
 }
 
 impl VmSettings {
     pub fn validate(&self) -> Result<(), String> {
-        vm_filename(&self.vm_name)?;
+        validate_name("VM", &self.vm_name)?;
+        if self.priority == 0 || !valid_alias(&self.alias) {
+            return Err(
+                "a VM needs a positive priority and a valid libvirt device alias".to_owned(),
+            );
+        }
+        if let Some(path) = &self.telemetry_path {
+            validate_telemetry_path(path)?;
+        }
+        if let Some(review) = &self.review {
+            validate_name("review profile", review)?;
+        }
         validate_ram_limits(self.min_ram, self.max_ram)?;
         // An eighth of it must still be a whole number of device blocks.
         let unit = 8 * crate::MIN_BLOCK_SIZE_BYTES;
@@ -298,7 +328,7 @@ impl VmSettings {
             schema: WindowsConfigSchema,
             version: WINDOWS_SERVICE_CONFIG_VERSION,
             service_name: SERVICE_NAME.to_owned(),
-            display_name: "Virtio Memory Service".to_owned(),
+            display_name: "RAMpire guest service".to_owned(),
             description: "RAMpire guest memory requests.".to_owned(),
             service_account: service_account.to_owned(),
             shutdown_timeout_millis: 30_000,
@@ -342,7 +372,8 @@ pub fn valid_alias(alias: &str) -> bool {
 
 /// Lower-case ASCII identities avoid case-folding, reserved-name and path
 /// traversal collisions on both Linux and Windows; no lossy sanitisation.
-pub fn vm_filename(name: &str) -> Result<String, String> {
+/// VM and review profile names follow it, since each names a file.
+fn validate_name(kind: &str, name: &str) -> Result<(), String> {
     if name.is_empty()
         || name.len() > 64
         || !name
@@ -350,69 +381,34 @@ pub fn vm_filename(name: &str) -> Result<String, String> {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
         || !name.as_bytes()[0].is_ascii_alphanumeric()
     {
-        return Err("vm_name must be 1..=64 lower-case ASCII letters, digits, '-' or '_', starting with a letter or digit".to_owned());
+        return Err(format!("{kind} name {name:?} must be 1..=64 lower-case ASCII letters, digits, '-' or '_', starting with a letter or digit"));
     }
-    Ok(format!("{name}_settings.toml"))
+    Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct HostVm {
-    pub vm_name: String,
-    pub alias: String,
-    pub priority: u32,
-    /// Optional host-local diagnostic output. No guest path or transport here.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub telemetry_path: Option<String>,
+/// The settings file of the VM `name`, inside `vms.d`.
+pub fn vm_filename(name: &str) -> Result<String, String> {
+    validate_name("VM", name)?;
+    Ok(format!("{name}.toml"))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct HostList {
-    #[serde(rename = "vm")]
-    pub vms: Vec<HostVm>,
-}
-
-impl HostList {
-    pub fn validate(&self) -> Result<(), String> {
-        if self.vms.is_empty() {
-            return Err("host_list.toml must contain at least one [[vm]] entry".to_owned());
-        }
-        let mut names = BTreeSet::new();
-        let mut paths = BTreeSet::new();
-        for vm in &self.vms {
-            vm_filename(&vm.vm_name)?;
-            if !names.insert(&vm.vm_name) {
-                return Err(format!("duplicate VM {}", vm.vm_name));
-            }
-            if vm.priority == 0 || !valid_alias(&vm.alias) {
-                return Err(format!(
-                    "VM {} needs a positive priority and a valid libvirt device alias",
-                    vm.vm_name
-                ));
-            }
-            if let Some(path) = &vm.telemetry_path {
-                let file = Path::new(path);
-                if file
-                    .components()
-                    .any(|part| matches!(part, std::path::Component::ParentDir))
-                    || file.file_name().is_none()
-                    || file.starts_with("/var/lib/rampire")
-                    || file.starts_with("/etc/rampire")
-                    // Host paths are Linux paths, whatever platform checks them.
-                    || !path.starts_with('/')
-                    || path.chars().any(char::is_control)
-                    || !paths.insert(file)
-                {
-                    return Err(format!(
-                        "VM {} telemetry_path must be a unique absolute host file path outside controller state/config directories",
-                        vm.vm_name
-                    ));
-                }
-            }
-        }
-        Ok(())
+/// A diagnostic copy goes to an absolute host file outside the controller's
+/// own directories.
+fn validate_telemetry_path(path: &str) -> Result<(), String> {
+    let file = Path::new(path);
+    if file
+        .components()
+        .any(|part| matches!(part, std::path::Component::ParentDir))
+        || file.file_name().is_none()
+        || file.starts_with("/var/lib/rampire")
+        || file.starts_with("/etc/rampire")
+        // Host paths are Linux paths, whatever platform checks them.
+        || !path.starts_with('/')
+        || path.chars().any(char::is_control)
+    {
+        return Err("telemetry_path must be an absolute host file path outside the controller's state and configuration directories".to_owned());
     }
+    Ok(())
 }
 
 pub fn read_toml<T: DeserializeOwned>(path: &Path) -> Result<T, String> {
@@ -438,45 +434,59 @@ pub fn load_globals(directory: &Path) -> Result<GlobalSettings, String> {
     Ok(globals)
 }
 
+/// One VM's settings file. The VM's name is the file's name.
 pub fn load_vm(path: &Path) -> Result<VmSettings, String> {
-    let vm: VmSettings = read_toml(path)?;
-    vm.validate()?;
-    if path.file_name().and_then(|name| name.to_str()) != Some(vm_filename(&vm.vm_name)?.as_str()) {
-        return Err(format!(
-            "VM {} settings must be named {}",
-            vm.vm_name,
-            vm_filename(&vm.vm_name)?
-        ));
-    }
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_suffix(".toml"))
+        .ok_or_else(|| format!("{}: a VM settings file is named NAME.toml", path.display()))?;
+    let mut vm: VmSettings = read_toml(path)?;
+    vm.vm_name = name.to_owned();
+    vm.validate()
+        .map_err(|error| format!("{}: {error}", path.display()))?;
     Ok(vm)
 }
 
-/// Load and validate the complete source set before any consumer can act.
-pub fn load_configuration(
-    list_path: &Path,
-) -> Result<(GlobalSettings, HostList, Vec<VmSettings>), String> {
-    let directory = list_path.parent().unwrap_or(Path::new("."));
+/// Load and validate the whole configuration in `directory` before any
+/// consumer can act: `global.toml`, which may be absent, and every
+/// `vms.d/NAME.toml`, in name order. Other files in `vms.d`, such as editor
+/// backups, hidden files and a package's `NAME.toml.rpmnew`, are ignored. An
+/// empty `vms.d` is valid: the controller then manages no VMs (decision D13).
+pub fn load_configuration(directory: &Path) -> Result<(GlobalSettings, Vec<VmSettings>), String> {
     let globals = load_globals(directory)?;
-    let list: HostList = read_toml(list_path)?;
-    list.validate()?;
-    if list.vms.len() > 1 && globals.pool_bytes.is_none() {
-        return Err("set pool_bytes in global-settings.toml when managing multiple VMs".to_owned());
+    let vms_directory = directory.join(VMS_DIRECTORY);
+    let read_error = |error: std::io::Error| format!("read {}: {error}", vms_directory.display());
+    let mut paths = Vec::new();
+    for entry in std::fs::read_dir(&vms_directory).map_err(read_error)? {
+        let path = entry.map_err(read_error)?.path();
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        if !name.starts_with('.') && name.ends_with(".toml") {
+            paths.push(path);
+        }
     }
-    let vms = list
-        .vms
+    paths.sort();
+    let vms = paths
         .iter()
-        .map(|entry| {
-            let vm = load_vm(&directory.join(vm_filename(&entry.vm_name)?))?;
-            if vm.vm_name != entry.vm_name {
+        .map(|path| load_vm(path))
+        .collect::<Result<Vec<_>, String>>()?;
+    if vms.len() > 1 && globals.pool.is_none() {
+        return Err(format!(
+            "set pool in {GLOBAL_FILE} when managing more than one VM"
+        ));
+    }
+    let mut outputs = BTreeSet::new();
+    for vm in &vms {
+        if let Some(path) = &vm.telemetry_path {
+            if !outputs.insert(Path::new(path)) {
                 return Err(format!(
-                    "VM settings identity does not match {}",
-                    entry.vm_name
+                    "VM {} shares its telemetry_path with another VM",
+                    vm.vm_name
                 ));
             }
-            Ok(vm)
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    Ok((globals, list, vms))
+        }
+    }
+    Ok((globals, vms))
 }
 
 #[cfg(test)]
@@ -499,12 +509,16 @@ mod tests {
 
     fn vm(name: &str) -> VmSettings {
         VmSettings {
+            alias: "memory0".to_owned(),
+            priority: 1,
+            telemetry_path: None,
+            review: None,
             min_ram: 4 * GIB,
             max_ram: 16 * GIB,
             free_ram: 2 * GIB,
             vm_name: name.to_owned(),
             guest_os: GuestOs::Windows,
-            install_path: Some(r"C:\Program Files\RampireGuest\rampire-guest.exe".to_owned()),
+            install_path: Some(r"C:\Program Files\RAMpire\rampire-guest.exe".to_owned()),
             service_account: Some(r"NT AUTHORITY\LocalService".to_owned()),
         }
     }
@@ -523,6 +537,7 @@ mod tests {
             assert!(vm_filename(name).is_err(), "{name}");
         }
         assert!(vm_filename(&"x".repeat(65)).is_err());
+        assert_eq!(vm_filename("guest").unwrap(), "guest.toml");
     }
 
     #[test]
@@ -530,41 +545,56 @@ mod tests {
         let settings = vm("guest");
         let text = toml::to_string(&settings).unwrap();
         assert!(!text.contains("telemetry"));
-        assert_eq!(toml::from_str::<VmSettings>(&text).unwrap(), settings);
+        assert!(!text.contains("vm_name"), "the name is the file's: {text}");
+        let parsed = VmSettings {
+            vm_name: "guest".to_owned(),
+            ..toml::from_str::<VmSettings>(&text).unwrap()
+        };
+        assert_eq!(parsed, settings);
         let globals: GlobalSettings = toml::from_str("").unwrap();
         globals.validate().unwrap();
         assert!(!text.contains("guest_os"));
         let service = settings.service_config().unwrap();
         service.validate().unwrap();
         service
-            .validate_paths(r"C:\ProgramData\RampireGuest\config.json")
+            .validate_paths(r"C:\ProgramData\RAMpire\config.json")
             .unwrap();
         assert_eq!(service.service_account, r"NT AUTHORITY\LocalService");
-        let host: HostList =
-            toml::from_str("[[vm]]\nvm_name='guest'\nalias='memory0'\npriority=1").unwrap();
-        host.validate().unwrap();
-        assert!(host.vms[0].telemetry_path.is_none());
-        let mut host = host;
-        host.vms[0].telemetry_path = Some("/tmp/virtio-diagnostic.json".to_owned());
-        host.validate().unwrap();
-        let mut other = host.vms[0].clone();
-        other.vm_name = "other".to_owned();
-        other.telemetry_path = Some("/tmp/./virtio-diagnostic.json".to_owned());
-        host.vms.push(other);
-        assert!(host.validate().is_err(), "outputs cannot alias across VMs");
+        let mut traced = settings.clone();
+        traced.telemetry_path = Some("/tmp/virtio-diagnostic.json".to_owned());
+        traced.validate().unwrap();
+        for path in [
+            r"C:\x.json",
+            "relative.json",
+            "/etc/rampire/x.json",
+            "/tmp/../x",
+        ] {
+            traced.telemetry_path = Some(path.to_owned());
+            assert!(traced.validate().is_err(), "{path}");
+        }
+        traced.telemetry_path = None;
+        traced.review = Some("linux-standard".to_owned());
+        traced.validate().unwrap();
+        traced.review = Some("../other".to_owned());
+        assert!(traced.validate().is_err());
     }
 
     #[test]
     fn a_linux_guest_has_its_own_identity_and_rejects_windows_settings() {
         let linux: VmSettings = toml::from_str(
-            "min_ram='2GB'\nmax_ram='5GB'\nfree_ram='512MB'\nguest_os='linux'\nvm_name='debian'",
+            "min_ram='2GB'\nmax_ram='5GB'\nfree_ram='512MB'\nguest_os='linux'\nalias='memory0'\npriority=1",
         )
         .unwrap();
+        let linux = VmSettings {
+            vm_name: "debian".to_owned(),
+            ..linux
+        };
         linux.validate().unwrap();
-        assert_eq!(
-            toml::from_str::<VmSettings>(&toml::to_string(&linux).unwrap()).unwrap(),
-            linux
-        );
+        let round_trip = VmSettings {
+            vm_name: "debian".to_owned(),
+            ..toml::from_str::<VmSettings>(&toml::to_string(&linux).unwrap()).unwrap()
+        };
+        assert_eq!(round_trip, linux);
         let globals = GlobalSettings::default();
         let published = linux.guest_settings(&globals);
         published.validate().unwrap();
@@ -598,7 +628,7 @@ mod tests {
         assert_eq!(policy.shrink_step_bytes, 3 * GIB);
 
         let linux: VmSettings = toml::from_str(
-            "min_ram='2GB'\nmax_ram='5GB'\nfree_ram='512MB'\nguest_os='linux'\nvm_name='debian'",
+            "min_ram='2GB'\nmax_ram='5GB'\nfree_ram='512MB'\nguest_os='linux'\nalias='memory0'\npriority=1",
         )
         .unwrap();
         let policy = linux.guest_policy(&globals);
@@ -617,7 +647,8 @@ mod tests {
             assert!(windows.validate().is_err(), "{invalid}");
         }
         assert!(
-            toml::from_str::<VmSettings>("min_ram='2GB'\nmax_ram='5GB'\nvm_name='debian'").is_err(),
+            toml::from_str::<VmSettings>("min_ram='2GB'\nmax_ram='5GB'\nalias='m'\npriority=1")
+                .is_err(),
             "free_ram has no built-in default"
         );
     }
@@ -633,11 +664,11 @@ mod tests {
         settings = vm("guest");
         assert!(
             toml::from_str::<VmSettings>(&format!(
-                "{}\ntelemetry_path='C:\\\\x.json'",
+                "{}\nvm_name='guest'",
                 toml::to_string(&settings).unwrap()
             ))
             .is_err(),
-            "the Windows diagnostic copy is gone"
+            "the name is the file's, never a setting"
         );
         assert!(toml::from_str::<VmSettings>(&format!(
             "{}\npoll_interval_millis=5000",
@@ -645,9 +676,9 @@ mod tests {
         ))
         .is_err());
         assert!(toml::from_str::<GlobalSettings>("virsh_binary='virsh'").is_err());
-        assert!(
-            toml::from_str::<HostList>("[[vm]]\nname='old'\nalias='memory0'\npriority=1").is_err()
-        );
+        for old in ["pool_bytes='4GB'", "host_min_headroom_bytes='4GB'"] {
+            assert!(toml::from_str::<GlobalSettings>(old).is_err(), "{old}");
+        }
         let invalid = GlobalSettings {
             poll_interval_seconds: 0,
             ..GlobalSettings::default()
@@ -666,55 +697,55 @@ mod tests {
     }
 
     #[test]
-    fn independent_vm_files_are_loaded_relative_to_list_and_identity_checked() {
+    fn vm_files_in_vms_d_make_the_configuration() {
         let root = std::env::temp_dir().join(format!("rampire-settings-{}", std::process::id()));
-        std::fs::create_dir_all(&root).unwrap();
-        let path = root.join(HOST_LIST_FILE);
-        let mut list = HostList {
-            vms: vec![HostVm {
-                vm_name: "alpha".to_owned(),
-                alias: "memory0".to_owned(),
-                priority: 2,
-                telemetry_path: None,
-            }],
-        };
+        let vms = root.join(VMS_DIRECTORY);
         let write = |path: &Path, text: String| std::fs::write(path, text).unwrap();
-        write(&path, toml::to_string(&list).unwrap());
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(
+            load_configuration(&root).unwrap_err().contains("vms.d"),
+            "a directory without vms.d is not a configuration"
+        );
+        std::fs::create_dir(&vms).unwrap();
+        // No VMs and no global settings: valid, with every default.
+        let (globals, loaded) = load_configuration(&root).unwrap();
+        assert_eq!((globals, loaded), (GlobalSettings::default(), vec![]));
+
         write(
-            &root.join("alpha_settings.toml"),
+            &vms.join("alpha.toml"),
             toml::to_string(&vm("alpha")).unwrap(),
         );
-        // Missing globals use defaults and missing telemetry requires no stand-ins.
-        let (_, _, loaded) = load_configuration(&path).unwrap();
-        assert_eq!(loaded[0], vm("alpha"));
+        for ignored in ["alpha.toml.rpmnew", "alpha.toml~", ".beta.toml", "README"] {
+            write(&vms.join(ignored), "not settings".to_owned());
+        }
+        let (_, loaded) = load_configuration(&root).unwrap();
+        assert_eq!(loaded, [vm("alpha")]);
+
         let mut beta = vm("beta");
         beta.min_ram = 8 * GIB;
-        list.vms.push(HostVm {
-            vm_name: "beta".to_owned(),
-            alias: "memory0".to_owned(),
-            priority: 1,
-            telemetry_path: None,
-        });
-        write(&path, toml::to_string(&list).unwrap());
-        write(
-            &root.join("beta_settings.toml"),
-            toml::to_string(&beta).unwrap(),
+        write(&vms.join("beta.toml"), toml::to_string(&beta).unwrap());
+        assert!(load_configuration(&root).unwrap_err().contains("pool"));
+        write(&root.join(GLOBAL_FILE), "pool='32GB'".to_owned());
+        let (_, loaded) = load_configuration(&root).unwrap();
+        assert_eq!(loaded, [vm("alpha"), beta.clone()]);
+
+        let mut shared = beta;
+        shared.telemetry_path = Some("/tmp/./diagnostic.json".to_owned());
+        write(&vms.join("beta.toml"), toml::to_string(&shared).unwrap());
+        let mut alpha = vm("alpha");
+        alpha.telemetry_path = Some("/tmp/diagnostic.json".to_owned());
+        write(&vms.join("alpha.toml"), toml::to_string(&alpha).unwrap());
+        assert!(
+            load_configuration(&root).is_err(),
+            "outputs cannot alias across VMs"
         );
-        assert!(load_configuration(&path)
-            .unwrap_err()
-            .contains("pool_bytes"));
-        write(&root.join(GLOBAL_FILE), "pool_bytes='32GB'".to_owned());
-        let (_, _, loaded) = load_configuration(&path).unwrap();
-        assert_eq!(loaded, [vm("alpha"), beta]);
+
         write(
-            &root.join("beta_settings.toml"),
-            toml::to_string(&vm("alpha")).unwrap(),
+            &vms.join("Bad Name.toml"),
+            toml::to_string(&vm("x")).unwrap(),
         );
-        assert!(load_configuration(&path).is_err());
-        std::fs::remove_file(root.join("beta_settings.toml")).unwrap();
-        assert!(load_configuration(&path).is_err());
-        list.vms[1].vm_name = "alpha".to_owned();
-        assert!(list.validate().is_err());
+        assert!(load_configuration(&root).unwrap_err().contains("Bad Name"));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -54,11 +54,11 @@ struct AttestationEvidence {
 }
 
 /// Where host-deploy installs the configuration, with the attestations in
-/// their own folder inside it; the unit's ExecStart names the host list in it.
+/// their own folder inside it; the unit's ExecStart names this directory.
 const CONFIG_DIRECTORY: &str = "/etc/rampire";
 
 /// The deployment layout: unit `rampire@INSTANCE.service` runs the
-/// config `/etc/rampire/host_list.toml` and its sibling settings files.
+/// configuration in `/etc/rampire`.
 /// Returns INSTANCE for a controller unit name.
 pub fn controller_instance(unit: &str) -> Result<&str, String> {
     unit.strip_prefix("rampire@")
@@ -209,47 +209,66 @@ pub fn run(command: &Command, repo: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// The configuration's files, relative to its directory: `global.toml`
+/// and each VM's `vms.d/NAME.toml`.
+fn configuration_files(directory: &Path) -> Result<Vec<String>, String> {
+    use rampire_core::settings::{self, GLOBAL_FILE, VMS_DIRECTORY};
+    let (_, vms) = settings::load_configuration(directory)?;
+    let mut files = vec![GLOBAL_FILE.to_owned()];
+    for vm in &vms {
+        files.push(format!(
+            "{VMS_DIRECTORY}/{}",
+            settings::vm_filename(&vm.vm_name)?
+        ));
+    }
+    Ok(files)
+}
+
 /// Copies the configuration files byte for byte, so what is installed is what
 /// the administrator wrote: their comments and sizes such as `"3GB"` stay as
 /// they are. The caller validates the copy, not the source.
 fn snapshot_configuration(source: &Path, directory: &Path) -> Result<PathBuf, String> {
-    use rampire_core::settings::{self, GLOBAL_FILE, HOST_LIST_FILE};
-    let (_, _, vms) = settings::load_configuration(source)?;
-    let from = source.parent().unwrap_or(Path::new("."));
-    let copy = |name: &str| -> Result<(), String> {
-        let bytes = std::fs::read(from.join(name))
-            .map_err(|error| format!("read {}: {error}", from.join(name).display()))?;
-        persist(&directory.join(name), &bytes)
-    };
-    if from.join(GLOBAL_FILE).exists() {
-        copy(GLOBAL_FILE)?;
-    } else {
-        persist(
-            &directory.join(GLOBAL_FILE),
-            b"# Every server-wide setting is at its built-in default.\n",
-        )?;
+    use rampire_core::settings::{GLOBAL_FILE, VMS_DIRECTORY};
+    std::fs::create_dir_all(directory.join(VMS_DIRECTORY))
+        .map_err(|error| format!("create {}: {error}", directory.display()))?;
+    for name in configuration_files(source)? {
+        let from = source.join(&name);
+        if name == GLOBAL_FILE && !from.exists() {
+            persist(
+                &directory.join(GLOBAL_FILE),
+                b"# Every server-wide setting is at its built-in default.\n",
+            )?;
+            continue;
+        }
+        let bytes =
+            std::fs::read(&from).map_err(|error| format!("read {}: {error}", from.display()))?;
+        persist(&directory.join(&name), &bytes)?;
     }
-    persist(
-        &directory.join(HOST_LIST_FILE),
-        &std::fs::read(source).map_err(|error| format!("read {}: {error}", source.display()))?,
-    )?;
-    for vm in &vms {
-        copy(&settings::vm_filename(&vm.vm_name)?)?;
-    }
-    Ok(directory.join(HOST_LIST_FILE))
+    Ok(directory.to_path_buf())
 }
 
-fn configuration_paths(list_path: &Path) -> Result<Vec<PathBuf>, String> {
-    use rampire_core::settings::{self, GLOBAL_FILE};
-    let (_, _, vms) = settings::load_configuration(list_path)?;
-    let directory = list_path
-        .parent()
-        .ok_or("host list has no parent directory")?;
-    let mut paths = vec![directory.join(GLOBAL_FILE), list_path.to_path_buf()];
-    for vm in &vms {
-        paths.push(directory.join(settings::vm_filename(&vm.vm_name)?));
+/// VM files installed by an earlier deployment that the new configuration
+/// doesn't have. They are backed up and removed, or the controller would
+/// still manage those VMs.
+fn stale_vm_files(installed: &Path, keep: &[String]) -> Result<Vec<PathBuf>, String> {
+    use rampire_core::settings::VMS_DIRECTORY;
+    let directory = installed.join(VMS_DIRECTORY);
+    let entries = match std::fs::read_dir(&directory) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        result => result.map_err(|error| format!("read {}: {error}", directory.display()))?,
+    };
+    let mut stale = Vec::new();
+    for entry in entries {
+        let path = entry
+            .map_err(|error| format!("read {}: {error}", directory.display()))?
+            .path();
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        if !keep.contains(&format!("{VMS_DIRECTORY}/{name}")) {
+            stale.push(path);
+        }
     }
-    Ok(paths)
+    stale.sort();
+    Ok(stale)
 }
 
 fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
@@ -286,7 +305,7 @@ fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
     )?;
     // Snapshot the attestations with the settings, so an install from the
     // installed directory itself never copies a file onto itself.
-    let attestation_snapshot = config_source.with_file_name(rampire::config::ATTESTATION_DIRECTORY);
+    let attestation_snapshot = config_source.join(rampire::config::ATTESTATION_DIRECTORY);
     for attestation in &mut attestations {
         let bytes = std::fs::read(&attestation.source).map_err(|error| {
             format!(
@@ -309,18 +328,14 @@ fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
     require_inactive(&before, &unit)?;
 
     let candidate_hash = hash(&candidate, repo, command.timeout)?;
-    let config_files = configuration_paths(&config_source)?;
     let mut config_index = String::new();
-    for path in &config_files {
+    for name in configuration_files(&config_source)? {
         config_index.push_str(&format!(
-            "{}  {}\n",
-            hash(path, repo, command.timeout)?,
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .ok_or("configuration filename is not UTF-8")?
+            "{}  {name}\n",
+            hash(&config_source.join(&name), repo, command.timeout)?
         ));
     }
-    let index_path = config_source.with_file_name("config-index.sha256");
+    let index_path = config_source.join("config-index.sha256");
     persist(&index_path, config_index.as_bytes())?;
     let config_hash = hash(&index_path, repo, command.timeout)?;
     let attestation_evidence = attestations
@@ -484,7 +499,8 @@ fn install(
         repo,
         command.timeout,
     )?;
-    let config_files = configuration_paths(config)?;
+    let config_files = configuration_files(config)?;
+    let stale = stale_vm_files(Path::new(CONFIG_DIRECTORY), &config_files)?;
     let targets = [
         PathBuf::from("/usr/local/bin/rampire"),
         PathBuf::from("/etc/systemd/system/rampire@.service"),
@@ -494,9 +510,9 @@ fn install(
     .chain(
         config_files
             .iter()
-            .filter_map(|path| path.file_name())
-            .map(|name| Path::new("/etc/rampire").join(name)),
+            .map(|name| Path::new(CONFIG_DIRECTORY).join(name)),
     )
+    .chain(stale.iter().cloned())
     .chain(
         attestations
             .iter()
@@ -514,22 +530,22 @@ fn install(
                 .map_err(|error| format!("backup {}: {error}", target.display()))?;
         }
     }
-    // Earlier installs put attestations beside the settings files. Keep a
-    // copy, then remove them once the new ones are in their own folder.
-    let legacy = legacy_attestations(Path::new(CONFIG_DIRECTORY))?;
-    for path in &legacy {
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or("invalid legacy attestation filename")?;
-        std::fs::copy(path, backup.join(format!("legacy-{name}")))
-            .map_err(|error| format!("backup {}: {error}", path.display()))?;
-    }
     install_directory(
         CONFIG_DIRECTORY,
         "root",
         "root",
         "0755",
+        repo,
+        command.timeout,
+    )?;
+    install_directory(
+        &Path::new(CONFIG_DIRECTORY)
+            .join(rampire_core::settings::VMS_DIRECTORY)
+            .display()
+            .to_string(),
+        "root",
+        "rampire",
+        "0750",
         repo,
         command.timeout,
     )?;
@@ -571,14 +587,10 @@ fn install(
         repo,
         command.timeout,
     )?;
-    for source in &config_files {
-        let name = source
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or("invalid configuration filename")?;
+    for name in &config_files {
         install_file(
-            source,
-            &format!("/etc/rampire/{name}"),
+            &config.join(name),
+            &format!("{CONFIG_DIRECTORY}/{name}"),
             "root",
             "rampire",
             "0640",
@@ -600,7 +612,7 @@ fn install(
             command.timeout,
         )?;
     }
-    for path in &legacy {
+    for path in &stale {
         std::fs::remove_file(path)
             .map_err(|error| format!("remove {}: {error}", path.display()))?;
     }
@@ -624,30 +636,6 @@ fn install(
             .map_err(|error| format!("record prior enablement: {error}"))?;
     }
     Ok(backup.display().to_string())
-}
-
-/// Attestations left directly in the configuration directory by an install
-/// from before they had their own folder.
-fn legacy_attestations(directory: &Path) -> Result<Vec<PathBuf>, String> {
-    let entries = match std::fs::read_dir(directory) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        result => result.map_err(|error| format!("read {}: {error}", directory.display()))?,
-    };
-    let mut found = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|error| format!("read {}: {error}", directory.display()))?;
-        let path = entry.path();
-        if path.is_file()
-            && path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.ends_with(".attestation.json"))
-        {
-            found.push(path);
-        }
-    }
-    found.sort();
-    Ok(found)
 }
 
 fn install_file(
@@ -925,9 +913,7 @@ mod tests {
     fn every_configured_vm_needs_exactly_one_attestation_in_the_config_directory() {
         let directory =
             std::env::temp_dir().join(format!("rampire-deploy-test-{}", std::process::id()));
-        let source = crate::repo_root()
-            .expect("root")
-            .join("fixtures/config/host_list.toml");
+        let source = crate::repo_root().expect("root").join("fixtures/config");
         let snapshot = snapshot_configuration(&source, &directory).expect("snapshot");
         let original = HostSettings::load(&snapshot).expect("settings");
         let mut settings = original;
@@ -963,9 +949,7 @@ mod tests {
             std::env::temp_dir().join(format!("rampire-deploy-dir-{}", std::process::id()));
         std::fs::create_dir_all(&directory).expect("folder");
         std::fs::write(directory.join("a.attestation.json"), b"{}").expect("a");
-        let source = crate::repo_root()
-            .expect("root")
-            .join("fixtures/config/host_list.toml");
+        let source = crate::repo_root().expect("root").join("fixtures/config");
         let mut vms = HostSettings::load(&source).expect("settings").vms;
         vms[0].vm_name = "a".to_owned();
         let mut other = vms[0].clone();
@@ -987,47 +971,39 @@ mod tests {
     fn the_installed_configuration_keeps_comments_and_written_sizes() {
         let root = std::env::temp_dir().join(format!("rampire-deploy-copy-{}", std::process::id()));
         let source = root.join("source");
-        std::fs::create_dir_all(&source).expect("source");
-        let globals = "# The pool every VM shares.\npool_bytes = \"3GB\"\n";
-        let list =
-            "# Web first.\n[[vm]]\nvm_name = \"web\"\nalias = \"ua-virtiomem0\"\npriority = 100\n";
-        let vm = "# Small at idle.\nvm_name = \"web\"\nguest_os = \"linux\"\nmin_ram = \"512MB\"\nmax_ram = \"2GiB\"\nfree_ram = \"128MiB\"\n";
-        std::fs::write(source.join("global-settings.toml"), globals).expect("globals");
-        std::fs::write(source.join("host_list.toml"), list).expect("list");
-        std::fs::write(source.join("web_settings.toml"), vm).expect("vm");
-        let snapshot = snapshot_configuration(&source.join("host_list.toml"), &root.join("copy"));
+        std::fs::create_dir_all(source.join("vms.d")).expect("source");
+        let globals = "# The pool every VM shares.\npool = \"3GB\"\n";
+        let vm = "# Web first, small at idle.\nalias = \"ua-virtiomem0\"\npriority = 100\nguest_os = \"linux\"\nmin_ram = \"512MB\"\nmax_ram = \"2GiB\"\nfree_ram = \"128MiB\"\n";
+        std::fs::write(source.join("global.toml"), globals).expect("globals");
+        std::fs::write(source.join("vms.d/web.toml"), vm).expect("vm");
+        std::fs::write(source.join("vms.d/web.toml~"), "backup").expect("backup");
+        let snapshot = snapshot_configuration(&source, &root.join("copy"));
         let read = |name: &str| std::fs::read_to_string(root.join("copy").join(name));
-        let copied = (
-            read("global-settings.toml"),
-            read("host_list.toml"),
-            read("web_settings.toml"),
-        );
+        let copied = (read("global.toml"), read("vms.d/web.toml"));
+        let backup_copied = root.join("copy/vms.d/web.toml~").exists();
         let loaded = snapshot.as_ref().map(|path| HostSettings::load(path));
         std::fs::remove_dir_all(&root).expect("remove");
         assert!(snapshot.is_ok(), "{snapshot:?}");
         assert_eq!(copied.0.expect("globals"), globals);
-        assert_eq!(copied.1.expect("list"), list);
-        assert_eq!(copied.2.expect("vm"), vm);
+        assert_eq!(copied.1.expect("vm"), vm);
+        assert!(!backup_copied, "only the configuration is installed");
         let vms = loaded.expect("snapshot path").expect("valid copy").vms;
         assert_eq!(vms[0].max_ram, 2 << 30);
     }
 
     #[test]
-    fn only_top_level_attestations_are_legacy() {
+    fn vm_files_the_new_configuration_drops_are_stale() {
         let root =
-            std::env::temp_dir().join(format!("rampire-deploy-legacy-{}", std::process::id()));
-        std::fs::create_dir_all(root.join("attestations")).expect("folders");
-        for name in [
-            "web.attestation.json",
-            "web_settings.toml",
-            "attestations/web.attestation.json",
-        ] {
-            std::fs::write(root.join(name), b"{}").expect("file");
+            std::env::temp_dir().join(format!("rampire-deploy-stale-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("vms.d")).expect("folders");
+        for name in ["vms.d/web.toml", "vms.d/old.toml", "global.toml"] {
+            std::fs::write(root.join(name), b"").expect("file");
         }
-        let found = legacy_attestations(&root);
-        let absent = legacy_attestations(&root.join("absent"));
+        let keep = ["global.toml".to_owned(), "vms.d/web.toml".to_owned()];
+        let found = stale_vm_files(&root, &keep);
+        let absent = stale_vm_files(&root.join("absent"), &keep);
         std::fs::remove_dir_all(&root).expect("remove");
-        assert_eq!(found, Ok(vec![root.join("web.attestation.json")]));
+        assert_eq!(found, Ok(vec![root.join("vms.d/old.toml")]));
         assert_eq!(absent, Ok(Vec::new()));
     }
 

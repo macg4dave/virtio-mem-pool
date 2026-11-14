@@ -51,10 +51,10 @@ const RECENT_EVENTS: usize = 200;
 const BUNDLE_ROWS: usize = 60;
 
 pub const HELP: &str = "Metrics options (read-only stress-test recorder):
-  --config PATH                 Required host_list.toml; loads sibling global
-                                and per-VM settings. Optional diagnostic
+  --config DIR                  Required configuration directory: global.toml
+                                and vms.d/NAME.toml. Optional diagnostic
                                 telemetry paths are not needed or read.
-  --vm NAME                     The [[vm]] to record; required with several.
+  --vm NAME                     The VM to record; required with several.
                                 `--vm all` records every VM: one recorder
                                 per VM in DIR/<vm>/, plus DIR/pool.csv with
                                 every device, the pool and host memory per
@@ -1724,7 +1724,7 @@ mod tests {
     fn tracked_config() -> String {
         crate::repo_root()
             .expect("repository root")
-            .join("fixtures/config/host_list.toml")
+            .join("fixtures/config")
             .to_string_lossy()
             .into_owned()
     }
@@ -1789,35 +1789,31 @@ mod tests {
         let root =
             std::env::temp_dir().join(format!("rampire-metrics-config-{}", std::process::id()));
         std::fs::create_dir_all(&root).expect("fixture directory");
-        let config_path = root.join("host_list.toml");
+        let config_path = root.clone();
+        std::fs::create_dir_all(root.join("vms.d")).expect("VM directory");
         std::fs::write(
-            root.join("global-settings.toml"),
-            "pool_bytes='16GB'\nhost_min_headroom_bytes='6GB'\npoll_interval_seconds=2\n",
+            root.join("global.toml"),
+            "pool='16GB'\nhost_reserve='6GB'\npoll_interval_seconds=2\n",
         )
         .expect("global settings");
         for diagnostics in [false, true] {
-            let mut list = String::new();
             for (name, alias) in [("alpha", "memory0"), ("beta", "memory1")] {
-                list.push_str(&format!(
-                    "[[vm]]\nvm_name='{name}'\nalias='{alias}'\npriority=100\n"
-                ));
-                let vm = format!(
+                let mut vm = format!(
                     r#"
-vm_name='{name}'
+alias='{alias}'
+priority=100
 min_ram='4GB'
 max_ram='16GB'
 free_ram='2GB'
-install_path='C:\Program Files\RampireGuest\rampire-guest.exe'
+install_path='C:\Program Files\RAMpire\rampire-guest.exe'
 service_account='NT AUTHORITY\LocalService'
 "#
                 );
                 if diagnostics {
-                    list.push_str(&format!("telemetry_path='/tmp/{name}-diagnostics.json'\n"));
+                    vm.push_str(&format!("telemetry_path='/tmp/{name}-diagnostics.json'\n"));
                 }
-                std::fs::write(root.join(format!("{name}_settings.toml")), vm)
-                    .expect("VM settings");
+                std::fs::write(root.join(format!("vms.d/{name}.toml")), vm).expect("VM settings");
             }
-            std::fs::write(&config_path, list).expect("host list");
             let args = vec![
                 "--config".to_owned(),
                 config_path.to_string_lossy().into_owned(),

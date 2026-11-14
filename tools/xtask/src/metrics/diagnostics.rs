@@ -40,7 +40,7 @@ pub(super) fn write_manifest(
     };
     let settings = rampire_core::settings::load_configuration(&command.config_path)
         .map_err(|error| error.to_string())
-        .map(|(global, hosts, vms)| json!({"global": global, "hosts": hosts, "vms": vms}));
+        .map(|(global, vms)| json!({"global": global, "vms": vms}));
     let config = rampire::config::HostConfig::load_vm(&command.config_path, Some(&command.vm))
         .map_err(|error| error.to_string());
     let controller_pid = process::bounded_text(
@@ -79,8 +79,8 @@ pub(super) fn write_manifest(
         "configured_settings": settings.unwrap_or_else(|error| json!({"error": error})),
         "installed_controller_sha256": installed_hash,
         "controller_unit": run("systemctl", &["show", &command.unit, "--property=ExecStart,FragmentPath,MainPID,InvocationID"]),
-        "installed_settings": {"global": read(Path::new("/etc/rampire/global-settings.toml")), "host_list": read(Path::new("/etc/rampire/host_list.toml")),
-            "vm": read(&PathBuf::from(format!("/etc/rampire/{}_settings.toml", command.vm)))},
+        "installed_settings": {"global": read(Path::new("/etc/rampire/global.toml")),
+            "vm": read(&PathBuf::from(format!("/etc/rampire/vms.d/{}.toml", command.vm)))},
         "initial_control_state": state,
         "host_boot_id": read(Path::new("/proc/sys/kernel/random/boot_id")),
         "live_xml": run("virsh", &["-c", &command.connect, "--readonly", "dumpxml", &command.vm]),
@@ -344,7 +344,7 @@ mod tests {
             "--config".to_owned(),
             crate::repo_root()
                 .unwrap()
-                .join("fixtures/config/host_list.toml")
+                .join("fixtures/config")
                 .display()
                 .to_string(),
         ])

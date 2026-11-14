@@ -1,6 +1,8 @@
-# Memory limits for one Linux VM.
+# One Linux VM: its memory device, its priority and its memory limits.
 #
-# This file must be named <VM name>_settings.toml, here linux-vm_settings.toml.
+# The file's name is the VM's name, exactly as `virsh list` shows it, with
+# .toml added: this file is for the VM linux-vm.
+#
 # Lines starting with # are notes: the program ignores them.
 #
 # Write sizes in quotes, for example "512MB", "128MiB", "3GB" or "1.5GB".
@@ -10,8 +12,16 @@
 # After changing this file, install it (see docs/usage.md). The running
 # program does not notice changes on its own.
 
-# The VM's name, exactly as `virsh list` shows it. Don't change it.
-vm_name = "linux-vm"
+# The name of the VM's memory device. Don't change it.
+alias = "ua-virtiomem0"
+
+# Priority: a whole number above zero. A higher number is more important.
+# - With plenty of free memory, priority makes no difference.
+# - When memory is short, the VM with the higher number is served first.
+# - Equal numbers are served in the order the VMs asked.
+# - Memory is never taken away from one VM to give to another.
+# Spacing the numbers out (100, 50, 10) leaves room for VMs in between.
+priority = 100
 
 # The VM's operating system. Don't change it.
 guest_os = "linux"

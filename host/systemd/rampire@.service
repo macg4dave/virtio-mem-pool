@@ -12,14 +12,14 @@ SupplementaryGroups=qemu
 # Provision non-interactive libvirt management authorization for this account
 # during installation. The daemon checks it before polling and never requests
 # a desktop password dialog or elevates itself. The libvirt connection is
-# libvirt_uri in global-settings.toml.
+# libvirt_uri in global.toml.
 Environment=HOME=/run/rampire
 Environment=XDG_CACHE_HOME=/run/rampire/.cache
 # A site with another layout overrides ExecStart in a drop-in
-# (systemctl edit rampire@.service). Attestations sit in the
-# attestations/ folder beside the host list; durable state goes in the
+# (systemctl edit rampire@.service). The configuration directory holds
+# global.toml, vms.d/ and attestations/; durable state goes in the
 # StateDirectory below.
-ExecStart=/usr/local/bin/rampire --config /etc/rampire/host_list.toml
+ExecStart=/usr/local/bin/rampire --config /etc/rampire
 # Failure is fail-stop. Deployment monitoring decides when a reviewed restart
 # is appropriate; the unit does not create an automatic restart loop.
 Restart=no

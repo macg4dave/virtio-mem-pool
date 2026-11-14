@@ -2,9 +2,8 @@
 # Build the host controller from this checkout and install it with a site's
 # configuration and explicit, current attestations.
 # Usage: install-host.sh CONFIG_DIR INSTANCE [VM=ATTESTATION ...]
-# CONFIG_DIR holds host_list.toml, global-settings.toml and each
-# <vm_name>_settings.toml (see deploy/examples), installed exactly as
-# written. Each VM's attestation is CONFIG_DIR/attestations/<vm_name>.attestation.json
+# CONFIG_DIR holds global.toml and vms.d/<vm_name>.toml for each VM (see
+# deploy/examples), installed exactly as written. Each VM's attestation is CONFIG_DIR/attestations/<vm_name>.attestation.json
 # unless VM=ATTESTATION names another file. INSTANCE names the systemd
 # controller.
 set -euo pipefail
@@ -15,8 +14,8 @@ fi
 config_dir=$(cd -- "$1" && pwd)
 instance=$2
 shift 2
-if [[ ! -f $config_dir/host_list.toml ]]; then
-  echo "no host_list.toml in $config_dir" >&2
+if [[ ! -d $config_dir/vms.d ]]; then
+  echo "no vms.d folder in $config_dir" >&2
   exit 1
 fi
 if [[ ! $instance =~ ^[[:alnum:]][[:alnum:]_.-]*$ ]]; then
@@ -47,7 +46,7 @@ cargo build --release --locked -p rampire -p xtask
 sudo systemctl stop "$unit"
 sudo systemctl reset-failed "$unit" 2>/dev/null || true
 target/release/xtask host-deploy "$instance" \
-  --config "$config_dir/host_list.toml" \
+  --config "$config_dir" \
   "${attestations[@]}" \
   --output ".artifacts/deploy/host-deploy-$(date +%Y%m%dT%H%M%S).json" \
   --command-timeout-seconds 60 --apply --elevate

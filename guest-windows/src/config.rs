@@ -5,7 +5,7 @@ use rampire_core::{WindowsServiceConfigFile, WINDOWS_SERVICE_CONFIG_VERSION};
 
 use crate::error::ConfigurationError;
 
-pub const DEFAULT_CONFIG_PATH: &str = r"C:\ProgramData\RampireGuest\config.json";
+pub const DEFAULT_CONFIG_PATH: &str = r"C:\ProgramData\RAMpire\config.json";
 
 /// The deployed configuration file and where it was loaded from. It reads as
 /// the file's own fields.

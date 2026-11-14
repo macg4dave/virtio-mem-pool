@@ -45,7 +45,7 @@ pub struct Target {
 }
 
 pub fn usage() -> &'static str {
-    "Usage: rampire --config FILE\n       rampire status --config FILE [--vm NAME] [--connect URI]\n       rampire clear-latch REASON --config FILE [--vm NAME] [--connect URI] [--apply]"
+    "Usage: rampire --config DIR\n       rampire status --config DIR [--vm NAME] [--connect URI]\n       rampire clear-latch REASON --config DIR [--vm NAME] [--connect URI] [--apply]"
 }
 
 pub fn parse_args(args: &[String]) -> Result<CliCommand, String> {

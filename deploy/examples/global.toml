@@ -15,12 +15,12 @@
 # memory each one starts with. Needed when there is more than one VM.
 # A good start: the host's memory, minus what the host keeps for itself
 # (below), minus the memory each VM starts with.
-pool_bytes = "16GB"
+pool = "16GB"
 
 # Memory the host always keeps free for itself. VMs are never given memory
 # that would take the host below this. "4GB" suits most hosts; raise it if
 # the host runs other programs.
-host_min_headroom_bytes = "4GB"
+host_reserve = "4GB"
 
 # Trial mode. true: decide and log everything, but change no VM's memory.
 # false: normal use.
