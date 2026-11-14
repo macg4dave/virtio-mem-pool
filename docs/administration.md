@@ -346,9 +346,12 @@ see [the roadmap](roadmap.md), milestone W.
 ## Observing
 
 ```bash
-cargo xtask watch --config /etc/rampire
+sudo rampire top            # every VM and the pool
+sudo rampire watch VM       # one VM
+sudo rampire status [VM]    # the controller's status, as JSON
+sudo rampire check          # settings and attestations against the live VMs
+sudo rampire logs --follow  # the controller's journal
 cargo xtask metrics --config /etc/rampire
-rampire status --config /etc/rampire --vm VM
 ```
 
 The controller logs every decision to the journal
@@ -363,14 +366,13 @@ and `metrics`) and stops resizing until an operator clears it. Install the
 current controller and attestation, then:
 
 ```bash
-deploy/scripts/recover-latch.sh INSTANCE "why it is safe to resume"
+sudo rampire recover VM "why it is safe to resume"
 ```
 
-It stops the unit, runs `rampire clear-latch`, which first settles a
-stuck shrink at what the guest kept and records the reason in the state,
-and starts the unit again. `RAMPIRE_HOST_BIN`, `RAMPIRE_HOST_CONFIG`
-(the configuration directory) and `RAMPIRE_CONNECT` override the installed
-paths and libvirt URI.
+It shows what it would do and asks. Then it stops the unit, settles a
+stuck shrink at what the guest kept, records the reason in the VM's state
+(as the service account, so the controller can still write it) and starts
+the unit again. `--yes` answers for a script.
 
 **A stopped controller.** The unit is fail-stop (`Restart=no`): a failure
 needs a person to look. Read `systemctl status` and the journal, fix the

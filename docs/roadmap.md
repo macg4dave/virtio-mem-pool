@@ -244,12 +244,17 @@ version.
   controller status view is `rampire status` itself; `xtask
   controller-status`, which records evidence from a checkout build, stays
   a development tool.
-- [ ] **O1.2** One binary (decision D7), with its command line defined in
+- [x] **O1.2** One binary (decision D7), with its command line defined in
   clap, so `--help`, shell completion and man pages come from one
   definition (decision D16). The unit runs `rampire daemon`. People run
   `status`, `top`, `check`, `diff`, `apply`, `logs`, `doctor` and
   `recover`. `check` validates the settings and every attestation
   against the live VMs, and changes nothing.
+
+  Done for `daemon`, `status`, `top`, `watch`, `check`, `logs` and
+  `recover` (which replaces `recover-latch.sh`). `diff` and `apply` come
+  with O1.4, `doctor` with O1.9. Completions and man pages are generated
+  from the same definition when the packages are built (O2).
 - [ ] **O1.3** The contract shared by every command (X6):
   - `--json`, `--yes`, and no prompts without a terminal;
   - documented exit codes, including `apply --detailed-exitcode`;

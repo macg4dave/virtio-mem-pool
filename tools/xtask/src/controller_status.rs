@@ -192,10 +192,9 @@ fn collect(command: &Command, repo: &Path) -> Result<Evidence, String> {
     let output = process::bounded_output_with_env(
         &command.host_cli,
         &[
-            process::os("status"),
             process::os("--config"),
             config_path.as_os_str().to_owned(),
-            process::os("--vm"),
+            process::os("status"),
             process::os(&configured.vm_name),
             process::os("--connect"),
             process::os(&command.connection),

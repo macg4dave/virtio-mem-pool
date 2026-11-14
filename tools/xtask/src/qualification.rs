@@ -2115,8 +2115,10 @@ fn controller_config_path(command_line: &[u8]) -> Result<PathBuf, String> {
         .filter(|argument| !argument.is_empty())
         .collect::<Vec<_>>();
     match arguments.as_slice() {
-        [_, b"--config", path] => Ok(PathBuf::from(String::from_utf8_lossy(path).into_owned())),
-        _ => Err("running controller was not started with exactly --config PATH".to_owned()),
+        [_, b"daemon", b"--config", path] => {
+            Ok(PathBuf::from(String::from_utf8_lossy(path).into_owned()))
+        }
+        _ => Err("running controller was not started with exactly daemon --config DIR".to_owned()),
     }
 }
 
@@ -2934,13 +2936,14 @@ mod tests {
     #[test]
     fn controller_config_comes_only_from_its_exact_command_line() {
         assert_eq!(
-            controller_config_path(b"/usr/local/bin/rampire\0--config\0/etc/rampire/guest.toml\0"),
-            Ok(PathBuf::from("/etc/rampire/guest.toml"))
+            controller_config_path(b"/usr/local/bin/rampire\0daemon\0--config\0/etc/rampire\0"),
+            Ok(PathBuf::from("/etc/rampire"))
         );
         for unexpected in [
             &b"/usr/local/bin/rampire\0"[..],
-            b"/usr/local/bin/rampire\0status\0--config\0a.toml\0",
-            b"/usr/local/bin/rampire\0--config\0a.toml\0--config\0b.toml\0",
+            b"/usr/local/bin/rampire\0--config\0/etc/rampire\0",
+            b"/usr/local/bin/rampire\0status\0--config\0a\0",
+            b"/usr/local/bin/rampire\0daemon\0--config\0a\0--config\0b\0",
         ] {
             assert!(controller_config_path(unexpected).is_err());
         }

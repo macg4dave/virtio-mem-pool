@@ -19,7 +19,7 @@ Environment=XDG_CACHE_HOME=/run/rampire/.cache
 # (systemctl edit rampire@.service). The configuration directory holds
 # global.toml, vms.d/ and attestations/; durable state goes in the
 # StateDirectory below.
-ExecStart=/usr/local/bin/rampire --config /etc/rampire
+ExecStart=/usr/local/bin/rampire daemon --config /etc/rampire
 # Failure is fail-stop. Deployment monitoring decides when a reviewed restart
 # is appropriate; the unit does not create an automatic restart loop.
 Restart=no

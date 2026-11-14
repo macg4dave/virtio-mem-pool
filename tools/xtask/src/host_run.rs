@@ -126,6 +126,7 @@ pub fn run(command: &Command, repo: &Path) -> Result<(), String> {
         process
     };
     process
+        .arg("daemon")
         .arg("--config")
         .arg(&config)
         .current_dir(repo)

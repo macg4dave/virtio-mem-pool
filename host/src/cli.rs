@@ -1,5 +1,6 @@
-//! Operator commands beside the daemon: a read-only `status` and the
-//! reviewed `clear-latch` recovery.
+//! The operator actions behind `rampire status` and `rampire recover`: a
+//! read-only status and the reviewed latch recovery. The command line
+//! itself is the `rampire` binary's.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -18,107 +19,12 @@ use crate::runtime::{MemoryStateSource, ResizeSink};
 use crate::virsh::Virsh;
 use crate::xml_source::VirshXmlSource;
 
-const DEFAULT_CONNECTION: &str = "qemu:///system";
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum CliCommand {
-    /// Run the controller daemon.
-    Run {
-        config: PathBuf,
-    },
-    Status {
-        target: Target,
-    },
-    ClearLatch {
-        reason: String,
-        target: Target,
-        apply: bool,
-    },
-}
-
 /// The configured VM an operator command acts on.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Target {
     pub config: PathBuf,
     pub vm: Option<String>,
     pub connection: String,
-}
-
-pub fn usage() -> &'static str {
-    "Usage: rampire --config DIR\n       rampire status --config DIR [--vm NAME] [--connect URI]\n       rampire clear-latch REASON --config DIR [--vm NAME] [--connect URI] [--apply]"
-}
-
-pub fn parse_args(args: &[String]) -> Result<CliCommand, String> {
-    let (mode, rest) = args.split_first().ok_or_else(|| usage().to_owned())?;
-    if mode == "--config" {
-        return match rest {
-            [path] if !path.trim().is_empty() => Ok(CliCommand::Run {
-                config: PathBuf::from(path),
-            }),
-            _ => Err(usage().to_owned()),
-        };
-    }
-    let (reason, options) = match mode.as_str() {
-        "status" => (None, rest),
-        "clear-latch" => {
-            let (reason, options) = rest
-                .split_first()
-                .filter(|(reason, _)| !reason.trim().is_empty() && !reason.starts_with("--"))
-                .ok_or_else(|| usage().to_owned())?;
-            (Some(reason.clone()), options)
-        }
-        _ => return Err(format!("unknown CLI command: {mode}\n{}", usage())),
-    };
-    let mut config = None;
-    let mut vm = None;
-    let mut connection = None;
-    let mut apply = false;
-    let mut options = options.iter();
-    while let Some(option) = options.next() {
-        let mut value = |slot: &mut Option<String>| {
-            let value = options
-                .next()
-                .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| format!("{option} requires a value"))?;
-            match slot.replace(value.clone()) {
-                Some(_) => Err(format!("{option} may be supplied only once")),
-                None => Ok(()),
-            }
-        };
-        match option.as_str() {
-            "--config" => value(&mut config)?,
-            "--vm" => value(&mut vm)?,
-            "--connect" => value(&mut connection)?,
-            "--apply" if reason.is_some() && !apply => apply = true,
-            _ => return Err(format!("unknown CLI option: {option}\n{}", usage())),
-        }
-    }
-    let target = Target {
-        config: PathBuf::from(config.ok_or_else(|| "--config is required".to_owned())?),
-        vm,
-        connection: connection.unwrap_or_else(|| DEFAULT_CONNECTION.to_owned()),
-    };
-    Ok(match reason {
-        None => CliCommand::Status { target },
-        Some(reason) => CliCommand::ClearLatch {
-            reason,
-            target,
-            apply,
-        },
-    })
-}
-
-pub fn run(command: CliCommand) -> Result<(), String> {
-    let mut output = std::io::stdout().lock();
-    match command {
-        CliCommand::Run { .. } => Err("the controller runs from main, not the CLI".to_owned()),
-        CliCommand::Status { target } => run_status(&target, &mut output),
-        CliCommand::ClearLatch {
-            reason,
-            target,
-            apply,
-        } => run_clear_latch(&reason, &target, apply, &mut output),
-    }
 }
 
 fn load(target: &Target) -> Result<(HostConfig, Virsh), String> {
@@ -149,7 +55,9 @@ fn fingerprint(config: &HostConfig) -> Result<String, String> {
     )
 }
 
-fn run_clear_latch<W: Write>(
+/// Clear the VM's actuation latch for `reason`. Without `apply`, only
+/// reports what it would do.
+pub fn clear_latch<W: Write>(
     reason: &str,
     target: &Target,
     apply: bool,
@@ -230,7 +138,8 @@ fn settle_stuck_shrink<S: MemoryStateSource, R: ResizeSink, W: Write>(
     Ok(settled)
 }
 
-fn run_status<W: Write>(target: &Target, output: &mut W) -> Result<(), String> {
+/// Write the VM's controller status as JSON.
+pub fn status<W: Write>(target: &Target, output: &mut W) -> Result<(), String> {
     let (config, virsh) = load(target)?;
     let live = VirshXmlSource::new(virsh.clone(), config.vm_name.clone(), config.alias.clone())
         .memory_state()?;
@@ -313,78 +222,6 @@ mod tests {
             block_size_bytes: 2 * 1024 * 1024,
             requested_bytes,
             current_bytes,
-        }
-    }
-
-    fn args(values: &[&str]) -> Vec<String> {
-        values.iter().map(|value| (*value).to_owned()).collect()
-    }
-
-    #[test]
-    fn parses_run_status_and_clear_latch() {
-        assert_eq!(
-            parse_args(&args(&["--config", "/etc/rampire/guest.toml"])),
-            Ok(CliCommand::Run {
-                config: PathBuf::from("/etc/rampire/guest.toml"),
-            })
-        );
-        assert_eq!(
-            parse_args(&args(&["status", "--config", "guest.toml"])),
-            Ok(CliCommand::Status {
-                target: Target {
-                    config: PathBuf::from("guest.toml"),
-                    vm: None,
-                    connection: DEFAULT_CONNECTION.to_owned(),
-                },
-            })
-        );
-        assert_eq!(
-            parse_args(&args(&[
-                "clear-latch",
-                "reviewed recovery",
-                "--connect",
-                "test:///default",
-                "--config",
-                "guest.toml",
-                "--vm",
-                "guest",
-                "--apply",
-            ])),
-            Ok(CliCommand::ClearLatch {
-                reason: "reviewed recovery".to_owned(),
-                target: Target {
-                    config: PathBuf::from("guest.toml"),
-                    vm: Some("guest".to_owned()),
-                    connection: "test:///default".to_owned(),
-                },
-                apply: true,
-            })
-        );
-    }
-
-    #[test]
-    fn rejects_invalid_cli_options() {
-        for invalid in [
-            &[][..],
-            &["--config"],
-            &["unknown"],
-            &["status"],
-            &["status", "--config", "a", "--apply"],
-            &["status", "--config", "a", "--vm", "x", "--vm", "y"],
-            &["status", "--config"],
-            &["clear-latch", "--config", "a"],
-            &["clear-latch", "reason", "--apply"],
-            &[
-                "clear-latch",
-                "reason",
-                "--config",
-                "a",
-                "--apply",
-                "--apply",
-            ],
-            &["resize", "guest", "memory0", "0"],
-        ] {
-            assert!(parse_args(&args(invalid)).is_err(), "{invalid:?}");
         }
     }
 

@@ -279,13 +279,8 @@ The pool view shows every VM and how the memory is shared, updating every
 second:
 
 ```bash
-cd ~/rampire
-cargo build --release -p xtask
-sudo target/release/xtask pool --config /etc/rampire
+sudo rampire top
 ```
-
-(The `cargo build` line is needed only the first time, and after you
-update the project folder.)
 
 How to read it:
 
@@ -309,12 +304,11 @@ You can open the same view from a Windows PC. See
 ### What has the controller been doing?
 
 ```bash
-journalctl -u rampire@main --since "1 hour ago"
+sudo rampire logs --since "1 hour ago"
 ```
 
-This shows the controller's log. Press **Space** to page down, and **q**
-to leave. To watch new lines as they happen, use
-`journalctl -u rampire@main -f` and press **Ctrl+C** to stop.
+This shows the controller's log. To watch new lines as they happen, use
+`sudo rampire logs --follow` and press **Ctrl+C** to stop.
 
 ## Stopping and starting
 
@@ -332,7 +326,7 @@ starts.
 
 | What you see | What it means | What to do |
 |---|---|---|
-| `systemctl status` says **failed** | The controller found a problem and stopped itself rather than risk a mistake. It doesn't restart on its own | Look at the log (`journalctl -u rampire@main -n 50`). If the cause is clear and fixed, start it again. If not, get help from whoever set it up |
+| `systemctl status` says **failed** | The controller found a problem and stopped itself rather than risk a mistake. It doesn't restart on its own | Look at the log (`sudo rampire logs --since "10 min ago"`). If the cause is clear and fixed, start it again. If not, get help from whoever set it up |
 | A VM never grows | The pool is full, the host is at its reserve, or the VM is at its `max_ram` | Look at the pool view. Raise `pool` or the VM's `max_ram`, or lower other VMs' `max_ram` |
 | A VM grows, but slowly gives memory back | Normal. A VM returns memory gradually, and can take several minutes when the memory was busy | Wait |
 | A VM stays large after a restart | A restart from inside the VM keeps its size | Shut the VM down fully, then start it |
